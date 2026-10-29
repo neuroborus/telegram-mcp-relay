@@ -1,0 +1,30 @@
+# Synthetic IDs/paths: replace explicitly. Never place secret values in TOML.
+[server]
+listen = "127.0.0.1:8765"
+# Optional: choose an environment source OR an owned mode-0600 file.
+# auth_token_env = "TELEGRAM_MCP_AUTH_TOKEN"
+# auth_token_file = "~/.config/telegram-mcp-relay/bearer.token"
+# create_auth_token_file = true # requires an existing private parent directory
+
+[telegram]
+bot_token_env = "TELEGRAM_BOT_TOKEN"
+chat_id = 101
+allowed_chat_ids = [101]
+allowed_user_ids = [202]
+# Alternatively remove bot_token_env and use bot_token_file.
+
+[files]
+allowed_roots = ["/home/synthetic/agent-exports"]
+max_outbound_mb = 50
+
+[delivery]
+wait_fallback_enabled = true
+wait_timeout_seconds = 600
+processing_start_grace_seconds = 60
+
+[activity]
+typing_enabled = true
+typing_refresh_seconds = 4
+typing_max_duration_seconds = 600
+
+# Other bounded settings retain the defaults declared in src/config.rs.

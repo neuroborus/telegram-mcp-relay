@@ -7,6 +7,11 @@ Tokio's current-thread runtime and initializes structured `tracing` diagnostics 
 The library logs the scaffold status and returns without opening sockets or creating files.
 No database schema, Telegram client or MCP transport is implemented yet.
 
+The library now provides centralized validated TOML settings and typed, redacted startup
+errors in `config`/`error`, with protected Unix secret resolution under `config::secrets`.
+Parsing has no side effects; secret loading is explicit. The binary remains a scaffold;
+production startup composition is a later step. See [configuration](CONFIGURATION.md).
+
 The complete dependency resolution lives in `Cargo.lock`. The release profile enables thin
 LTO, one codegen unit and stripping. Add configuration, persistence, HTTP and test dependencies
 only as their implementations land.
@@ -28,6 +33,13 @@ archives. No live upstream fetch or application protocol compatibility test was 
 | [Tokio](https://docs.rs/crate/tokio/1.54.1/features) | 1.54.1 | `macros`, `rt` | Current-thread async binary entry point |
 | [tracing](https://docs.rs/crate/tracing/0.1.44/features) | 0.1.44 | `std` | Structured diagnostic events |
 | [tracing-subscriber](https://docs.rs/crate/tracing-subscriber/0.3.23/features) | 0.3.23 | `fmt`, `std` | Fallible stderr diagnostic initialization with an INFO ceiling |
+| [serde](https://docs.rs/crate/serde/1.0.229/features) | 1.0.229 | `derive`, `std` | Typed settings deserialization; already in the SDK graph |
+| [toml](https://docs.rs/crate/toml/1.1.3/features) | 1.1.3+spec-1.1.0 | `parse`, `serde`, `std` | TOML input without display/serialization or ordering features |
+| [rustix](https://docs.rs/crate/rustix/1.1.4/features) | 1.1.4 | `std`, `fs`, `process` | Safe descriptor opening and effective-owner checks without application unsafe code |
+| [getrandom](https://docs.rs/crate/getrandom/0.4.3/features) | 0.4.3 | none | OS randomness for bearer-file creation; already in the SDK graph |
+
+Configuration dependency versions/features were reviewed from cached published registry metadata.
+Live DNS and new crate archives were unavailable for API/compilation verification in that turn.
 
 Feature unification also enables Tokio I/O utilities, synchronization and time, and tracing
 attributes through the SDK. It does not enable Tokio's multi-thread runtime or the SDK's

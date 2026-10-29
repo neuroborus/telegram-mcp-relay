@@ -8,6 +8,8 @@ This checkout contains the project specification, repository conventions, Agent 
 workflow and an initial Rust application scaffold. The binary initializes structured
 diagnostics on a current-thread Tokio runtime, logs its scaffold status and exits. The MCP
 endpoint, Telegram client, storage and runnable relay setup are not implemented yet.
+The library also implements validated [configuration and protected secrets](docs/CONFIGURATION.md);
+the binary does not load configuration yet.
 The specification calls the product **Telegram MCP Bridge**; this repository and binary are
 named **telegram-mcp-relay**.
 

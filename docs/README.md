@@ -8,6 +8,7 @@ Keep implementation status explicit; requirements and intended structure are not
 | [Technical specification](product/TECHNICAL_SPECIFICATION.md) | Original requirements, phases, acceptance and external references | The owner approves a product requirement revision; otherwise preserve the input |
 | [Conventions](CONVENTIONS.md) | File ownership, Rust and HTTP conventions | Layout, naming or dependency policy changes |
 | [Architecture](ARCHITECTURE.md) | Intended boundaries and current implementation status | A component or protocol capability is implemented or changes |
+| [Configuration](CONFIGURATION.md) | Settings, bounds and protected secret sources | Startup configuration or secret handling changes |
 | [Testing](TESTING.md) | Required gates, test ownership and acceptance evidence | A check or verification boundary changes |
 | [Development](DEVELOPMENT.md) | Runner setup, task/plan/execution lifecycle and Git boundaries | Operator workflow or runner configuration changes |
 

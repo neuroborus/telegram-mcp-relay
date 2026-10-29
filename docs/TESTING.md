@@ -58,6 +58,10 @@ Default tests use local fake transports, synthetic IDs and temporary SQLite/file
 real bot credentials or send real Telegram messages in CI. Optional live integration needs a
 separate explicit user request and must disclose what client/API behavior it actually proves.
 
+Configuration tests cover defaults/examples, bounds, allowlists, home expansion, redaction,
+protected files/links/special files, bounded reads and non-overwriting bearer creation. They
+inject environment lookups and clean private synthetic fixtures under `LOCAL_ARTIFACTS/`.
+
 ## Measurements and check ownership
 
 Release acceptance records Linux target/toolchain, stripped locked release binary size,

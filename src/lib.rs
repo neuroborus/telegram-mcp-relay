@@ -4,6 +4,9 @@
 
 #![forbid(unsafe_code)]
 
+pub mod config;
+pub mod error;
+
 /// Run the application scaffold without starting relay services.
 pub async fn run() {
     tracing::info!(

@@ -52,6 +52,8 @@ use its staging-independent check division. An unrun required check remains pend
 | --- | --- |
 | `Cargo.toml`, `Cargo.lock` | Application package, dependency features, locked resolution and release profile |
 | `src/main.rs`, `src/lib.rs` | Binary bootstrap and shared application entry point |
+| `src/config.rs`, `src/config/`, `src/error.rs` | Central settings, protected secrets, configuration tests and safe typed errors |
+| `config/` | Synthetic, nonsecret configuration examples |
 | `docs/product/TECHNICAL_SPECIFICATION.md` | Original product requirements and acceptance criteria |
 | `docs/` | Architecture, conventions, testing and development workflow |
 | `.agents/skills/` | Canonical repository skills |
