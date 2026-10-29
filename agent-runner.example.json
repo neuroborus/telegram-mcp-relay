@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "artifactRoot": "LOCAL_ARTIFACTS",
+  "defaultBackend": "codex",
+  "defaultProfile": "current",
+  "defaultModel": "current",
+  "defaultEffort": "current",
+  "defaultContextSize": "current",
+  "pipelines": {
+    "plan-authoring": {
+      "mode": "independent",
+      "preferredCommitLineLimit": 900
+    },
+    "plan-execution": {
+      "mode": "independent",
+      "finalization": "auto",
+      "trustedChecks": []
+    },
+    "polishing": {
+      "mode": "independent",
+      "finalization": "auto",
+      "trustedChecks": []
+    }
+  }
+}

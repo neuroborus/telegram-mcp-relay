@@ -1,0 +1,2 @@
+# Preserve Markdown hard-break spaces in the original specification.
+docs/product/TECHNICAL_SPECIFICATION.md whitespace=-blank-at-eol

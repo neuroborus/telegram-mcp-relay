@@ -1,0 +1,26 @@
+# Local runner tasks, guidance, reports, and scratch files
+LOCAL_ARTIFACTS/
+
+# Rust build output; Cargo.lock belongs in version control for this application
+/target/
+**/*.rs.bk
+
+# Local configuration, credentials, runtime databases, and logs
+.env
+.env.*
+!.env.example
+*.local.toml
+*.log
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+*.db
+*.db-*
+
+# Editor and operating system files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+.claude/worktrees/
