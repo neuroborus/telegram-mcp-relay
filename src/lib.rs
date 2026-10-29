@@ -5,6 +5,7 @@
 #![forbid(unsafe_code)]
 
 pub mod config;
+pub mod domain;
 pub mod error;
 
 /// Run the application scaffold without starting relay services.

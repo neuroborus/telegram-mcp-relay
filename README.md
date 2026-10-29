@@ -10,6 +10,8 @@ diagnostics on a current-thread Tokio runtime, logs its scaffold status and exit
 endpoint, Telegram client, storage and runnable relay setup are not implemented yet.
 The library also implements validated [configuration and protected secrets](docs/CONFIGURATION.md);
 the binary does not load configuration yet.
+Pure [outbound formatting rules](docs/ARCHITECTURE.md#outbound-formatting) normalize session
+titles and enforce final text/caption limits; sending is not implemented yet.
 The specification calls the product **Telegram MCP Bridge**; this repository and binary are
 named **telegram-mcp-relay**.
 

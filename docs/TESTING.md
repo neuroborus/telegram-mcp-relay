@@ -62,6 +62,14 @@ Configuration tests cover defaults/examples, bounds, allowlists, home expansion,
 protected files/links/special files, bounded reads and non-overwriting bearer creation. They
 inject environment lookups and clean private synthetic fixtures under `LOCAL_ARTIFACTS/`.
 
+Unit tests in `domain::outbound::tests` cover whitespace/control normalization, blank fallback,
+50/51-grapheme titles (including combining marks, ZWJ emoji, flags and Hangul), unchanged
+multiline bodies and shared plain headers. They exercise final 1,000/1,001-scalar boundaries
+for ASCII, Cyrillic, combining marks and supplementary symbols, native 1,024/1,025-UTF-16-unit
+captions including the title, unusually large title graphemes and redacted structured errors.
+Text/question/notice formatting and caption validation are pure; zero-send/zero-route
+integration assertions belong to the later sending services, which are not implemented yet.
+
 ## Measurements and check ownership
 
 Release acceptance records Linux target/toolchain, stripped locked release binary size,

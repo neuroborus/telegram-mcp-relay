@@ -12,6 +12,10 @@ errors in `config`/`error`, with protected Unix secret resolution under `config:
 Parsing has no side effects; secret loading is explicit. The binary remains a scaffold;
 production startup composition is a later step. See [configuration](CONFIGURATION.md).
 
+Pure title normalization and outbound formatting now live in `domain::outbound`, with typed
+length errors in `error`. These functions perform no network or database effects. Services
+will use them before sends and route mutations; those integrations are not implemented yet.
+
 The complete dependency resolution lives in `Cargo.lock`. The release profile enables thin
 LTO, one codegen unit and stripping. Add configuration, persistence, HTTP and test dependencies
 only as their implementations land.
@@ -37,9 +41,18 @@ archives. No live upstream fetch or application protocol compatibility test was 
 | [toml](https://docs.rs/crate/toml/1.1.3/features) | 1.1.3+spec-1.1.0 | `parse`, `serde`, `std` | TOML input without display/serialization or ordering features |
 | [rustix](https://docs.rs/crate/rustix/1.1.4/features) | 1.1.4 | `std`, `fs`, `process` | Safe descriptor opening and effective-owner checks without application unsafe code |
 | [getrandom](https://docs.rs/crate/getrandom/0.4.3/features) | 0.4.3 | none | OS randomness for bearer-file creation; already in the SDK graph |
+| [unicode-segmentation](https://docs.rs/crate/unicode-segmentation/1.13.3/features) | 1.13.3 | none | Unicode extended grapheme boundaries for title truncation, without runtime dependencies |
 
 Configuration dependency versions/features were reviewed from cached published registry metadata.
 Live DNS and new crate archives were unavailable for API/compilation verification in that turn.
+
+The title dependency's version, checksum, features and Rust 1.85 minimum were selected from
+cached published registry metadata. Its cached archive now matches the checksum in
+`Cargo.lock`; source inspection confirms `UnicodeSegmentation::grapheme_indices(true)`,
+the declared minimum and the absence of runtime dependencies. Initial live docs.rs and
+Telegram Bot API checks failed at DNS resolution; an upstream limits recheck remains pending.
+Native bounds below follow specification §9.3 with conservative UTF-16 counting; no live
+Telegram behavior has been tested.
 
 Feature unification also enables Tokio I/O utilities, synchronization and time, and tracing
 attributes through the SDK. It does not enable Tokio's multi-thread runtime or the SDK's
@@ -53,6 +66,30 @@ subscription interests; `SubscriptionSink::send` enforces the accepted resource 
 Modern `StreamableHttpService` dispatch creates a handler for each request, so later
 application state must be shared through its factory. These are verified SDK APIs, not
 implemented relay capabilities. No client/version interoperability is claimed yet.
+
+## Outbound formatting
+
+`SessionTitle` collapses Unicode whitespace to one ASCII space, trims edges, removes other
+Unicode control scalars and truncates at 50 extended grapheme clusters. Blank titles become
+`Agent Session`. Emoji joiners and combining sequences remain intact. Titles are display
+labels; their debug representation is redacted.
+
+`format_text` handles messages/questions, `format_caption` handles documents and
+`format_notice` handles notices with an optional known-session title. All share the plain
+`[Title]` header with one newline before a nonempty body; an empty description leaves only
+the header. Bodies remain verbatim, with no markup parsing, splitting or truncation. An
+unprefixed empty notice is rejected with `TEXT_EMPTY` to respect Telegram's nonempty text bound.
+
+Before allocating the final output, these functions count the normalized title, brackets,
+separator and full body. They enforce the fixed 1,000 Unicode scalar cap and conservatively
+check native UTF-16 bounds of 4,096 for text/notices and 1,024 for captions. A very large
+single title grapheme can therefore cause rejection even when the body is empty.
+
+`TEXT_TOO_LONG` carries serializable details: `limit=1000`, `actual_characters`,
+`native_limit_utf16`, `actual_utf16_units` and file-delivery `guidance`. Native caption
+rejections retain the actual scalar count even when it is within 1,000. Error details and
+diagnostics contain counts and static guidance, never the supplied title or body. Callers
+must prepare the file themselves; this layer performs no send or route registration.
 
 ## Runtime and ownership
 
