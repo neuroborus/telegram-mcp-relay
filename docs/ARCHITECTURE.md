@@ -5,7 +5,8 @@
 The root Rust crate contains a small binary and a shared library entry point. The binary uses
 Tokio's current-thread runtime and initializes structured `tracing` diagnostics on stderr.
 The library logs the scaffold status and returns without opening sockets or creating files.
-The library provides explicit SQLite initialization, but the binary does not open it.
+The library provides explicit SQLite initialization and session/route operations, but the
+binary does not open it.
 No Telegram client or MCP transport is implemented yet.
 
 The library now provides centralized validated TOML settings and typed, redacted startup
@@ -114,7 +115,7 @@ roll back the schema. Foreign/unversioned nonempty databases and unknown version
 Foreign keys restrict session deletion while children survive; replies have no route foreign
 key, so an expired route can later be removed independently. Indexes cover identity, ordered
 inboxes, question matching, notice eligibility and each record's expiry. These are schema
-constraints, not implemented registration, ingestion, claiming or cleanup services.
+constraints; ingestion, claiming and cleanup services are not implemented yet.
 
 Connections use DELETE rollback journals, FULL synchronization, a 100 ms busy timeout, a
 512 KiB suggested page cache, eight cached statements, disabled mmap and in-memory temporary
@@ -128,6 +129,32 @@ rusqlite 0.32.1 embeds SQLite 3.46.0 through libsqlite3-sys 0.30.1; `bundled` al
 archives, and the used APIs were inspected. Focused storage tests use this embedded build.
 Live registry/SQLite documentation requests failed at DNS resolution; no latest-version claim
 or live Telegram behavior is implied by the pinned dependency verification.
+
+## Session and route persistence
+
+`Database::register_session` uses an immediate transaction to register/resume by external ID
+or a saved handle and rename future messages. New handles contain 32 OS-random bytes encoded
+as 64 hex characters. Identical titles never share identity; absent external ID and handle
+means a new session. An unknown supplied handle fails without creating a replacement. When
+both identifiers are supplied they must already match. Registration does not touch replies
+or processing ownership. Results include the effective title and a stable inbox URI helper.
+
+Registration and successful route bookkeeping refresh session activity/expiry monotonically.
+Read-only session and composite chat/message route lookups do not refresh activity. Text and
+document routes use the same transaction path; conflicts never overwrite an existing route.
+Route expiry is fixed to the original Telegram message creation time, independently of session
+activity. Expired routes are excluded at lookup even before cleanup; a retained session remains
+resumable while its valid children await later cleanup/recovery.
+
+`reserve_route` admits an in-flight send against route count and logical metadata capacity;
+its owned reservation crosses awaits without a database guard and releases capacity on drop.
+All runtime admissions must share one `Database`. Registration/rename includes outstanding
+reservations in its budget. Retained expired rows still count until cleanup; pressure never
+evicts data. Logical session/route charges are 128 bytes per row plus UTF-8 identity/title
+bytes (route rows include the session key). SQLite pages have their separate physical cap.
+Reservations live only in RAM and do not guarantee post-send disk success: the sending service
+must report failed bookkeeping as uncertain. Actual sends, received-Reply activity updates,
+cross-component metadata accounting and physical maintenance remain later steps.
 
 ## Runtime and ownership
 

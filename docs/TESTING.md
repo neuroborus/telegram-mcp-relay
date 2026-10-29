@@ -78,7 +78,15 @@ acknowledgment receipts. Unsafe permissions, links, FIFOs and sidecars fail befo
 Repository unit tests force mid-migration disk-full rollback and page-limit failure without
 loss of committed rows. Fixtures use private randomized directories under `LOCAL_ARTIFACTS/`.
 Storage tests use the locked bundled SQLite build. Transactional ingestion, claim arbitration
-and cleanup tests land with their services; this schema step does not claim those behaviors.
+and cleanup tests land with their services; schema tests do not claim those behaviors.
+
+`tests/registry.rs` exercises three same-title identities, interleaved text/document routes,
+cross-chat message-ID collisions, external-ID and saved-handle resume, normalized renaming and
+restart continuity. Explicit timestamps cover session activity and independent route expiry.
+Count/UTF-8 metadata limits include in-flight reservations and expired retained rows; rejected
+renames leave activity unchanged. Tests also cover cancellation release, route conflicts,
+transaction rollback after a route insert, invalid inputs and redacted diagnostics. These are
+repository operations; Telegram/MCP send and Reply-ingestion integration remain later work.
 
 ## Measurements and check ownership
 

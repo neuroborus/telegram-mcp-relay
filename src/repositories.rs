@@ -4,6 +4,7 @@ use std::{
     fs::File,
     os::unix::fs::MetadataExt,
     path::{Component, Path},
+    sync::Arc,
     time::Duration,
 };
 
@@ -13,7 +14,13 @@ use rustix::{
     process::geteuid,
 };
 
-use crate::{config::Storage, error::AppError};
+use crate::{
+    config::{Limits, Storage},
+    error::AppError,
+};
+
+mod registry;
+pub use registry::{MessageRoute, RouteKind, RouteReservation, Session};
 
 const SCHEMA_VERSION: i64 = 1;
 const APPLICATION_ID: i64 = 0x544d4352; // TMCR
@@ -21,12 +28,15 @@ const APPLICATION_ID: i64 = 0x544d4352; // TMCR
 /// One private connection; services will expose narrowly scoped transactions, not raw SQL.
 pub struct Database {
     connection: Connection,
+    registry: registry::RegistryPolicy,
+    reserved_routes: Arc<registry::ReservedRoutes>,
 }
 
 impl Database {
     /// Open in an existing private owned directory, initializing only an empty database.
     /// Ancestor directories must be trusted; existing permissions are never repaired.
-    pub fn open(settings: &Storage) -> Result<Self, AppError> {
+    pub fn open(settings: &Storage, limits: &Limits) -> Result<Self, AppError> {
+        let registry = registry::RegistryPolicy::new(settings, limits)?;
         if !(1_048_576..=1_073_741_824).contains(&settings.max_database_bytes) {
             return Err(AppError::InvalidConfig("storage.max_database_bytes"));
         }
@@ -72,7 +82,11 @@ impl Database {
             return Err(AppError::StorageCapacity);
         }
         initialize(&mut connection)?;
-        Ok(Self { connection })
+        Ok(Self {
+            connection,
+            registry,
+            reserved_routes: Arc::default(),
+        })
     }
 
     /// Read the committed schema version without exposing a connection to callers.
@@ -242,7 +256,7 @@ mod tests {
             max_database_bytes: 1_048_576,
             ..Storage::default()
         };
-        let database = Database::open(&settings).unwrap();
+        let database = Database::open(&settings, &Limits::default()).unwrap();
         database
             .connection
             .execute(
@@ -258,7 +272,7 @@ mod tests {
             Err(AppError::StorageCapacity)
         );
         drop(database);
-        let database = Database::open(&settings).unwrap();
+        let database = Database::open(&settings, &Limits::default()).unwrap();
         let title: String = database
             .connection
             .query_row(

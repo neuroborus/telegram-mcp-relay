@@ -20,6 +20,11 @@ pub enum AppError {
     SecretUnavailable(&'static str),
     EmptyText,
     TextTooLong(TextTooLong),
+    InvalidRequest(&'static str),
+    SessionNotFound,
+    SessionIdentityConflict,
+    RouteConflict,
+    RandomUnavailable,
     StorageUnavailable,
     StorageFailure,
     StorageCapacity,
@@ -35,6 +40,11 @@ impl AppError {
             Self::SecretUnavailable(_) => "SECRET_UNAVAILABLE",
             Self::EmptyText => "TEXT_EMPTY",
             Self::TextTooLong(_) => "TEXT_TOO_LONG",
+            Self::InvalidRequest(_) => "REQUEST_INVALID",
+            Self::SessionNotFound => "SESSION_NOT_FOUND",
+            Self::SessionIdentityConflict => "SESSION_IDENTITY_CONFLICT",
+            Self::RouteConflict => "ROUTE_CONFLICT",
+            Self::RandomUnavailable => "RANDOM_UNAVAILABLE",
             Self::StorageUnavailable => "STORAGE_UNAVAILABLE",
             Self::StorageFailure => "STORAGE_FAILED",
             Self::StorageCapacity => "STORAGE_CAPACITY",
@@ -56,6 +66,13 @@ impl fmt::Display for AppError {
                 )
             }
             Self::EmptyText => write!(f, "{}: outgoing text must not be empty", self.code()),
+            Self::InvalidRequest(field) => write!(f, "{}: invalid {field}", self.code()),
+            Self::SessionNotFound => write!(f, "{}: unknown session handle", self.code()),
+            Self::SessionIdentityConflict => {
+                write!(f, "{}: session identities disagree", self.code())
+            }
+            Self::RouteConflict => write!(f, "{}: message already has a route", self.code()),
+            Self::RandomUnavailable => write!(f, "{}: OS randomness unavailable", self.code()),
             Self::TextTooLong(details) => write!(
                 f,
                 "{}: final text has {} Unicode scalars (limit {}) and {} UTF-16 units (native limit {}). {}",

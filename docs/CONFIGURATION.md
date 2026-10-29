@@ -40,5 +40,7 @@ SQLite initialization requires an existing owned private parent directory (norma
 and trusted ancestors. It creates only the database, with mode 0600; existing files and sidecars
 must be owned regular single-link files with owner read/write access and no group/other access.
 Parent/leaf symlinks and special files fail; existing permissions are never changed. The main
-database file is page-limited by `storage.max_database_bytes`; physical journal accounting and
-runtime inbox/metadata admission remain later work. See [architecture](ARCHITECTURE.md#sqlite-initialization).
+database file is page-limited by `storage.max_database_bytes`. Session/route admission enforces
+`limits.sessions`, `limits.routes` and logical `limits.metadata_bytes`, including in-flight route
+reservations. Physical journal accounting and inbox/other metadata admission remain later work.
+See [architecture](ARCHITECTURE.md#session-and-route-persistence).

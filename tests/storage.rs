@@ -5,7 +5,11 @@ use std::{
 };
 
 use rusqlite::Connection;
-use telegram_mcp_relay::{config::Storage, error::AppError, repositories::Database};
+use telegram_mcp_relay::{
+    config::{Limits, Storage},
+    error::AppError,
+    repositories::Database,
+};
 
 struct Fixture(PathBuf);
 
@@ -80,7 +84,7 @@ fn assert_constraint(connection: &Connection, sql: &str) {
 fn initializes_private_database_and_reopens_without_resetting_state() {
     let fixture = Fixture::new();
     let settings = fixture.settings();
-    let database = Database::open(&settings).unwrap();
+    let database = Database::open(&settings, &Limits::default()).unwrap();
     assert_eq!(database.schema_version().unwrap(), 1);
     assert_eq!(
         fs::metadata(&settings.path).unwrap().permissions().mode() & 0o777,
@@ -113,7 +117,7 @@ fn initializes_private_database_and_reopens_without_resetting_state() {
         .unwrap();
     drop(connection);
     drop(database);
-    let reopened = Database::open(&settings).unwrap();
+    let reopened = Database::open(&settings, &Limits::default()).unwrap();
     assert_eq!(reopened.schema_version().unwrap(), 1);
     let connection = fixture.connect();
     let saved: (String, i64) = connection.query_row(
@@ -126,7 +130,7 @@ fn initializes_private_database_and_reopens_without_resetting_state() {
 #[test]
 fn constraints_preserve_identity_deduplication_and_independent_reply_retention() {
     let fixture = Fixture::new();
-    let _database = Database::open(&fixture.settings()).unwrap();
+    let _database = Database::open(&fixture.settings(), &Limits::default()).unwrap();
     let connection = fixture.connect();
     add_session(&connection, "a", Some("external-a"));
     add_session(&connection, "b", None);
@@ -184,7 +188,7 @@ fn constraints_preserve_identity_deduplication_and_independent_reply_retention()
 #[test]
 fn claim_shape_and_notice_deduplication_are_guarded() {
     let fixture = Fixture::new();
-    let _database = Database::open(&fixture.settings()).unwrap();
+    let _database = Database::open(&fixture.settings(), &Limits::default()).unwrap();
     let connection = fixture.connect();
     add_session(&connection, "a", None);
     add_reply(&connection, "r1", 11, 8).unwrap();
@@ -245,7 +249,7 @@ fn unsupported_or_foreign_schema_is_rejected_without_mutation() {
         drop(connection);
         let before = fs::read(&settings.path).unwrap();
         assert!(matches!(
-            Database::open(&settings),
+            Database::open(&settings, &Limits::default()),
             Err(AppError::UnsupportedSchema(_))
         ));
         assert_eq!(fs::read(&settings.path).unwrap(), before);
@@ -256,12 +260,12 @@ fn unsupported_or_foreign_schema_is_rejected_without_mutation() {
 fn unprotected_files_links_special_files_and_sidecars_fail_closed() {
     let fixture = Fixture::new();
     let settings = fixture.settings();
-    drop(Database::open(&settings).unwrap());
+    drop(Database::open(&settings, &Limits::default()).unwrap());
     let original = fs::read(&settings.path).unwrap();
     for mode in [0o400, 0o000, 0o640, 0o606] {
         fs::set_permissions(&settings.path, Permissions::from_mode(mode)).unwrap();
         assert!(matches!(
-            Database::open(&settings),
+            Database::open(&settings, &Limits::default()),
             Err(AppError::StorageUnavailable)
         ));
     }
@@ -269,10 +273,10 @@ fn unprotected_files_links_special_files_and_sidecars_fail_closed() {
     let target = fixture.0.join("target");
     fs::rename(&settings.path, &target).unwrap();
     symlink(&target, &settings.path).unwrap();
-    assert!(Database::open(&settings).is_err());
+    assert!(Database::open(&settings, &Limits::default()).is_err());
     fs::remove_file(&settings.path).unwrap();
     fs::hard_link(&target, &settings.path).unwrap();
-    assert!(Database::open(&settings).is_err());
+    assert!(Database::open(&settings, &Limits::default()).is_err());
     fs::remove_file(&settings.path).unwrap();
     rustix::fs::mkfifoat(
         rustix::fs::CWD,
@@ -280,15 +284,15 @@ fn unprotected_files_links_special_files_and_sidecars_fail_closed() {
         rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
     )
     .unwrap();
-    assert!(Database::open(&settings).is_err());
+    assert!(Database::open(&settings, &Limits::default()).is_err());
     fs::remove_file(&settings.path).unwrap();
     fs::rename(&target, &settings.path).unwrap();
     let journal = fixture.0.join("relay.sqlite-journal");
     symlink(&settings.path, &journal).unwrap();
-    assert!(Database::open(&settings).is_err());
+    assert!(Database::open(&settings, &Limits::default()).is_err());
     fs::remove_file(journal).unwrap();
     fs::set_permissions(&fixture.0, Permissions::from_mode(0o755)).unwrap();
-    assert!(Database::open(&settings).is_err());
+    assert!(Database::open(&settings, &Limits::default()).is_err());
     assert_eq!(fs::read(&settings.path).unwrap(), original);
 }
 
@@ -305,7 +309,7 @@ fn excessive_existing_size_is_rejected_without_eviction_and_errors_are_safe() {
         .unwrap();
     file.set_len(1_048_577).unwrap();
     assert!(matches!(
-        Database::open(&settings),
+        Database::open(&settings, &Limits::default()),
         Err(AppError::StorageCapacity)
     ));
     assert_eq!(fs::metadata(&settings.path).unwrap().len(), 1_048_577);

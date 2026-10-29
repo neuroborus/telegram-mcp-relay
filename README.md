@@ -14,6 +14,8 @@ Pure [outbound formatting rules](docs/ARCHITECTURE.md#outbound-formatting) norma
 titles and enforce final text/caption limits; sending is not implemented yet.
 The library also provides [private SQLite initialization](docs/ARCHITECTURE.md#sqlite-initialization);
 the binary does not open storage yet.
+Persistent [session registration and message routes](docs/ARCHITECTURE.md#session-and-route-persistence)
+support saved-handle/external-ID resume and independent route expiry through the library.
 The specification calls the product **Telegram MCP Bridge**; this repository and binary are
 named **telegram-mcp-relay**.
 
