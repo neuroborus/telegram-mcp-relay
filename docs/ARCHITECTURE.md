@@ -5,7 +5,8 @@
 The root Rust crate contains a small binary and a shared library entry point. The binary uses
 Tokio's current-thread runtime and initializes structured `tracing` diagnostics on stderr.
 The library logs the scaffold status and returns without opening sockets or creating files.
-No database schema, Telegram client or MCP transport is implemented yet.
+The library provides explicit SQLite initialization, but the binary does not open it.
+No Telegram client or MCP transport is implemented yet.
 
 The library now provides centralized validated TOML settings and typed, redacted startup
 errors in `config`/`error`, with protected Unix secret resolution under `config::secrets`.
@@ -17,8 +18,8 @@ length errors in `error`. These functions perform no network or database effects
 will use them before sends and route mutations; those integrations are not implemented yet.
 
 The complete dependency resolution lives in `Cargo.lock`. The release profile enables thin
-LTO, one codegen unit and stripping. Add configuration, persistence, HTTP and test dependencies
-only as their implementations land.
+LTO, one codegen unit and stripping.
+Add dependencies only as their implementations land.
 
 The following boundaries are the intended MVP design from
 [the specification](product/TECHNICAL_SPECIFICATION.md), especially sections 3–13.
@@ -42,6 +43,7 @@ archives. No live upstream fetch or application protocol compatibility test was 
 | [rustix](https://docs.rs/crate/rustix/1.1.4/features) | 1.1.4 | `std`, `fs`, `process` | Safe descriptor opening and effective-owner checks without application unsafe code |
 | [getrandom](https://docs.rs/crate/getrandom/0.4.3/features) | 0.4.3 | none | OS randomness for bearer-file creation; already in the SDK graph |
 | [unicode-segmentation](https://docs.rs/crate/unicode-segmentation/1.13.3/features) | 1.13.3 | none | Unicode extended grapheme boundaries for title truncation, without runtime dependencies |
+| [rusqlite](https://docs.rs/crate/rusqlite/0.32.1/features) | 0.32.1 | `bundled` | Embedded SQLite with fixed source/bindings, strict tables and JSON validation |
 
 Configuration dependency versions/features were reviewed from cached published registry metadata.
 Live DNS and new crate archives were unavailable for API/compilation verification in that turn.
@@ -90,6 +92,42 @@ single title grapheme can therefore cause rejection even when the body is empty.
 rejections retain the actual scalar count even when it is within 1,000. Error details and
 diagnostics contain counts and static guidance, never the supplied title or body. Callers
 must prepare the file themselves; this layer performs no send or route registration.
+
+## SQLite initialization
+
+`repositories::Database::open` explicitly opens one synchronous private connection. It requires
+an existing effective-user-owned private parent and a regular, single-link, owned mode-0600
+database; creation is exclusive and does not repair existing permissions. Descriptor checks
+reject leaf/parent symlinks, unsafe existing journal/WAL sidecars and special files before
+SQLite opens the path with `SQLITE_OPEN_NOFOLLOW`. Ancestors and same-user access are trusted.
+Failures retain only safe typed classifications, without SQLite SQL, paths or row values.
+
+Schema version 1 uses strict tables for sessions, composite chat/message routes, incoming
+replies, the singleton cursor, minimal valid-token acknowledgment receipts and notice attempts.
+Only incoming text/captions and attachment metadata have payload columns. No table holds
+outbound bodies, full Telegram updates, file bytes or typing leases. A NULL initial cursor
+means no update has been processed. Timestamps use Unix milliseconds.
+
+Initialization enables incremental auto-vacuum before the schema transaction. DDL, initial
+cursor, application ID and version commit together under an immediate transaction; errors
+roll back the schema. Foreign/unversioned nonempty databases and unknown versions are rejected.
+Foreign keys restrict session deletion while children survive; replies have no route foreign
+key, so an expired route can later be removed independently. Indexes cover identity, ordered
+inboxes, question matching, notice eligibility and each record's expiry. These are schema
+constraints, not implemented registration, ingestion, claiming or cleanup services.
+
+Connections use DELETE rollback journals, FULL synchronization, a 100 ms busy timeout, a
+512 KiB suggested page cache, eight cached statements, disabled mmap and in-memory temporary
+work. `max_page_count` limits main-file growth to the configured budget rounded down to pages;
+an already oversized database is rejected without eviction. Transient rollback journals and
+temporary query memory still require bounded service transactions and physical-use accounting
+in the later cleanup/runtime steps. No synchronous database guard may cross an await.
+
+rusqlite 0.32.1 embeds SQLite 3.46.0 through libsqlite3-sys 0.30.1; `bundled` also enables
+`modern_sqlite` and pregenerated bindings. Cached published sources match checksum-verified
+archives, and the used APIs were inspected. Focused storage tests use this embedded build.
+Live registry/SQLite documentation requests failed at DNS resolution; no latest-version claim
+or live Telegram behavior is implied by the pinned dependency verification.
 
 ## Runtime and ownership
 

@@ -20,6 +20,10 @@ pub enum AppError {
     SecretUnavailable(&'static str),
     EmptyText,
     TextTooLong(TextTooLong),
+    StorageUnavailable,
+    StorageFailure,
+    StorageCapacity,
+    UnsupportedSchema(i64),
 }
 
 impl AppError {
@@ -31,6 +35,10 @@ impl AppError {
             Self::SecretUnavailable(_) => "SECRET_UNAVAILABLE",
             Self::EmptyText => "TEXT_EMPTY",
             Self::TextTooLong(_) => "TEXT_TOO_LONG",
+            Self::StorageUnavailable => "STORAGE_UNAVAILABLE",
+            Self::StorageFailure => "STORAGE_FAILED",
+            Self::StorageCapacity => "STORAGE_CAPACITY",
+            Self::UnsupportedSchema(_) => "STORAGE_SCHEMA_UNSUPPORTED",
         }
     }
 }
@@ -58,8 +66,34 @@ impl fmt::Display for AppError {
                 details.native_limit_utf16,
                 details.guidance,
             ),
+            Self::StorageUnavailable => write!(
+                f,
+                "{}: database location is unavailable or unprotected",
+                self.code()
+            ),
+            Self::StorageFailure => write!(f, "{}: database operation failed", self.code()),
+            Self::StorageCapacity => write!(f, "{}: database capacity exhausted", self.code()),
+            Self::UnsupportedSchema(version) => write!(
+                f,
+                "{}: unrecognized database schema version {version}",
+                self.code()
+            ),
         }
     }
 }
 
 impl std::error::Error for AppError {}
+
+impl From<rusqlite::Error> for AppError {
+    fn from(error: rusqlite::Error) -> Self {
+        // SQLite errors may contain SQL, paths or data; retain only a safe classification.
+        match error {
+            rusqlite::Error::SqliteFailure(cause, _)
+                if cause.code == rusqlite::ErrorCode::DiskFull =>
+            {
+                Self::StorageCapacity
+            }
+            _ => Self::StorageFailure,
+        }
+    }
+}

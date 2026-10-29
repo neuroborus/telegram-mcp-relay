@@ -70,6 +70,16 @@ captions including the title, unusually large title graphemes and redacted struc
 Text/question/notice formatting and caption validation are pure; zero-send/zero-route
 integration assertions belong to the later sending services, which are not implemented yet.
 
+Storage tests in `tests/storage.rs` cover private initialization/reopen, persisted records and
+cursor, foreign/future schema rejection without mutation, composite routes, distinct replies,
+deduplication, valid claim shapes, notice-attempt uniqueness and restrictive foreign keys.
+They verify that removing a route preserves replies and removing reply payloads preserves
+acknowledgment receipts. Unsafe permissions, links, FIFOs and sidecars fail before database use.
+Repository unit tests force mid-migration disk-full rollback and page-limit failure without
+loss of committed rows. Fixtures use private randomized directories under `LOCAL_ARTIFACTS/`.
+Storage tests use the locked bundled SQLite build. Transactional ingestion, claim arbitration
+and cleanup tests land with their services; this schema step does not claim those behaviors.
+
 ## Measurements and check ownership
 
 Release acceptance records Linux target/toolchain, stripped locked release binary size,

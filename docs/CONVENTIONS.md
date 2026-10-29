@@ -16,7 +16,7 @@ Keep `main.rs` to bootstrap and shutdown; `lib.rs` exposes the shared applicatio
 | `src/handlers/`, `src/routes/` | Thin tool/resource/HTTP entry points and route wiring |
 | `src/domain/` | Session/title/text rules, reply state and retention invariants |
 | `src/services/` | Registration, sending, ingestion, claims and delivery orchestration |
-| `src/repositories/` | SQLite initialization/migrations, transactions and queries |
+| `src/repositories.rs`, `src/repositories/` | SQLite initialization/migrations, transactions and queries |
 | `src/clients/` | Direct Telegram HTTP client and transport DTOs |
 | `tests/`, `tests/fixtures/` | Cross-module/MCP/mock-Telegram tests and sanitized inputs |
 | `config/` | Nonsecret example configuration |

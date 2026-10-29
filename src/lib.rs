@@ -7,6 +7,7 @@
 pub mod config;
 pub mod domain;
 pub mod error;
+pub mod repositories;
 
 /// Run the application scaffold without starting relay services.
 pub async fn run() {

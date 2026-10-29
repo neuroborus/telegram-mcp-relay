@@ -10,7 +10,8 @@ Specify a nonzero destination `telegram.chat_id` inside nonempty `allowed_chat_i
 `allowed_user_ids`, and 1–64 export roots. IDs are bounded to 52 bits; ID lists to 256 entries.
 Binding requires loopback and a nonzero port; `/mcp` is fixed. Paths must be absolute after
 initial `~/` expansion against HOME. Relative paths, parent traversal, `~other-user` and `/`
-export roots fail. Parsing does not inspect/create roots or storage; safe opening lands later.
+export roots fail. Parsing does not inspect/create roots or storage. SQLite opening is explicit
+through `Database::open`; safe export-file opening lands later.
 
 Bot secrets default to `TELEGRAM_BOT_TOKEN`; choose `telegram.bot_token_env` or `bot_token_file`,
 never both. Optional MCP authentication uses `server.auth_token_env` or `auth_token_file`.
@@ -34,3 +35,10 @@ policy. Positive request/task/subscription/inbox/payload/metadata budgets reject
 and inconsistent capacities. SQLite's physical budget must exceed payload plus metadata budgets;
 later components enforce actual usage without early eviction. Host/Origin/authentication and
 other runtime enforcement land with their components; this step supplies validated settings.
+
+SQLite initialization requires an existing owned private parent directory (normally 0700)
+and trusted ancestors. It creates only the database, with mode 0600; existing files and sidecars
+must be owned regular single-link files with owner read/write access and no group/other access.
+Parent/leaf symlinks and special files fail; existing permissions are never changed. The main
+database file is page-limited by `storage.max_database_bytes`; physical journal accounting and
+runtime inbox/metadata admission remain later work. See [architecture](ARCHITECTURE.md#sqlite-initialization).
