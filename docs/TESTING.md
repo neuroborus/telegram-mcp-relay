@@ -21,8 +21,8 @@ spaces; other files retain normal Git whitespace checks.
 
 ## Rust gates
 
-The bootstrap has no `Cargo.toml`; Rust gates are **not applicable**, not passing. Once the
-application crate exists, source, tests, Cargo/dependency or Rust tooling changes require:
+The root application crate makes Rust gates applicable. The complete dependency resolution
+is in `Cargo.lock`; source, tests, Cargo/dependency or Rust tooling changes require:
 
 ```bash
 cargo fmt --all -- --check

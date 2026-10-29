@@ -50,14 +50,17 @@ use its staging-independent check division. An unrun required check remains pend
 
 | Path | Owner |
 | --- | --- |
+| `Cargo.toml`, `Cargo.lock` | Application package, dependency features, locked resolution and release profile |
+| `src/main.rs`, `src/lib.rs` | Binary bootstrap and shared application entry point |
 | `docs/product/TECHNICAL_SPECIFICATION.md` | Original product requirements and acceptance criteria |
 | `docs/` | Architecture, conventions, testing and development workflow |
 | `.agents/skills/` | Canonical repository skills |
 | `.claude/skills`, `CLAUDE.md` | Symlinks to canonical skills and these instructions |
 | `LOCAL_ARTIFACTS/` | Ignored Runner config, tasks, plans, reports and local scratch |
 
-The future Rust layout is described in [docs/CONVENTIONS.md](docs/CONVENTIONS.md). Add directories
-only when their first real owner is implemented; keep this map synchronized with the tree.
+The current and intended Rust layout is described in [docs/CONVENTIONS.md](docs/CONVENTIONS.md).
+Add directories only when their first real owner is implemented; keep this map synchronized
+with the tree.
 
 ## Telegram interaction policy
 

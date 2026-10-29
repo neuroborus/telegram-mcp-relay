@@ -2,11 +2,45 @@
 
 ## Current status
 
-No daemon code, database schema, dependencies or MCP transport is implemented in the bootstrap.
+The root Rust crate contains a small binary and a shared library entry point. The binary uses
+Tokio's current-thread runtime and initializes structured `tracing` diagnostics on stderr.
+The library logs the scaffold status and returns without opening sockets or creating files.
+No database schema, Telegram client or MCP transport is implemented yet.
+
+The complete dependency resolution lives in `Cargo.lock`. The release profile enables thin
+LTO, one codegen unit and stripping. Add configuration, persistence, HTTP and test dependencies
+only as their implementations land.
+
 The following boundaries are the intended MVP design from
 [the specification](product/TECHNICAL_SPECIFICATION.md), especially sections 3–13.
 Replace intended claims with verified implementation details as each component lands; record
 the actual tested SDK/protocol versions and any compatibility gaps here.
+
+## Dependency baseline
+
+The 2026-10-29 dependency review used cached published crates.io packages and registry metadata.
+Archive checksums matched the registry, and the inspected extracted sources matched those
+archives. No live upstream fetch or application protocol compatibility test was performed.
+
+| Dependency | Selected version | Direct features (defaults disabled) | Purpose |
+| --- | --- | --- | --- |
+| [rmcp](https://docs.rs/crate/rmcp/3.8.0/features) | 3.8.0 | `server`, `transport-streamable-http-server` | Official MCP server, schema support and shared HTTP transport foundation |
+| [Tokio](https://docs.rs/crate/tokio/1.54.1/features) | 1.54.1 | `macros`, `rt` | Current-thread async binary entry point |
+| [tracing](https://docs.rs/crate/tracing/0.1.44/features) | 0.1.44 | `std` | Structured diagnostic events |
+| [tracing-subscriber](https://docs.rs/crate/tracing-subscriber/0.3.23/features) | 0.3.23 | `fmt`, `std` | Fallible stderr diagnostic initialization with an INFO ceiling |
+
+Feature unification also enables Tokio I/O utilities, synchronization and time, and tracing
+attributes through the SDK. It does not enable Tokio's multi-thread runtime or the SDK's
+client, OAuth, tool macros or child-process transport. The diagnostics formatter omits ANSI,
+JSON, environment filters and the log adapter. The locked graph requires Rust 1.89 because
+of `uuid` 1.29.0; rmcp itself declares Rust 1.88. The minimum toolchain is not separately tested.
+
+The rmcp source defines `ProtocolVersion::V_2026_07_28`, `server/discover` and
+`subscriptions/listen`. `ServerHandler::accepted_subscription_filter` and `listen` accept
+subscription interests; `SubscriptionSink::send` enforces the accepted resource URI filter.
+Modern `StreamableHttpService` dispatch creates a handler for each request, so later
+application state must be shared through its factory. These are verified SDK APIs, not
+implemented relay capabilities. No client/version interoperability is claimed yet.
 
 ## Runtime and ownership
 

@@ -2,13 +2,12 @@
 
 ## Current and intended structure
 
-The bootstrap contains documentation and workflow configuration only. The first implementation
-step will introduce one application crate at the repository root, with a committed `Cargo.lock`.
+One application crate at the repository root provides the initial runtime scaffold, with a
+complete `Cargo.lock`. Keep the lockfile with manifest changes and use locked builds/checks.
 Use `telegram-mcp-relay` for the package/binary and `telegram_mcp_relay` for its Rust library.
-Keep `main.rs` to bootstrap and shutdown; expose testable application construction through
-`lib.rs` when implementation needs it.
+Keep `main.rs` to bootstrap and shutdown; `lib.rs` exposes the shared application entry point.
 
-| Intended path | Responsibility |
+| Current or intended path | Responsibility |
 | --- | --- |
 | `src/main.rs`, `src/lib.rs` | Binary bootstrap and testable library surface |
 | `src/app.rs`, `src/state.rs` | Router/runtime composition and shared handles |
