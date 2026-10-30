@@ -197,12 +197,14 @@ fn restart_recovers_claims_at_lease_boundary_without_reclaiming_processing_work(
     fixture.receive(&mut db, input(11, -101, 5), 1_000);
     fixture.receive(&mut db, input(12, -101, 5), 1_000);
     let original = claims().claim(&mut db, &key, None, 2, 2_000).unwrap();
-    fixture
-        .sql()
-        .execute(
-            "UPDATE replies SET state = 'processing', processing_started_at = 2001,
-        claim_expires_at = NULL WHERE telegram_update_id = 12",
-            [],
+    claims()
+        .processing(
+            &mut db,
+            &key,
+            &original[1].reply.reply_id,
+            &original[1].claim_token,
+            true,
+            2_001,
         )
         .unwrap();
     drop(db);
@@ -466,4 +468,630 @@ fn invalid_queries_and_lease_settings_fail_without_claim_effects() {
     .unwrap();
     let owned = maximum.claim(&mut db, &key, None, 1, 2_000).unwrap();
     assert_eq!(owned[0].reply.claim_expires_at, Some(602_000));
+}
+
+fn assert_invalid_transitions(db: &mut Database, key: &str, id: &str, token: &str, now: i64) {
+    for active in [true, false] {
+        assert_eq!(
+            claims().processing(db, key, id, token, active, now),
+            Err(AppError::InvalidClaim)
+        );
+    }
+    assert_eq!(
+        claims().reconcile_processing(db, key, id, token, "different-resume", now),
+        Err(AppError::InvalidClaim)
+    );
+    assert_eq!(
+        claims().acknowledge(db, key, id, token, now),
+        Err(AppError::InvalidClaim)
+    );
+}
+
+#[test]
+fn first_start_is_idempotent_and_inactivity_never_releases_processing_ownership() {
+    let fixture = Fixture::new(Limits::default());
+    let mut db = fixture.open();
+    let key = fixture.session(&mut db, -101);
+    let id = fixture.receive(&mut db, input(11, -101, 5), 1_000);
+    let claimed = claims()
+        .claim(&mut db, &key, None, 1, 2_000)
+        .unwrap()
+        .remove(0);
+    let token = &claimed.claim_token;
+    let inactive = claims()
+        .processing(&mut db, &key, &id, token, false, 2_001)
+        .unwrap();
+    assert_eq!(inactive.processing_started_at, None);
+    assert_eq!(
+        db.inbox_snapshot(&key, None, 1, 2_001).unwrap().replies[0],
+        claimed.reply
+    );
+    assert_eq!(
+        claims().reconcile_processing(&mut db, &key, &id, token, "resume", 2_001),
+        Err(AppError::InvalidClaim)
+    );
+    let started = claims()
+        .processing(&mut db, &key, &id, token, true, 2_002)
+        .unwrap();
+    assert_eq!(started.telegram_chat_id, -101);
+    assert_eq!(started.processing_started_at, Some(2_002));
+    for request_id in [String::new(), "x".repeat(65), "invalid\0id".to_owned()] {
+        assert_eq!(
+            claims().reconcile_processing(&mut db, &key, &id, token, &request_id, 2_002),
+            Err(AppError::InvalidRequest("reconciliation request ID"))
+        );
+    }
+    for (active, now) in [(true, 2_003), (false, 700_000), (true, 800_000)] {
+        assert_eq!(
+            claims()
+                .processing(&mut db, &key, &id, token, active, now)
+                .unwrap(),
+            started
+        );
+    }
+    assert!(
+        claims()
+            .claim(&mut db, &key, None, 1, 800_000)
+            .unwrap()
+            .is_empty()
+    );
+    let reply = db
+        .inbox_snapshot(&key, None, 1, 800_000)
+        .unwrap()
+        .replies
+        .remove(0);
+    assert_eq!(reply.reply_id, id);
+    assert_eq!(reply.state, ReplyState::Processing);
+    assert_eq!(reply.claim_expires_at, None);
+    assert_eq!(reply.expires_at, claimed.reply.expires_at);
+}
+
+#[test]
+fn transitions_fence_wrong_sessions_replies_tokens_and_expired_preprocessing_claims() {
+    let fixture = Fixture::new(Limits::default());
+    let mut db = fixture.open();
+    let key = fixture.session(&mut db, -101);
+    let other = fixture.session(&mut db, -102);
+    let id = fixture.receive(&mut db, input(11, -101, 5), 1_000);
+    assert_invalid_transitions(&mut db, &key, &id, "not-a-claim", 1_001);
+    let claimed = claims()
+        .claim(&mut db, &key, None, 1, 2_000)
+        .unwrap()
+        .remove(0);
+    assert_invalid_transitions(&mut db, &other, &id, &claimed.claim_token, 2_001);
+    assert_invalid_transitions(&mut db, &key, "unknown-reply", &claimed.claim_token, 2_001);
+    assert_invalid_transitions(&mut db, &key, &id, "wrong-token", 2_001);
+    assert_invalid_transitions(&mut db, &key, &id, &claimed.claim_token, 62_000);
+    let renewed = claims()
+        .claim(&mut db, &key, None, 1, 62_000)
+        .unwrap()
+        .remove(0);
+    assert_invalid_transitions(&mut db, &key, &id, &claimed.claim_token, 62_001);
+    assert_eq!(
+        claims().processing(
+            &mut db,
+            "unknown-session",
+            &id,
+            &renewed.claim_token,
+            true,
+            62_001
+        ),
+        Err(AppError::SessionNotFound)
+    );
+    assert_eq!(
+        claims().acknowledge(&mut db, &key, &id, &renewed.claim_token, -1),
+        Err(AppError::InvalidRequest("timestamp"))
+    );
+    let error = claims()
+        .acknowledge(&mut db, &key, &id, "private-token", 62_001)
+        .unwrap_err();
+    assert_eq!(error.code(), "CLAIM_INVALID");
+    assert!(!format!("{error:?} {error}").contains("private-token"));
+    // A valid current claim can complete without a separate processing-start call.
+    claims()
+        .acknowledge(&mut db, &key, &id, &renewed.claim_token, 62_001)
+        .unwrap();
+}
+
+#[test]
+fn restart_resume_reconciliation_has_one_cas_winner_and_preserves_first_start() {
+    let fixture = Fixture::new(Limits::default());
+    let mut db = fixture.open();
+    let key = fixture.session(&mut db, -101);
+    let id = fixture.receive(&mut db, input(11, -101, 5), 1_000);
+    let claimed = claims()
+        .claim(&mut db, &key, None, 1, 2_000)
+        .unwrap()
+        .remove(0);
+    claims()
+        .processing(&mut db, &key, &id, &claimed.claim_token, true, 2_001)
+        .unwrap();
+    drop(db);
+    let mut db = fixture.open();
+    db.register_session(None, Some(&key), "Resumed", DAY)
+        .unwrap();
+    assert!(
+        claims()
+            .claim(&mut db, &key, None, 1, DAY)
+            .unwrap()
+            .is_empty()
+    );
+    let barrier = Arc::new(std::sync::Barrier::new(2));
+    let workers: Vec<_> = [db, fixture.open()]
+        .into_iter()
+        .enumerate()
+        .map(|(request, mut db)| {
+            let (barrier, key, id, token) = (
+                barrier.clone(),
+                key.clone(),
+                id.clone(),
+                claimed.claim_token.clone(),
+            );
+            std::thread::spawn(move || {
+                barrier.wait();
+                claims().reconcile_processing(
+                    &mut db,
+                    &key,
+                    &id,
+                    &token,
+                    &format!("resume-{request}"),
+                    DAY,
+                )
+            })
+        })
+        .collect();
+    let mut winners = Vec::new();
+    for worker in workers {
+        match worker.join().unwrap() {
+            Ok(winner) => winners.push(winner),
+            Err(error) => assert_eq!(error, AppError::InvalidClaim),
+        }
+    }
+    assert_eq!(winners.len(), 1);
+    let winner = winners.remove(0);
+    assert_eq!(winner.status.processing_started_at, Some(2_001));
+    assert_ne!(winner.claim_token, claimed.claim_token);
+    assert_eq!(winner.claim_token.len(), 64);
+    assert!(!format!("{winner:?}").contains(&winner.claim_token));
+    let mut db = fixture.open();
+    assert_invalid_transitions(&mut db, &key, &id, &claimed.claim_token, DAY);
+    let snapshot = db
+        .inbox_snapshot(&key, None, 1, DAY)
+        .unwrap()
+        .replies
+        .remove(0);
+    assert_eq!(snapshot.reply_id, id);
+    assert_eq!(snapshot.processing_started_at, Some(2_001));
+    assert_eq!(snapshot.claimed_at, Some(DAY));
+    assert_eq!(snapshot.expires_at, claimed.reply.expires_at);
+    assert_eq!(
+        claims()
+            .processing(&mut db, &key, &id, &winner.claim_token, true, DAY)
+            .unwrap(),
+        winner.status
+    );
+    claims()
+        .acknowledge(&mut db, &key, &id, &winner.claim_token, DAY)
+        .unwrap();
+    drop(db); // Simulate losing the acknowledgment response after commit.
+    let mut db = fixture.open();
+    claims()
+        .acknowledge(&mut db, &key, &id, &winner.claim_token, DAY + 1)
+        .unwrap();
+    assert_invalid_transitions(&mut db, &key, &id, &claimed.claim_token, DAY + 1);
+}
+
+#[test]
+fn lost_reconciliation_response_recovers_from_saved_request_and_fences_superseded_retries() {
+    let mut fixture = Fixture::new(Limits::default());
+    let mut db = fixture.open();
+    let key = fixture.session(&mut db, -101);
+    let other = fixture.session(&mut db, -102);
+    let id = fixture.receive(&mut db, input(11, -101, 5), 1_000);
+    let saved = claims()
+        .claim(&mut db, &key, None, 1, 2_000)
+        .unwrap()
+        .remove(0);
+    claims()
+        .processing(&mut db, &key, &id, &saved.claim_token, true, 2_001)
+        .unwrap();
+    // The client saves this request ID with its old token before dispatch, then loses
+    // the entire successful response and restarts with only that saved state.
+    claims()
+        .reconcile_processing(&mut db, &key, &id, &saved.claim_token, "resume-a", 2_002)
+        .unwrap();
+    drop(db);
+    fixture.0.limits.metadata_bytes = 1;
+    let mut db = fixture.open();
+    let recovered = claims()
+        .reconcile_processing(&mut db, &key, &id, &saved.claim_token, "resume-a", 3_000)
+        .unwrap();
+    assert_ne!(recovered.claim_token, saved.claim_token);
+    assert_eq!(recovered.status.processing_started_at, Some(2_001));
+    let reply = db
+        .inbox_snapshot(&key, None, 1, 3_000)
+        .unwrap()
+        .replies
+        .remove(0);
+    assert_eq!(reply.reply_id, id);
+    assert_eq!(reply.claimed_at, Some(2_002));
+    assert_eq!(reply.expires_at, saved.reply.expires_at);
+    assert_eq!(
+        claims()
+            .reconcile_processing(&mut db, &key, &id, &saved.claim_token, "resume-a", 3_001)
+            .unwrap(),
+        recovered
+    );
+    assert_invalid_transitions(&mut db, &key, &id, &saved.claim_token, 3_001);
+    assert_eq!(
+        claims().reconcile_processing(&mut db, &other, &id, &saved.claim_token, "resume-a", 3_001),
+        Err(AppError::InvalidClaim)
+    );
+    assert_eq!(
+        claims().reconcile_processing(&mut db, &key, &id, "wrong-token", "resume-a", 3_001),
+        Err(AppError::InvalidClaim)
+    );
+    drop(db);
+    fixture.0.limits = Limits::default();
+    let mut db = fixture.open();
+    let next = claims()
+        .reconcile_processing(
+            &mut db,
+            &key,
+            &id,
+            &recovered.claim_token,
+            &"b".repeat(64),
+            3_002,
+        )
+        .unwrap();
+    assert_eq!(
+        claims().reconcile_processing(&mut db, &key, &id, &saved.claim_token, "resume-a", 3_003),
+        Err(AppError::InvalidClaim)
+    );
+    claims()
+        .acknowledge(&mut db, &key, &id, &next.claim_token, 3_003)
+        .unwrap();
+    assert_eq!(
+        claims().reconcile_processing(
+            &mut db,
+            &key,
+            &id,
+            &recovered.claim_token,
+            &"b".repeat(64),
+            3_004,
+        ),
+        Err(AppError::InvalidClaim)
+    );
+}
+
+#[test]
+fn completion_removes_payloads_and_receipts_deduplicate_without_refresh_on_retry() {
+    let fixture = Fixture::new(Limits::default());
+    let mut db = fixture.open();
+    let key = fixture.session(&mut db, -101);
+    let mut document = input(11, -101, 5);
+    document["message"]["document"] =
+        json!({"file_id":"synthetic-file", "file_unique_id":"unique"});
+    let id = fixture.receive(&mut db, document.clone(), 1_000);
+    let token = claims()
+        .claim(&mut db, &key, None, 1, 2_000)
+        .unwrap()
+        .remove(0)
+        .claim_token;
+    claims()
+        .acknowledge(&mut db, &key, &id, &token, 2_001)
+        .unwrap();
+    assert!(
+        db.inbox_snapshot(&key, None, 1, 2_001)
+            .unwrap()
+            .replies
+            .is_empty()
+    );
+    let receipt: (String, String, String, i64, i64, i64) = fixture
+        .sql()
+        .query_row("SELECT * FROM acknowledgment_receipts", [], |r| {
+            Ok((
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get(3)?,
+                r.get(4)?,
+                r.get(5)?,
+            ))
+        })
+        .unwrap();
+    assert_eq!(
+        receipt,
+        (
+            id.clone(),
+            key.clone(),
+            token.clone(),
+            11,
+            2_001,
+            2_001 + 2 * DAY
+        )
+    );
+    let count: i64 = fixture
+        .sql()
+        .query_row("SELECT count(*) FROM replies", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(count, 0);
+    // Advance the cursor: deduplication must use the retained receipt, not just the cursor.
+    fixture.receive(&mut db, input(12, -101, 5), 3_000);
+    drop(db);
+    let mut db = fixture.open();
+    let update = serde_json::from_value(document).unwrap();
+    assert_eq!(
+        IngressService::new(&fixture.0)
+            .unwrap()
+            .ingest(&mut db, &update, 4_000)
+            .unwrap(),
+        IngestOutcome::Duplicate
+    );
+    assert_eq!(db.update_cursor().unwrap(), Some(12));
+    claims()
+        .acknowledge(&mut db, &key, &id, &token, 4_000)
+        .unwrap();
+    let timestamps: (i64, i64) = fixture
+        .sql()
+        .query_row(
+            "SELECT created_at, expires_at FROM acknowledgment_receipts",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(timestamps, (receipt.4, receipt.5));
+    assert_eq!(
+        claims().acknowledge(&mut db, &key, &id, &token, receipt.5),
+        Err(AppError::InvalidClaim)
+    );
+}
+
+#[test]
+fn receipt_pressure_preserves_processing_payload_and_valid_ack_retry_is_free() {
+    let fixture = Fixture::new(Limits {
+        receipts: 1,
+        ..Limits::default()
+    });
+    let mut db = fixture.open();
+    let key = fixture.session(&mut db, -101);
+    for id in [11, 12] {
+        fixture.receive(&mut db, input(id, -101, 5), 1_000);
+    }
+    let owned = claims().claim(&mut db, &key, None, 2, 2_000).unwrap();
+    claims()
+        .acknowledge(
+            &mut db,
+            &key,
+            &owned[0].reply.reply_id,
+            &owned[0].claim_token,
+            2_001,
+        )
+        .unwrap();
+    let (id, token) = (&owned[1].reply.reply_id, &owned[1].claim_token);
+    claims()
+        .processing(&mut db, &key, id, token, true, 2_001)
+        .unwrap();
+    assert_eq!(
+        claims().acknowledge(&mut db, &key, id, token, 2_002),
+        Err(AppError::StorageCapacity)
+    );
+    drop(db);
+    let mut db = fixture.open();
+    let reply = db
+        .inbox_snapshot(&key, None, 1, 2_003)
+        .unwrap()
+        .replies
+        .remove(0);
+    assert_eq!(reply.reply_id, *id);
+    assert_eq!(reply.state, ReplyState::Processing);
+    assert_eq!(reply.text_or_caption.as_deref(), Some("reply"));
+    assert_eq!(db.update_cursor().unwrap(), Some(12));
+    claims()
+        .acknowledge(
+            &mut db,
+            &key,
+            &owned[0].reply.reply_id,
+            &owned[0].claim_token,
+            2_003,
+        )
+        .unwrap();
+    // Unroutable dispositions consume the same receipt budget as completions.
+    fixture
+        .sql()
+        .execute("DELETE FROM acknowledgment_receipts", [])
+        .unwrap();
+    let unknown = serde_json::from_value(input(13, -101, 999)).unwrap();
+    assert_eq!(
+        IngressService::new(&fixture.0)
+            .unwrap()
+            .ingest(&mut db, &unknown, 2_003)
+            .unwrap(),
+        IngestOutcome::Unroutable
+    );
+    assert_eq!(
+        claims().acknowledge(&mut db, &key, id, token, 2_004),
+        Err(AppError::StorageCapacity)
+    );
+    fixture
+        .sql()
+        .execute(
+            "DELETE FROM update_dispositions WHERE kind = 'unroutable'",
+            [],
+        )
+        .unwrap();
+    claims()
+        .acknowledge(&mut db, &key, id, token, 2_005)
+        .unwrap();
+}
+
+#[test]
+fn reconciliation_and_ack_account_for_replacement_bytes_and_outstanding_sends() {
+    const BASE: u32 = 196 + 192 + 256 + 64;
+    const PROOF: u32 = 64 + 6; // Prior token plus the UTF-8 request ID "resume".
+    let mut fixture = Fixture::new(Limits {
+        metadata_bytes: BASE + PROOF + 192 - 1,
+        ..Limits::default()
+    });
+    let mut db = fixture.open();
+    let key = fixture.session(&mut db, -101);
+    let id = fixture.receive(&mut db, input(11, -101, 5), 1_000);
+    let token = claims()
+        .claim(&mut db, &key, None, 1, 2_000)
+        .unwrap()
+        .remove(0)
+        .claim_token;
+    claims()
+        .processing(&mut db, &key, &id, &token, true, 2_001)
+        .unwrap();
+    let reservation = db.reserve_route(&key).unwrap();
+    assert_eq!(
+        claims().reconcile_processing(&mut db, &key, &id, &token, "resume", 2_002),
+        Err(AppError::StorageCapacity)
+    );
+    drop(reservation);
+    let rotated = claims()
+        .reconcile_processing(&mut db, &key, &id, &token, "resume", 2_002)
+        .unwrap();
+    drop(db);
+    fixture.0.limits.metadata_bytes = BASE + PROOF;
+    let mut db = fixture.open();
+    // Replacing a proof of the same size consumes no additional metadata.
+    let rotated = claims()
+        .reconcile_processing(&mut db, &key, &id, &rotated.claim_token, "nextid", 2_003)
+        .unwrap();
+    assert_eq!(
+        claims().reconcile_processing(&mut db, &key, &id, &rotated.claim_token, "longer-id", 2_004),
+        Err(AppError::StorageCapacity)
+    );
+    drop(db);
+    fixture.0.limits.metadata_bytes = BASE - 1;
+    let mut db = fixture.open();
+    assert_eq!(
+        claims().acknowledge(&mut db, &key, &id, &rotated.claim_token, 2_004),
+        Err(AppError::StorageCapacity)
+    );
+    drop(db);
+    // Completion sheds the recovery proof even when retained rows exceed a lowered cap.
+    fixture.0.limits.metadata_bytes = BASE;
+    let mut db = fixture.open();
+    claims()
+        .acknowledge(&mut db, &key, &id, &rotated.claim_token, 2_005)
+        .unwrap();
+}
+
+#[test]
+fn transition_failures_roll_back_first_start_token_rotation_and_payload_removal() {
+    let fixture = Fixture::new(Limits::default());
+    let mut db = fixture.open();
+    let key = fixture.session(&mut db, -101);
+    let id = fixture.receive(&mut db, input(11, -101, 5), 1_000);
+    let token = claims()
+        .claim(&mut db, &key, None, 1, 2_000)
+        .unwrap()
+        .remove(0)
+        .claim_token;
+    fixture
+        .sql()
+        .execute_batch(
+            "CREATE TRIGGER fail_update BEFORE UPDATE ON replies
+        BEGIN SELECT RAISE(ABORT, 'private-storage-detail'); END;",
+        )
+        .unwrap();
+    assert_eq!(
+        claims().processing(&mut db, &key, &id, &token, true, 2_001),
+        Err(AppError::StorageFailure)
+    );
+    assert_eq!(
+        db.inbox_snapshot(&key, None, 1, 2_001).unwrap().replies[0].state,
+        ReplyState::Claimed
+    );
+    fixture
+        .sql()
+        .execute_batch("DROP TRIGGER fail_update")
+        .unwrap();
+    claims()
+        .processing(&mut db, &key, &id, &token, true, 2_002)
+        .unwrap();
+    fixture
+        .sql()
+        .execute_batch(
+            "CREATE TRIGGER fail_update BEFORE UPDATE ON replies
+        BEGIN SELECT RAISE(ABORT, 'private-storage-detail'); END;",
+        )
+        .unwrap();
+    let error = claims()
+        .reconcile_processing(&mut db, &key, &id, &token, "resume", 2_003)
+        .unwrap_err();
+    assert_eq!(error, AppError::StorageFailure);
+    assert!(!format!("{error:?} {error}").contains("private-storage-detail"));
+    fixture
+        .sql()
+        .execute_batch(
+            "DROP TRIGGER fail_update;
+        CREATE TRIGGER fail_delete BEFORE DELETE ON replies
+        BEGIN SELECT RAISE(ABORT, 'private-storage-detail'); END;",
+        )
+        .unwrap();
+    assert_eq!(
+        claims().acknowledge(&mut db, &key, &id, &token, 2_004),
+        Err(AppError::StorageFailure)
+    );
+    drop(db);
+    let mut db = fixture.open();
+    let count: i64 = fixture
+        .sql()
+        .query_row("SELECT count(*) FROM acknowledgment_receipts", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(count, 0);
+    let reply = db
+        .inbox_snapshot(&key, None, 1, 2_005)
+        .unwrap()
+        .replies
+        .remove(0);
+    assert_eq!(reply.reply_id, id);
+    assert_eq!(reply.text_or_caption.as_deref(), Some("reply"));
+    assert_eq!(reply.processing_started_at, Some(2_002));
+    fixture
+        .sql()
+        .execute_batch("DROP TRIGGER fail_delete")
+        .unwrap();
+    claims()
+        .acknowledge(&mut db, &key, &id, &token, 2_005)
+        .unwrap();
+}
+
+#[test]
+fn processing_ownership_ends_only_at_reply_retention_boundary() {
+    let fixture = Fixture::new(Limits::default());
+    let mut db = fixture.open();
+    let key = fixture.session(&mut db, -101);
+    let id = fixture.receive(&mut db, input(11, -101, 5), 1_000);
+    let claimed = claims()
+        .claim(&mut db, &key, None, 1, 2_000)
+        .unwrap()
+        .remove(0);
+    claims()
+        .processing(&mut db, &key, &id, &claimed.claim_token, true, 2_001)
+        .unwrap();
+    let rotated = claims()
+        .reconcile_processing(&mut db, &key, &id, &claimed.claim_token, "expiry", 2_002)
+        .unwrap();
+    let expiry = claimed.reply.expires_at;
+    claims()
+        .processing(&mut db, &key, &id, &rotated.claim_token, false, expiry - 1)
+        .unwrap();
+    assert_invalid_transitions(&mut db, &key, &id, &rotated.claim_token, expiry);
+    assert_eq!(
+        claims().reconcile_processing(&mut db, &key, &id, &claimed.claim_token, "expiry", expiry),
+        Err(AppError::InvalidClaim)
+    );
+    assert!(
+        db.inbox_snapshot(&key, None, 1, expiry)
+            .unwrap()
+            .replies
+            .is_empty()
+    );
 }

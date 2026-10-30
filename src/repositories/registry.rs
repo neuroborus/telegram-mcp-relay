@@ -459,6 +459,8 @@ pub(super) fn usage(connection: &Connection) -> Result<Usage, AppError> {
          + (SELECT coalesce(sum(128 + length(CAST(session_key AS BLOB))), 0) FROM message_routes)
          + (SELECT coalesce(sum(128 + length(CAST(reply_id AS BLOB)) + length(CAST(session_key AS BLOB))
              + coalesce(length(CAST(claim_token AS BLOB)), 0)
+             + coalesce(length(CAST(reconciliation_request_id AS BLOB)), 0)
+             + coalesce(length(CAST(reconciliation_from_token AS BLOB)), 0)
              + coalesce(length(CAST(attachment_metadata_json AS BLOB)), 0)), 0) FROM replies)
          + (SELECT coalesce(sum(128 + length(CAST(reply_id AS BLOB)) + length(CAST(session_key AS BLOB))
              + length(CAST(claim_token AS BLOB))), 0) FROM acknowledgment_receipts)

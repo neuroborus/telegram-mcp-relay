@@ -106,8 +106,8 @@ They verify that removing a route preserves replies and removing reply payloads 
 acknowledgment receipts. Unsafe permissions, links, FIFOs and sidecars fail before database use.
 Repository unit tests force mid-migration disk-full rollback and page-limit failure without
 loss of committed rows. Fixtures use private randomized, TMPDIR-aware directories.
-Storage tests use the locked bundled SQLite build and cover v1/v2-to-v3 migration preserving
-replies/cursor. Cleanup tests land with their services.
+Storage tests use the locked bundled SQLite build and cover v1/v2/v3-to-v4 migration preserving
+replies, processing first start and cursor. Cleanup tests land with their services.
 
 `tests/inbox.rs` covers read-only pagination, tied receipt ordering, attachment payloads,
 session/composite-question isolation, simultaneous SQLite claim consumers, restart/lease
@@ -115,6 +115,19 @@ boundaries, fresh fencing tokens, retained processing ownership and independent 
 It also covers item/payload bounds, token metadata admission with send reservations, whole-batch
 rollback and safe errors. Fixtures are private, randomized and TMPDIR-aware; timestamps are
 injected and contention uses a barrier without sleeps. Execution remains pending FINALIZE.
+
+The same suite now covers idempotent first processing start, inactivity without releasing
+ownership, stale/wrong-session tokens, exact claim/reply/receipt expiry boundaries and direct
+valid-claim completion. Concurrent resume reconciliation across SQLite connections has one
+compare-and-swap winner and preserves first start/retention through restart and registration.
+Lost reconciliation responses recover from the saved request ID and prior token after restart,
+even at capacity; mismatched and superseded requests remain fenced. Request IDs are bounded,
+and proof replacement/removal participates in metadata admission with outstanding sends.
+Lost acknowledgment responses retry from minimal receipts without extending retention;
+receipts suppress redelivery after cursor advancement. Shared receipt/metadata pressure and
+outstanding send reservations preserve recoverable replies. Injected update/delete failures
+roll back first start, token rotation and receipt/payload replacement with redacted errors.
+These cases await the dedicated complete trusted FINALIZE suite; no execution is claimed here.
 
 `tests/ingress.rs` covers atomic reply/activity/cursor persistence, same-title cross-chat routes,
 multiple replies, attachment-only documents, photo captions, receipt-based TTLs, long incoming

@@ -1,9 +1,9 @@
-//! Claim policy shared by inbox tools and question waiters; no network effects or timers.
+//! Reply ownership shared by inbox tools and question waiters; no network effects or timers.
 
 use crate::{
     config::Delivery,
     error::AppError,
-    repositories::{ClaimedReply, Database, ReplyTarget},
+    repositories::{ClaimedReply, Database, ProcessingStatus, ReconciledProcessing, ReplyTarget},
 };
 
 pub struct InboxService {
@@ -32,5 +32,47 @@ impl InboxService {
         now: i64,
     ) -> Result<Vec<ClaimedReply>, AppError> {
         database.claim_replies(session_key, target, limit, self.claim_lease_ms, now)
+    }
+
+    /// Confirm the first start durably. Inactivity preserves processing ownership;
+    /// the returned first start anchors future in-memory typing, without resetting it.
+    pub fn processing(
+        &self,
+        database: &mut Database,
+        session_key: &str,
+        reply_id: &str,
+        claim_token: &str,
+        active: bool,
+        now: i64,
+    ) -> Result<ProcessingStatus, AppError> {
+        database.processing(session_key, reply_id, claim_token, active, now)
+    }
+
+    /// Save a fresh, unguessable request ID (1–64 UTF-8 bytes) with the token before resume.
+    /// Identical retries recover the committed result until a later rotation or completion;
+    /// distinct requests compete through the token fence and preserve the first start.
+    pub fn reconcile_processing(
+        &self,
+        database: &mut Database,
+        session_key: &str,
+        reply_id: &str,
+        claim_token: &str,
+        request_id: &str,
+        now: i64,
+    ) -> Result<ReconciledProcessing, AppError> {
+        database.reconcile_processing(session_key, reply_id, claim_token, request_id, now)
+    }
+
+    /// Complete only this valid claim, atomically removing payloads and saving a
+    /// bounded idempotency receipt. A prior processing-start call is not required.
+    pub fn acknowledge(
+        &self,
+        database: &mut Database,
+        session_key: &str,
+        reply_id: &str,
+        claim_token: &str,
+        now: i64,
+    ) -> Result<(), AppError> {
+        database.acknowledge_reply(session_key, reply_id, claim_token, now)
     }
 }

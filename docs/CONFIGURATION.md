@@ -63,5 +63,12 @@ Inbox pages and claim batches contain at most 100 items and `limits.reply_bytes`
 payload bytes. Claims enforce `delivery.claim_lease_seconds` (default 60, maximum 600) before
 processing starts; processing work is not lease-expired. Tokens count toward shared metadata
 capacity, including outstanding send reservations; rotation replaces the previous token charge.
+Processing start removes the pre-processing lease. Explicit reconciliation rotates its token
+without resetting first start or reply retention. Its bounded latest-request/prior-token proof
+counts toward shared metadata and lets identical retries recover a lost response after restart.
+Acknowledgment atomically removes payloads and that proof
+and retains a minimal receipt for `storage.reply_ttl_days` from completion. Receipts consume
+the shared receipt/metadata budgets; capacity failure leaves the reply recoverable. Repeating
+an acknowledgment with the same valid token consumes no new capacity or retention time.
 Physical journal accounting and cleanup remain later work.
 See [architecture](ARCHITECTURE.md#session-and-route-persistence).

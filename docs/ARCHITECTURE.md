@@ -14,8 +14,9 @@ as described below.
 Library reply ingestion authorizes input and commits replies/dispositions with the cursor.
 A cancellable single-consumer long poller now drives it; production startup and MCP
 notification delivery remain later work.
-Bounded library inbox snapshots and pre-processing claims are available; processing-start,
-reconciliation and acknowledgment operations remain later work.
+Bounded library inbox snapshots, pre-processing claims, durable processing-start,
+explicit reconciliation and acknowledgment operations are available. MCP tools and typing
+remain later work.
 
 The library now provides centralized validated TOML settings and typed, redacted startup
 errors in `config`/`error`, with protected Unix secret resolution under `config::secrets`.
@@ -143,6 +144,8 @@ means no update has been processed. Timestamps use Unix milliseconds. Schema ver
 minimal update dispositions, including one compact ignored marker, through a transactional
 migration preserving existing records.
 Version 3 adds a session/receipt-time/update-ID index for ordered inbox access.
+Version 4 adds nullable recovery-proof columns for the latest processing reconciliation;
+existing claims and first-start timestamps survive the transactional migration.
 
 Initialization enables incremental auto-vacuum before the schema transaction. DDL, initial
 cursor, application ID and version commit together under an immediate transaction; errors
@@ -361,6 +364,32 @@ reservations, replacing an old token's charge during recovery. Failure rolls bac
 Pre-processing claims become eligible exactly at lease expiry, including after restart, with
 the same reply ID and a rotated token. Leases never extend reply retention. Processing replies
 are excluded from automatic recovery; reads/claims never acknowledge, delete or start typing.
+
+`InboxService::processing` validates the session/reply/current token and unexpired reply.
+Pre-processing claims must also have an unexpired lease. The first active call atomically
+records processing start and removes the claim lease; repeated calls preserve that first
+timestamp. Inactivity preserves durable ownership and does not complete or requeue a reply.
+These synchronous transactions have no network effects or typing timers.
+
+Explicit `reconcile_processing` requires the saved current token as a compare-and-swap fence
+for a processing reply and a fresh, unguessable client request ID of 1–64 UTF-8 bytes
+(for example, a random UUID). Clients save both before dispatch. It rotates the token and
+acquisition time while preserving the
+reply ID, first-start timestamp, payload and retention deadline. The same transaction retains
+the request ID and prior-token proof: an identical retry recovers the committed result after
+response loss/restart without changing timestamps or requiring fresh capacity. Only the latest
+proof survives; a later rotation, completion or reply expiry prevents its replay. Registration
+does not reconcile claims. Distinct competing resume requests have one winner; stale tokens
+cannot start/stop processing, change ownership or acknowledge. Clients preserve returned tokens.
+Proof bytes count toward shared metadata, replace the prior proof and disappear with the reply.
+
+`InboxService::acknowledge` accepts a valid claimed or processing reply and atomically replaces
+its payload with a minimal valid-token receipt. Repeated acknowledgment with the same session,
+reply ID and token succeeds while that receipt remains valid, including after restart or at
+capacity. Receipt retention uses the configured reply TTL from completion; retries never
+refresh it. Receipt counts share `limits.receipts` with unroutable dispositions. Metadata
+admission accounts for replacement bytes and outstanding send reservations. Admission or
+transaction failure preserves the reply and ownership; no valid records are evicted.
 
 ## Telegram long polling
 

@@ -11,7 +11,7 @@ use super::{
 use crate::error::AppError;
 
 const MAX_PAGE_ITEMS: u32 = 100;
-const TOKEN_BYTES: u64 = 64;
+pub(super) const TOKEN_BYTES: u64 = 64;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ReplyState {
@@ -205,7 +205,7 @@ fn validate_query(limit: u32, now: i64) -> Result<(), AppError> {
     Ok(())
 }
 
-fn ensure_session(connection: &Connection, session_key: &str) -> Result<(), AppError> {
+pub(super) fn ensure_session(connection: &Connection, session_key: &str) -> Result<(), AppError> {
     let exists: bool = connection.query_row(
         "SELECT EXISTS(SELECT 1 FROM sessions WHERE session_key = ?1)",
         [session_key],

@@ -67,6 +67,7 @@ pub enum AppError {
     FileTooLarge { limit_bytes: u64, actual_bytes: u64 },
     SessionNotFound,
     SessionIdentityConflict,
+    InvalidClaim,
     RouteConflict,
     RoutePending,
     PollerActive,
@@ -95,6 +96,7 @@ impl AppError {
             Self::FileTooLarge { .. } => "FILE_TOO_LARGE",
             Self::SessionNotFound => "SESSION_NOT_FOUND",
             Self::SessionIdentityConflict => "SESSION_IDENTITY_CONFLICT",
+            Self::InvalidClaim => "CLAIM_INVALID",
             Self::RouteConflict => "ROUTE_CONFLICT",
             Self::RoutePending => "ROUTE_PENDING",
             Self::PollerActive => "TELEGRAM_POLL_ACTIVE",
@@ -141,6 +143,11 @@ impl fmt::Display for AppError {
             Self::SessionIdentityConflict => {
                 write!(f, "{}: session identities disagree", self.code())
             }
+            Self::InvalidClaim => write!(
+                f,
+                "{}: claim is absent, expired or no longer current",
+                self.code()
+            ),
             Self::RouteConflict => write!(f, "{}: message already has a route", self.code()),
             Self::RoutePending => write!(f, "{}: send bookkeeping is still pending", self.code()),
             Self::PollerActive => {

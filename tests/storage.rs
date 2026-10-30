@@ -85,7 +85,7 @@ fn initializes_private_database_and_reopens_without_resetting_state() {
     let fixture = Fixture::new();
     let settings = fixture.settings();
     let database = Database::open(&settings, &Limits::default()).unwrap();
-    assert_eq!(database.schema_version().unwrap(), 3);
+    assert_eq!(database.schema_version().unwrap(), 4);
     assert_eq!(
         fs::metadata(&settings.path).unwrap().permissions().mode() & 0o777,
         0o600
@@ -111,6 +111,13 @@ fn initializes_private_database_and_reopens_without_resetting_state() {
     add_reply(&connection, "reply-a", 11, 8).unwrap();
     connection
         .execute(
+            "UPDATE replies SET state = 'processing', claimed_at = 120,
+        claim_token = 'token-a', processing_started_at = 130",
+            [],
+        )
+        .unwrap();
+    connection
+        .execute(
             "UPDATE telegram_cursor SET last_durably_processed_update_id = 11",
             [],
         )
@@ -118,21 +125,33 @@ fn initializes_private_database_and_reopens_without_resetting_state() {
     drop(connection);
     drop(database);
     // Recreate each accepted older shape, preserving its records through migration.
-    for version in [1, 2] {
+    for version in [1, 2, 3] {
         let connection = fixture.connect();
+        connection
+            .execute_batch(
+                "ALTER TABLE replies DROP COLUMN reconciliation_from_token;
+                ALTER TABLE replies DROP COLUMN reconciliation_request_id;",
+            )
+            .unwrap();
         if version == 1 {
             connection
                 .execute_batch("DROP TABLE update_dispositions")
                 .unwrap();
         }
-        connection
-            .execute_batch("DROP INDEX replies_ordered")
-            .unwrap();
+        if version < 3 {
+            connection
+                .execute_batch("DROP INDEX replies_ordered")
+                .unwrap();
+        }
         connection
             .pragma_update(None, "user_version", version)
             .unwrap();
         let reopened = Database::open(&settings, &Limits::default()).unwrap();
-        assert_eq!(reopened.schema_version().unwrap(), 3);
+        assert_eq!(reopened.schema_version().unwrap(), 4);
+        assert_eq!(
+            reopened.inbox_snapshot("a", None, 1, 150).unwrap().replies[0].processing_started_at,
+            Some(130)
+        );
         let saved: (String, i64) = connection.query_row(
         "SELECT reply_id, last_durably_processed_update_id FROM replies CROSS JOIN telegram_cursor",
         [], |r| Ok((r.get(0)?, r.get(1)?)),
