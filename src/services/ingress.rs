@@ -8,7 +8,7 @@ use crate::{
     clients::telegram::{Attachment, Update},
     config::Config,
     error::AppError,
-    repositories::{Database, IncomingReply, IngestOutcome},
+    repositories::{Database, IncomingReply, IngestOutcome, PendingRoutes},
 };
 
 pub struct IngressService {
@@ -54,6 +54,18 @@ impl IngressService {
         update: &Update,
         received_at: i64,
     ) -> Result<IngestOutcome, AppError> {
+        let pending = database.pending_routes();
+        self.ingest_observed(database, update, received_at, &pending)
+    }
+
+    /// The poller preserves the batch's admission snapshot across retries and updates.
+    pub(crate) fn ingest_observed(
+        &self,
+        database: &mut Database,
+        update: &Update,
+        received_at: i64,
+        pending: &PendingRoutes,
+    ) -> Result<IngestOutcome, AppError> {
         if update.update_id < 0 || received_at < 0 {
             return Err(AppError::InvalidRequest(
                 "Telegram update timestamp or identity",
@@ -84,6 +96,11 @@ impl IngressService {
         let known_route = database
             .route(message.chat.id, target.message_id, received_at)?
             .is_some();
+        // Only sends already admitted when this input was observed could have created
+        // its target. Newer sends must not prolong this update's deferral.
+        if !known_route && pending.is_pending() {
+            return Err(AppError::RoutePending);
+        }
         let text = known_route
             .then(|| message.text.as_deref().or(message.caption.as_deref()))
             .flatten();

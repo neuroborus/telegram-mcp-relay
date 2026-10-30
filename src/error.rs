@@ -68,6 +68,8 @@ pub enum AppError {
     SessionNotFound,
     SessionIdentityConflict,
     RouteConflict,
+    RoutePending,
+    PollerActive,
     SendCapacity,
     SendBookkeepingFailed,
     RandomUnavailable,
@@ -94,6 +96,8 @@ impl AppError {
             Self::SessionNotFound => "SESSION_NOT_FOUND",
             Self::SessionIdentityConflict => "SESSION_IDENTITY_CONFLICT",
             Self::RouteConflict => "ROUTE_CONFLICT",
+            Self::RoutePending => "ROUTE_PENDING",
+            Self::PollerActive => "TELEGRAM_POLL_ACTIVE",
             Self::SendCapacity => "SEND_CAPACITY",
             Self::SendBookkeepingFailed => "SEND_BOOKKEEPING_FAILED",
             Self::RandomUnavailable => "RANDOM_UNAVAILABLE",
@@ -138,6 +142,10 @@ impl fmt::Display for AppError {
                 write!(f, "{}: session identities disagree", self.code())
             }
             Self::RouteConflict => write!(f, "{}: message already has a route", self.code()),
+            Self::RoutePending => write!(f, "{}: send bookkeeping is still pending", self.code()),
+            Self::PollerActive => {
+                write!(f, "{}: a Telegram poller is already running", self.code())
+            }
             Self::SendCapacity => write!(f, "{}: admitted send limit reached", self.code()),
             Self::SendBookkeepingFailed => write!(
                 f,

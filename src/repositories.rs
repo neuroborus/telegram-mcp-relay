@@ -4,7 +4,7 @@ use std::{
     fs::File,
     os::unix::fs::MetadataExt,
     path::{Component, Path},
-    sync::Arc,
+    sync::{Arc, Weak},
     time::Duration,
 };
 
@@ -13,6 +13,7 @@ use rustix::{
     fs::{Mode, OFlags, open, openat},
     process::geteuid,
 };
+use tokio::sync::Semaphore;
 
 use crate::{
     config::{Limits, Storage},
@@ -20,6 +21,7 @@ use crate::{
 };
 
 mod registry;
+pub(crate) use registry::PendingRoutes;
 pub use registry::{MessageRoute, RouteKind, RouteReservation, Session};
 mod ingress;
 pub(crate) use ingress::IncomingReply;
@@ -33,6 +35,8 @@ pub struct Database {
     connection: Connection,
     registry: registry::RegistryPolicy,
     reserved_routes: Arc<registry::ReservedRoutes>,
+    pending_routes: Vec<Weak<()>>,
+    pub(crate) poll_admission: Arc<Semaphore>,
 }
 
 impl Database {
@@ -89,6 +93,8 @@ impl Database {
             connection,
             registry,
             reserved_routes: Arc::default(),
+            pending_routes: Vec::new(),
+            poll_admission: Arc::new(Semaphore::new(1)),
         })
     }
 

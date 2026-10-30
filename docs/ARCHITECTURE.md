@@ -11,8 +11,9 @@ The library provides a bounded Telegram HTTP client and text/document delivery w
 reply routes. No MCP transport or production relay wiring exists yet. The accepted HTTP
 adapter's synthetic tests passed in Runner's complete workspace test suite,
 as described below.
-Library reply ingestion now authorizes input and commits replies/dispositions with the cursor;
-the single long poller and notification delivery remain later work.
+Library reply ingestion authorizes input and commits replies/dispositions with the cursor.
+A cancellable single-consumer long poller now drives it; production startup and MCP
+notification delivery remain later work.
 
 The library now provides centralized validated TOML settings and typed, redacted startup
 errors in `config`/`error`, with protected Unix secret resolution under `config::secrets`.
@@ -339,6 +340,38 @@ cursor: it consumes no receipt or variable metadata admission and remains under 
 database cap. Compacting it removes no reply, receipt or notice obligation; older ignored input
 may be ignored again without retaining contents or generating effects. Cleanup, downloads,
 notices and notification delivery remain later work.
+
+## Telegram long polling
+
+`services::polling::PollingService` holds one lease shared by the application's database
+handle, including across separate service instances. A competing consumer fails before HTTP.
+Startup inspects `getWebhookInfo`; a nonempty webhook or a 409 polling conflict stops with a
+safe rejection. It never deletes webhooks or pending updates. The existing verified Bot API
+reference above supplies the offset, batch, timeout and conflict contracts; no live bot was used.
+
+Each sequential `getUpdates` requests at most 100 messages with the configured timeout
+(45 seconds by default). The existing client bounds response bytes and parsing. The poller
+validates strict batch ordering and nonnegative, incrementable IDs before any batch effects;
+gaps and lower IDs from a new sequence remain valid. Each new offset comes only from the
+durable cursor plus one. An unresolved update holds its bounded batch locally, retries that
+update and prevents another poll from confirming past it. Capacity pressure never evicts a
+reply. Receipt timestamps remain fixed across local retries.
+
+At batch receipt, ingress captures a bounded snapshot of outstanding route reservations,
+including detached text/document sends. Unknown authorized Replies defer only while sends in
+that snapshot can still produce a route; later admissions cannot extend the wait. Known routes
+and ignored input do not wait. Completion or failure releases the reservation before waking
+ingress, which rechecks routing under the same database guard used for admission and persistence.
+The wakeup is armed before checking, and no database guard crosses an await. New committed
+replies emit coalesced in-memory watch revisions; consumers must read SQLite after a wakeup or
+restart. These are internal signals, not implemented MCP subscriptions.
+
+After the client's finite read retries, transient failures use quiet exponential backoff with
+jitter (one to 30 seconds locally); `retry_after` can extend that delay and is never shortened.
+Storage pressure uses the same bounded local backoff. Shutdown, loss of the supervisor's watch
+sender or dropping the run future cancels HTTP and waits, releases the lease and preserves
+committed replies/cursor. The next consumer resumes from SQLite. Production supervision and
+shutdown draining of admitted sends remain later steps. New poller tests await FINALIZE.
 
 ## Runtime and ownership
 

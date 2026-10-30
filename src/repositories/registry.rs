@@ -3,12 +3,13 @@
 use std::{
     fmt::{self, Write},
     sync::{
-        Arc,
+        Arc, Weak,
         atomic::{AtomicU32, AtomicU64, Ordering},
     },
 };
 
 use rusqlite::{Connection, OptionalExtension, Row, TransactionBehavior};
+use tokio::sync::Notify;
 
 use super::Database;
 use crate::{
@@ -66,12 +67,16 @@ pub struct RouteReservation {
     session_key: String,
     bytes: u64,
     reserved: Arc<ReservedRoutes>,
+    pending: Option<Arc<()>>,
 }
 
 impl Drop for RouteReservation {
     fn drop(&mut self) {
         self.reserved.count.fetch_sub(1, Ordering::SeqCst);
         self.reserved.bytes.fetch_sub(self.bytes, Ordering::SeqCst);
+        // Mark this admission settled before waking a snapshot's waiter.
+        drop(self.pending.take());
+        self.reserved.changed.notify_waiters();
     }
 }
 
@@ -91,6 +96,16 @@ redacted_debug!(Session, MessageRoute, RouteReservation);
 pub(super) struct ReservedRoutes {
     count: AtomicU32,
     pub(super) bytes: AtomicU64,
+    changed: Arc<Notify>,
+}
+
+/// A finite observation of admissions; later sends cannot extend its lifetime.
+pub(crate) struct PendingRoutes(Vec<Weak<()>>);
+
+impl PendingRoutes {
+    pub(crate) fn is_pending(&self) -> bool {
+        self.0.iter().any(|route| route.strong_count() != 0)
+    }
 }
 
 pub(super) struct RegistryPolicy {
@@ -156,6 +171,17 @@ impl RegistryPolicy {
 }
 
 impl Database {
+    /// Capture once when input is observed, then reuse across every ingress retry.
+    pub(crate) fn pending_routes(&mut self) -> PendingRoutes {
+        self.pending_routes
+            .retain(|route| route.strong_count() != 0);
+        PendingRoutes(self.pending_routes.clone())
+    }
+
+    pub(crate) fn route_changes(&self) -> Arc<Notify> {
+        Arc::clone(&self.reserved_routes.changed)
+    }
+
     /// Register by stable external ID or explicitly resume a saved handle. If both are
     /// supplied they must already identify the same session. With neither, create a new one.
     /// Registration/rename never changes routes, replies or processing ownership.
@@ -264,6 +290,10 @@ impl Database {
         {
             return Err(AppError::StorageCapacity);
         }
+        let pending = Arc::new(());
+        self.pending_routes
+            .retain(|route| route.strong_count() != 0);
+        self.pending_routes.push(Arc::downgrade(&pending));
         self.reserved_routes.count.fetch_add(1, Ordering::SeqCst);
         self.reserved_routes
             .bytes
@@ -272,6 +302,7 @@ impl Database {
             session_key: session.session_key,
             bytes: route_bytes,
             reserved: Arc::clone(&self.reserved_routes),
+            pending: Some(pending),
         })
     }
 

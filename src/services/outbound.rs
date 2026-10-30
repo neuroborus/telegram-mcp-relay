@@ -1,9 +1,6 @@
 //! Validate before effects and finish admitted sends even if the caller disappears.
 
-use std::{
-    sync::{Arc, Mutex},
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::sync::{Arc, Mutex};
 
 use tokio::sync::Semaphore;
 
@@ -15,7 +12,7 @@ use crate::{
     repositories::{Database, RouteKind, RouteReservation},
 };
 
-use super::files::ValidatedFile;
+use super::{files::ValidatedFile, unix_millis};
 
 enum Delivery {
     Text(String),
@@ -163,14 +160,6 @@ impl OutboundService {
             )
             .map_err(|_| AppError::SendBookkeepingFailed)
     }
-}
-
-fn unix_millis() -> Result<i64, AppError> {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .ok()
-        .and_then(|duration| i64::try_from(duration.as_millis()).ok())
-        .ok_or(AppError::InvalidRequest("timestamp"))
 }
 
 #[cfg(test)]

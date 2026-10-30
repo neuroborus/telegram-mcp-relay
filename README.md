@@ -21,7 +21,9 @@ The library adds a bounded [Bot API client](docs/ARCHITECTURE.md#telegram-http-c
 [streamed document delivery](docs/ARCHITECTURE.md#document-delivery) with cancellation-safe
 durable reply routes. Production startup composition remains a later step.
 Library [reply ingestion](docs/ARCHITECTURE.md#reply-ingestion) commits authorized replies and
-the update cursor atomically; long polling and notification delivery are not wired yet.
+the update cursor atomically. A [single restart-safe poller](docs/ARCHITECTURE.md#telegram-long-polling)
+drives ingestion with cancellation and bounded backoff; production wiring and MCP notification
+delivery remain pending.
 The specification calls the product **Telegram MCP Bridge**; this repository and binary are
 named **telegram-mcp-relay**.
 

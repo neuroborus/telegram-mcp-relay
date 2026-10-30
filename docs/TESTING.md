@@ -120,6 +120,19 @@ metadata admission including outstanding sends, late transaction failures and ac
 page exhaustion without losing accepted replies or advancing unresolved input. Fixtures are
 private, randomized and TMPDIR-aware. Execution remains pending the trusted FINALIZE suite.
 
+`services::polling::tests` combines actual mocked Telegram HTTP and protected SQLite for
+ordered batches, default 45-second polling, durable restart offsets, redelivery deduplication,
+post-commit change signals and a shared exclusive consumer lease. Explicit HTTP gates cover
+cancellation, supervisor loss and Replies arriving before a detached send's route commit or
+definitive rejection. A gated regression keeps a newer send outstanding while an earlier send
+settles, proving that an unknown Reply is classified and a following routable Reply commits
+without waiting for the newer admission. Capacity tests preserve the unresolved suffix across
+cancellation and restart, and resume the retained batch after synthetic capacity release. Webhook/409 conflicts
+and malformed batch order/IDs leave the cursor unchanged; no destructive API is called.
+Controlled-time tests cover bounded jittered backoff, unshortened large `retry_after` delays
+and cancellation during retry waits. Fixtures are private, randomized and TMPDIR-aware.
+Execution remains pending the complete trusted FINALIZE suite.
+
 `tests/registry.rs` exercises three same-title identities, interleaved text/document routes,
 cross-chat message-ID collisions, external-ID and saved-handle resume, normalized renaming and
 restart continuity. Explicit timestamps cover session activity and independent route expiry.
