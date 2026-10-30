@@ -26,8 +26,10 @@ pub use registry::{MessageRoute, RouteKind, RouteReservation, Session};
 mod ingress;
 pub(crate) use ingress::IncomingReply;
 pub use ingress::IngestOutcome;
+mod inbox;
+pub use inbox::{ClaimedReply, InboxCursor, InboxPage, InboxReply, ReplyState, ReplyTarget};
 
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 const APPLICATION_ID: i64 = 0x544d4352; // TMCR
 
 /// One private connection; services will expose narrowly scoped transactions, not raw SQL.
@@ -134,6 +136,9 @@ fn initialize(connection: &mut Connection) -> Result<(), AppError> {
     }
     if version < 2 {
         transaction.execute_batch(include_str!("repositories/ingress.sql"))?;
+    }
+    if version < 3 {
+        transaction.execute_batch(include_str!("repositories/inbox.sql"))?;
     }
     transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     let vacuum: i64 = transaction.pragma_query_value(None, "auto_vacuum", |r| r.get(0))?;

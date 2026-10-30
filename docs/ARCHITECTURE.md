@@ -14,6 +14,8 @@ as described below.
 Library reply ingestion authorizes input and commits replies/dispositions with the cursor.
 A cancellable single-consumer long poller now drives it; production startup and MCP
 notification delivery remain later work.
+Bounded library inbox snapshots and pre-processing claims are available; processing-start,
+reconciliation and acknowledgment operations remain later work.
 
 The library now provides centralized validated TOML settings and typed, redacted startup
 errors in `config`/`error`, with protected Unix secret resolution under `config::secrets`.
@@ -140,6 +142,7 @@ outbound bodies, full Telegram updates, file bytes or typing leases. A NULL init
 means no update has been processed. Timestamps use Unix milliseconds. Schema version 2 adds
 minimal update dispositions, including one compact ignored marker, through a transactional
 migration preserving existing records.
+Version 3 adds a session/receipt-time/update-ID index for ordered inbox access.
 
 Initialization enables incremental auto-vacuum before the schema transaction. DDL, initial
 cursor, application ID and version commit together under an immediate transaction; errors
@@ -147,7 +150,7 @@ roll back the schema. Foreign/unversioned nonempty databases and unknown version
 Foreign keys restrict session deletion while children survive; replies have no route foreign
 key, so an expired route can later be removed independently. Indexes cover identity, ordered
 inboxes, question matching, notice eligibility and each record's expiry. These are schema
-constraints; claiming and cleanup services are not implemented yet.
+constraints; cleanup services are not implemented yet.
 
 Connections use DELETE rollback journals, FULL synchronization, a 100 ms busy timeout, a
 512 KiB suggested page cache, eight cached statements, disabled mmap and in-memory temporary
@@ -340,6 +343,24 @@ cursor: it consumes no receipt or variable metadata admission and remains under 
 database cap. Compacting it removes no reply, receipt or notice obligation; older ignored input
 may be ignored again without retaining contents or generating effects. Cleanup, downloads,
 notices and notification delivery remain later work.
+
+## Inbox snapshots and claims
+
+`Database::inbox_snapshot` reads unexpired replies in receipt-time/update-ID order, preserving
+ordered Telegram batch ties. Keyset pagination covers every delivery state without acquiring
+ownership, exposing claim tokens or refreshing session activity. Pages and claims are limited
+to 100 items and `limits.reply_bytes` of combined UTF-8 text/attachment payload. If a newly
+lowered limit cannot fit the first retained reply, return capacity pressure without skipping it.
+
+`services::inbox::InboxService` validates the configured 1–600-second claim lease (default 60).
+Inbox and future ask consumers share one immediate SQLite transaction for ordered selection,
+metadata admission and claims. Optional question filtering includes both chat and outbound
+message ID within the session. Each acquisition uses a fresh 32-byte OS-random fencing token;
+only a committed transaction returns tokens. Admission counts token bytes and outstanding send
+reservations, replacing an old token's charge during recovery. Failure rolls back the batch.
+Pre-processing claims become eligible exactly at lease expiry, including after restart, with
+the same reply ID and a rotated token. Leases never extend reply retention. Processing replies
+are excluded from automatic recovery; reads/claims never acknowledge, delete or start typing.
 
 ## Telegram long polling
 

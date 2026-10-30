@@ -5,6 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::error::AppError;
 
 pub mod files;
+pub mod inbox;
 pub mod ingress;
 pub mod outbound;
 pub mod polling;

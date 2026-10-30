@@ -59,5 +59,9 @@ JSON also counts toward shared metadata; unroutable dispositions share `limits.r
 with acknowledgment receipts. Ignored input compacts into one fixed bookkeeping marker outside
 these variable admission budgets, bounded by the physical database cap. Pressure rejects
 reply/unroutable admission without eviction or cursor advancement.
+Inbox pages and claim batches contain at most 100 items and `limits.reply_bytes` combined
+payload bytes. Claims enforce `delivery.claim_lease_seconds` (default 60, maximum 600) before
+processing starts; processing work is not lease-expired. Tokens count toward shared metadata
+capacity, including outstanding send reservations; rotation replaces the previous token charge.
 Physical journal accounting and cleanup remain later work.
 See [architecture](ARCHITECTURE.md#session-and-route-persistence).

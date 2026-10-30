@@ -106,8 +106,15 @@ They verify that removing a route preserves replies and removing reply payloads 
 acknowledgment receipts. Unsafe permissions, links, FIFOs and sidecars fail before database use.
 Repository unit tests force mid-migration disk-full rollback and page-limit failure without
 loss of committed rows. Fixtures use private randomized, TMPDIR-aware directories.
-Storage tests use the locked bundled SQLite build and cover v1-to-v2 migration preserving
-replies/cursor. Claim arbitration and cleanup tests land with their services.
+Storage tests use the locked bundled SQLite build and cover v1/v2-to-v3 migration preserving
+replies/cursor. Cleanup tests land with their services.
+
+`tests/inbox.rs` covers read-only pagination, tied receipt ordering, attachment payloads,
+session/composite-question isolation, simultaneous SQLite claim consumers, restart/lease
+boundaries, fresh fencing tokens, retained processing ownership and independent reply expiry.
+It also covers item/payload bounds, token metadata admission with send reservations, whole-batch
+rollback and safe errors. Fixtures are private, randomized and TMPDIR-aware; timestamps are
+injected and contention uses a barrier without sleeps. Execution remains pending FINALIZE.
 
 `tests/ingress.rs` covers atomic reply/activity/cursor persistence, same-title cross-chat routes,
 multiple replies, attachment-only documents, photo captions, receipt-based TTLs, long incoming
