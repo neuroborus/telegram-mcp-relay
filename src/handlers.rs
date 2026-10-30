@@ -30,7 +30,7 @@ use crate::{
     repositories::{Database, InboxNotifications},
     services::{
         ask::AskService, files::OutboundFiles, inbox::InboxService, outbound::OutboundService,
-        unix_millis,
+        typing::TypingService, unix_millis,
     },
 };
 
@@ -69,6 +69,10 @@ impl McpHandler {
             database,
             notifications,
         })
+    }
+
+    pub(crate) fn typing(&self) -> TypingService {
+        self.outbound.typing()
     }
 
     fn register(&self, request: RegisterRequest) -> Result<RegisterResult, AppError> {

@@ -77,6 +77,7 @@ pub enum AppError {
     NoticeSchedulerActive,
     CleanupSchedulerActive,
     McpUnavailable,
+    ServiceStopped,
     SendCapacity,
     WaitCapacity,
     AskWaitFailed {
@@ -114,6 +115,7 @@ impl AppError {
             Self::NoticeSchedulerActive => "TELEGRAM_NOTICE_ACTIVE",
             Self::CleanupSchedulerActive => "STORAGE_CLEANUP_ACTIVE",
             Self::McpUnavailable => "MCP_UNAVAILABLE",
+            Self::ServiceStopped => "SERVICE_STOPPED",
             Self::SendCapacity => "SEND_CAPACITY",
             Self::WaitCapacity => "WAIT_CAPACITY",
             Self::AskWaitFailed { .. } => "ASK_WAIT_FAILED",
@@ -177,6 +179,7 @@ impl fmt::Display for AppError {
                 )
             }
             Self::McpUnavailable => write!(f, "{}: local HTTP transport unavailable", self.code()),
+            Self::ServiceStopped => write!(f, "{}: a supervised service stopped", self.code()),
             Self::CleanupSchedulerActive => {
                 write!(f, "{}: a cleanup scheduler is already running", self.code())
             }

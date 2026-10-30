@@ -27,6 +27,24 @@ fn start(service: &TypingService, session: &str, reply: &str, chat: i64, first: 
     );
 }
 
+#[tokio::test]
+async fn worker_abort_wakes_supervision_without_an_idle_timer() {
+    let service = service(&config());
+    let mut failure = Box::pin(service.failed());
+    assert!(futures_util::poll!(failure.as_mut()).is_pending());
+    service.state.lock().unwrap().running = false;
+    start(&service, "a", "1", -101, 0, 0);
+    service
+        .state
+        .lock()
+        .unwrap()
+        .worker
+        .as_ref()
+        .unwrap()
+        .abort();
+    failure.await;
+}
+
 #[tokio::test(start_paused = true)]
 async fn merge_chats_stop_independently_and_keep_cooldowns_through_idle() {
     let service = service(&config());

@@ -1,53 +1,42 @@
 # Telegram MCP Relay
 
-A planned lightweight Rust service connecting several agent sessions to one Telegram bot
+A lightweight Rust service connecting several agent sessions to one Telegram bot
 through a shared local MCP endpoint. Replies to text and documents return to the original
 session; a durable inbox supports subscriptions and an optional bounded wait.
 
-This checkout contains the project specification, repository conventions, Agent Runner
-workflow and an initial Rust application scaffold. The binary initializes structured
-diagnostics on a current-thread Tokio runtime, logs its scaffold status and exits. The MCP
-endpoint is available through the [library](docs/ARCHITECTURE.md#protected-mcp-transport);
-typed [registration and outbound tools](docs/ARCHITECTURE.md#mcp-registration-and-outbound-tools),
-[durable inbox resources and reply tools](docs/ARCHITECTURE.md#mcp-inbox-resources-and-reply-tools)
-and [modern resource subscriptions](docs/ARCHITECTURE.md#mcp-resource-subscriptions)
-are available in the library, alongside [bounded asks](docs/ARCHITECTURE.md#bounded-asks).
-Confirmed-processing typing is available in the library; runnable relay setup remains pending.
-Library [notice arbitration](docs/ARCHITECTURE.md#durable-notice-arbitration) persists once-only
-attempt decisions; a bounded library dispatcher sends factual notices and suppresses service
-Reply loops across restart and uncertain delivery. Production wiring remains pending.
-The library also implements validated [configuration and protected secrets](docs/CONFIGURATION.md);
-the binary does not load configuration yet.
-Pure [outbound formatting rules](docs/ARCHITECTURE.md#outbound-formatting) normalize session
-titles and enforce final text/caption limits.
-The library also provides [private SQLite initialization](docs/ARCHITECTURE.md#sqlite-initialization);
-the binary does not open storage yet.
-Library [retention cleanup](docs/ARCHITECTURE.md#retention-cleanup) provides bounded startup/daily
-sweeps preserving valid replies and recovery identity, followed by
-[incremental disk reclamation](docs/ARCHITECTURE.md#physical-disk-maintenance) with protected
-database/journal usage accounting. Production wiring remains pending.
-Persistent [session registration and message routes](docs/ARCHITECTURE.md#session-and-route-persistence)
-support saved-handle/external-ID resume and independent route expiry through the library.
-The library adds a bounded [Bot API client](docs/ARCHITECTURE.md#telegram-http-client) and
-[text delivery](docs/ARCHITECTURE.md#text-delivery) and
-[streamed document delivery](docs/ARCHITECTURE.md#document-delivery) with cancellation-safe
-durable reply routes. Production startup composition remains a later step.
-Library [reply ingestion](docs/ARCHITECTURE.md#reply-ingestion) commits authorized replies and
-the update cursor atomically. A [single restart-safe poller](docs/ARCHITECTURE.md#telegram-long-polling)
-drives ingestion with cancellation and bounded backoff; production wiring remains pending.
+The binary now runs the [shared daemon composition](docs/ARCHITECTURE.md#runtime-and-ownership)
+on a current-thread Tokio runtime. It loads validated
+[configuration and protected secrets](docs/CONFIGURATION.md), opens private SQLite/export roots,
+completes startup retention cleanup and serves one protected loopback MCP endpoint alongside
+one Telegram poller, factual notices and shared confirmed-processing typing.
+
+MCP provides typed registration, text/document sends, durable inbox resources, fenced reply
+processing/acknowledgment, modern resource subscriptions and bounded asks. Replies and the
+update cursor commit atomically; post-commit signals serve subscribers and waiters without
+consuming durable replies. Bounded periodic cleanup and incremental disk reclamation preserve
+valid replies and recovery identities. See [architecture](docs/ARCHITECTURE.md) for implemented
+guarantees and protocol limitations.
+
+Graceful accepted-send draining and OS signal integration remain the next shutdown step.
+Setup guidance, full acceptance interactions and resource measurements remain planned work;
+this composition does not establish complete MVP acceptance or live Telegram interoperability.
 The specification calls the product **Telegram MCP Bridge**; this repository and binary are
 named **telegram-mcp-relay**.
 
-The manifest requires Rust 1.89 or newer. Build the scaffold using its complete dependency lock:
+The manifest requires Rust 1.89 or newer. Build using its complete dependency lock:
 
 ```bash
 cargo build --locked --release --bin telegram-mcp-relay
 ```
 
-The resulting `target/release/telegram-mcp-relay` currently logs its scaffold status and exits.
-See [architecture](docs/ARCHITECTURE.md) for dependency choices and current compatibility limits.
+Run `target/release/telegram-mcp-relay /absolute/path/to/config.toml` with an explicitly prepared
+configuration, protected secrets and existing private storage/export directories. The
+[synthetic example](config/relay.example.toml) needs local IDs and paths before use. Startup
+failures return a safe error code and nonzero exit status. No directories, services or webhook
+resets are installed automatically. Default process termination can interrupt send bookkeeping;
+library hosts can cancel service loops through `run_until`.
 
-The MVP targets one native process, loopback Streamable HTTP, Telegram long polling and SQLite.
+The MVP uses one native process, loopback Streamable HTTP, Telegram long polling and SQLite.
 Outgoing text and captions have a strict 1,000 Unicode scalar limit including the session
 header; longer reports travel as files. Notifications cannot guarantee that an idle agent
 host starts a new turn. Unconsumed Telegram updates last at most 24 hours, independently of

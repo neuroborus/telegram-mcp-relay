@@ -1,9 +1,10 @@
 //! Shared application entry point for Telegram MCP Relay.
 //!
-//! The scaffold entry point only logs; library storage and delivery operations are explicit.
+//! Production startup and cancellable composition share the same durable services.
 
 #![forbid(unsafe_code)]
 
+pub mod app;
 pub mod clients;
 pub mod config;
 pub mod domain;
@@ -14,10 +15,4 @@ pub mod repositories;
 pub mod routes;
 pub mod services;
 
-/// Run the application scaffold without starting relay services.
-pub async fn run() {
-    tracing::info!(
-        version = env!("CARGO_PKG_VERSION"),
-        "Application scaffold initialized; relay services are not implemented yet"
-    );
-}
+pub use app::{run, run_until};

@@ -66,6 +66,17 @@ See [development](DEVELOPMENT.md#read-only-cargo-validation) for provisioning an
 
 ## Behavioral acceptance
 
+`app::tests` exercises the real daemon composition through modern MCP HTTP and a separate
+mocked Telegram service. It checks completion of a multi-batch startup cleanup before polling,
+shared registration/send/route/ingress/claim/processing/typing/ack state and durable reopen,
+recovered factual notices, terminal webhook-conflict supervision and peer listener retirement.
+Configuration/secret/bind failures start no services; a controlled SQLite write lock makes
+startup cleanup fail before MCP serving or Telegram effects. Fixtures retain bound listeners
+without port-reuse races and use private randomized TMPDIR-aware directories and explicit
+HTTP response gates. `services::typing::tests` also verifies that worker abortion wakes
+supervision without an idle timer. Execution remains pending the dedicated trusted FINALIZE
+suite; graceful accepted-work draining and full acceptance interactions remain later steps.
+
 `routes::tests` exercises real loopback HTTP discovery, native/same-origin clients, bearer auth,
 hostile/duplicate headers, paths, missing/mismatched `Mcp-Method`, required version/capability
 metadata, safe protocol failures and inclusive body bounds with declared/chunked input.
@@ -198,7 +209,7 @@ queries exclude expired routes/replies/receipts before deletion and preserve the
 the default daily interval, exclusive scheduling, shutdown and cancellation between batches.
 Fixtures are private, randomized and TMPDIR-aware. These cases address logical retention in
 specification §§10, 16 and 19; execution awaits the dedicated complete trusted FINALIZE suite.
-Production startup wiring remains separate planned acceptance work.
+Production startup ordering is covered separately by `app::tests` above.
 `services::outbound::tests::typing` also combines actual mocked Telegram HTTP, processing and
 cleanup with a single inbox slot: rollback preserves typing refreshes, and committed retention
 deletion frees the expired cap so a fresh reply can start typing. Controlled time separates

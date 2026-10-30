@@ -24,6 +24,7 @@ use crate::{
 pub struct TypingService {
     state: Arc<Mutex<State>>,
     changed: watch::Sender<()>,
+    failed: watch::Sender<bool>,
     telegram: TelegramClient,
     refresh: Duration,
     maximum_ms: i64,
@@ -64,6 +65,23 @@ impl Drop for State {
     }
 }
 
+// Aborts and panics must wake daemon supervision even before the worker's first poll.
+struct WorkerOutcome(Option<watch::Sender<bool>>);
+
+impl WorkerOutcome {
+    fn complete(mut self) {
+        self.0 = None;
+    }
+}
+
+impl Drop for WorkerOutcome {
+    fn drop(&mut self) {
+        if let Some(failed) = &self.0 {
+            failed.send_replace(true);
+        }
+    }
+}
+
 impl TypingService {
     pub fn new(telegram: TelegramClient, config: &Config) -> Result<Self, AppError> {
         let settings = &config.activity;
@@ -81,6 +99,7 @@ impl TypingService {
         Ok(Self {
             state: Arc::default(),
             changed: watch::channel(()).0,
+            failed: watch::channel(false).0,
             telegram,
             refresh: Duration::from_secs(settings.typing_refresh_seconds),
             maximum_ms: settings.typing_max_duration_seconds as i64 * 1_000,
@@ -88,6 +107,16 @@ impl TypingService {
             chats: config.telegram.allowed_chat_ids.clone(),
             enabled: settings.typing_enabled,
         })
+    }
+
+    /// Event-driven supervision; normal idle retirement and HTTP failures are not fatal.
+    pub(crate) async fn failed(&self) {
+        let mut failed = self.failed.subscribe();
+        while !*failed.borrow_and_update() {
+            if failed.changed().await.is_err() {
+                return;
+            }
+        }
     }
 
     /// Called synchronously after the fenced durable transition, under its database guard.
@@ -133,19 +162,25 @@ impl TypingService {
         }
         if !state.running {
             state.running = true;
+            let outcome = WorkerOutcome(Some(self.failed.clone()));
+            let driver = run(
+                Arc::downgrade(&self.state),
+                self.changed.subscribe(),
+                {
+                    let telegram = self.telegram.clone();
+                    move |chat| {
+                        let telegram = telegram.clone();
+                        async move { telegram.send_chat_action(chat).await }
+                    }
+                },
+                self.refresh,
+            );
             state.worker = Some(
-                tokio::spawn(run(
-                    Arc::downgrade(&self.state),
-                    self.changed.subscribe(),
-                    {
-                        let telegram = self.telegram.clone();
-                        move |chat| {
-                            let telegram = telegram.clone();
-                            async move { telegram.send_chat_action(chat).await }
-                        }
-                    },
-                    self.refresh,
-                ))
+                tokio::spawn(async move {
+                    if driver.await.is_ok() {
+                        outcome.complete();
+                    }
+                })
                 .abort_handle(),
             );
         }
@@ -272,20 +307,23 @@ async fn run<F, Fut>(
     mut changed: watch::Receiver<()>,
     send: F,
     refresh: Duration,
-) where
+) -> Result<(), AppError>
+where
     F: Fn(i64) -> Fut,
     Fut: Future<Output = Result<(), AppError>>,
 {
     let mut pending = FuturesUnordered::new();
     loop {
         let work = {
-            let Some(state) = state.upgrade() else { return };
-            let Ok(mut state) = state.lock() else { return };
+            let Some(state) = state.upgrade() else {
+                return Ok(());
+            };
+            let mut state = state.lock().map_err(|_| AppError::ServiceStopped)?;
             changed.borrow_and_update();
             state.work(Instant::now(), refresh)
         };
         let Work::Active { wake, requests } = work else {
-            return;
+            return Ok(());
         };
         for (chat, cancelled) in requests {
             pending.push(request(chat, cancelled, send(chat)));
@@ -294,8 +332,8 @@ async fn run<F, Fut>(
             biased;
             _ = changed.changed() => {},
             Some((chat, result)) = pending.next(), if !pending.is_empty() => {
-                let Some(state) = state.upgrade() else { return };
-                let Ok(mut state) = state.lock() else { return };
+                let Some(state) = state.upgrade() else { return Ok(()) };
+                let mut state = state.lock().map_err(|_| AppError::ServiceStopped)?;
                 state.in_flight.remove(&chat);
                 if let Some(Err(error)) = result {
                     if let AppError::Telegram(TelegramError::Rejected {

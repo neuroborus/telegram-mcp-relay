@@ -26,6 +26,16 @@ async fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    telegram_mcp_relay::run().await;
-    ExitCode::SUCCESS
+    let mut arguments = std::env::args_os().skip(1);
+    let Some(path) = arguments.next().filter(|_| arguments.next().is_none()) else {
+        eprintln!("Usage: telegram-mcp-relay <config.toml>");
+        return ExitCode::FAILURE;
+    };
+    match telegram_mcp_relay::run(std::path::Path::new(&path)).await {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            tracing::error!(code = error.code(), "Relay stopped");
+            ExitCode::FAILURE
+        }
+    }
 }

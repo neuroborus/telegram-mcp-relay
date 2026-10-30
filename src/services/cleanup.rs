@@ -5,7 +5,7 @@ use std::{
     time::Duration,
 };
 
-use tokio::sync::watch;
+use tokio::sync::{oneshot, watch};
 
 use crate::{
     config::Storage,
@@ -56,7 +56,16 @@ impl CleanupService {
 
     /// Clean on startup, then sleep for the configured interval after each complete sweep.
     /// Cancellation can stop between transactions; the next run scans durable state anew.
-    pub async fn run(&self, mut shutdown: watch::Receiver<bool>) -> Result<(), AppError> {
+    pub async fn run(&self, shutdown: watch::Receiver<bool>) -> Result<(), AppError> {
+        self.run_ready(shutdown, None).await
+    }
+
+    /// Notify composition only after the complete startup sweep and reclamation succeed.
+    pub(crate) async fn run_ready(
+        &self,
+        mut shutdown: watch::Receiver<bool>,
+        ready: Option<oneshot::Sender<()>>,
+    ) -> Result<(), AppError> {
         let admission = self
             .database
             .lock()
@@ -75,11 +84,11 @@ impl CleanupService {
                     }
                 }
             } => Ok(()),
-            result = self.consume() => result,
+            result = self.consume(ready) => result,
         }
     }
 
-    async fn consume(&self) -> Result<(), AppError> {
+    async fn consume(&self, mut ready: Option<oneshot::Sender<()>>) -> Result<(), AppError> {
         loop {
             let mut sweep = CleanupSweep::new((self.now)()?)?;
             loop {
@@ -108,6 +117,9 @@ impl CleanupService {
                 if usage.free_pages == 0 {
                     break;
                 }
+            }
+            if let Some(ready) = ready.take() {
+                let _ = ready.send(());
             }
             tokio::time::sleep(self.interval).await;
         }

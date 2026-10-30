@@ -2,17 +2,16 @@
 
 ## Current status
 
-The root Rust crate contains a small binary and a shared library entry point. The binary uses
-Tokio's current-thread runtime and initializes structured `tracing` diagnostics on stderr.
-The library logs the scaffold status and returns without opening sockets or creating files.
-The library provides explicit SQLite initialization and session/route operations, but the
-binary does not open it.
-The library provides a bounded Telegram HTTP client and text/document delivery with durable
-reply routes. A protected library MCP transport is available; production relay wiring remains
-pending. The accepted HTTP adapter's synthetic tests passed in Runner's complete workspace test suite,
-as described below.
-Library reply ingestion authorizes input and commits replies/dispositions with the cursor.
-A cancellable single-consumer long poller now drives it; production startup remains later work.
+The binary now loads one TOML path and runs the shared library composition on Tokio's
+current-thread runtime, with structured `tracing` diagnostics on stderr. It wires protected
+SQLite, the bounded Telegram client, text/document delivery, the shared protected MCP endpoint,
+one reply poller, typing, notices and retention/reclamation. Startup and supervision are
+described under [runtime and ownership](#runtime-and-ownership); graceful accepted-send
+draining and process signal handling remain separate planned work.
+The accepted HTTP adapter's synthetic tests passed in Runner's complete workspace test suite,
+as described below. New composition tests await FINALIZE.
+Reply ingestion authorizes input and commits replies/dispositions with the cursor.
+A cancellable single-consumer long poller drives it.
 Bounded library inbox snapshots, pre-processing claims, durable processing-start,
 explicit reconciliation and acknowledgment operations are available. MCP registration and
 outbound tools, read-only inbox resources and inbox/processing/acknowledgment tools are
@@ -22,12 +21,12 @@ one shared, capped typing scheduler in the library.
 Durable notice-attempt arbitration and one bounded factual-notice dispatcher are available
 in the library, including service-Reply loop suppression across restart and uncertain sends.
 Indexed bounded retention cleanup, incremental disk reclamation and a startup/daily library
-scheduler are available; production wiring remains later work.
+scheduler are included in daemon composition.
 
 The library now provides centralized validated TOML settings and typed, redacted startup
 errors in `config`/`error`, with protected Unix secret resolution under `config::secrets`.
-Parsing has no side effects; secret loading is explicit. The binary remains a scaffold;
-production startup composition is a later step. See [configuration](CONFIGURATION.md).
+Parsing has no side effects; startup resolves secrets before opening storage or listeners.
+See [configuration](CONFIGURATION.md).
 
 Pure title normalization and outbound formatting now live in `domain::outbound`, with typed
 length errors in `error`. These functions perform no network or database effects. Text delivery
@@ -138,7 +137,7 @@ cookies and client correlation headers are removed before SDK dispatch. HTTP rej
 static; JSON-RPC failures retain codes, IDs and structured negotiation data with safe messages.
 Binary diagnostics suppress rmcp targets, whose upstream logs can contain raw metadata;
 library embedders must retain this filter. New synthetic HTTP tests await FINALIZE; no named
-client compatibility, live Telegram or production startup is claimed.
+client compatibility or live Telegram behavior is claimed.
 
 ## MCP registration and outbound tools
 
@@ -167,7 +166,7 @@ errors retain byte limits/counts; Telegram rejections retain numeric code/retry 
 Uncertain delivery and confirmed-send bookkeeping failure remain distinct and explicitly
 forbid automatic resending. Supplied paths, keys, bodies and upstream descriptions are never
 included in errors. Synthetic MCP-to-mocked-Telegram tests await FINALIZE; no external client
-interoperability or runnable daemon is claimed.
+interoperability is claimed.
 
 ## MCP inbox resources and reply tools
 
@@ -240,7 +239,7 @@ Clients read SQLite-backed resources or claim through `telegram_inbox`, includin
 reconnect/restart; signals are neither persistent nor replayed and never claim or acknowledge.
 There is no guarantee that a host wakes an idle LLM. Actual HTTP protocol tests are defined in
 [testing](TESTING.md); their execution remains pending FINALIZE. No named client or live
-Telegram interoperability is claimed. Production daemon composition remains later work.
+Telegram interoperability is claimed.
 
 ## Bounded asks
 
@@ -364,7 +363,8 @@ Rollback preserves both durable replies and RAM activity/caps.
 After deletion, the scheduler snapshots the free-list count and yields before each separate
 reclamation transaction. This finite initial page budget prevents concurrent churn from
 extending the sweep indefinitely. Remaining free pages can be reused by ordinary writes and
-are reconsidered next sweep. The binary remains a scaffold; daemon startup supervision is pending.
+are reconsidered next sweep. Daemon startup waits for the entire first sweep before starting
+polling, notices or MCP serving, retaining the same cleanup lease for periodic maintenance.
 
 ## Physical disk maintenance
 
@@ -403,7 +403,7 @@ Usage is a snapshot rather than peak telemetry or reserved disk space, and exclu
 metadata, snapshots, logs and user-owned outbound sources. Filesystem allocation rounding can
 exceed file lengths. The private directory and same-user single-process ownership remain trust
 requirements; concurrent external writers/replacement invalidate accounting assumptions.
-Daemon wiring and measured runtime/peak disk behavior remain pending.
+Measured runtime/peak disk behavior remains pending.
 
 ## Session and route persistence
 
@@ -513,8 +513,9 @@ no live upload or runtime memory measurement is claimed.
 `clients::telegram::TelegramClient` owns one reusable reqwest/rustls pool; clones share it.
 The production constructor fixes `https://api.telegram.org`, disables proxy discovery,
 redirects and reqwest retries, and retains no transport errors or Telegram descriptions.
-Only crate tests can construct a mock endpoint; TOML has no API override. No production
-startup path contacts Telegram yet. The delivery service owns title formatting,
+Only crate tests can construct a mock endpoint; TOML has no API override. Production
+startup shares that client across polling, delivery, typing and notices. The delivery service
+owns title formatting,
 destination authorization, capacity reservations and durable routes for text/document sends.
 
 The adapter provides `getUpdates`, `getWebhookInfo`, plain `sendMessage`, streamed
@@ -619,7 +620,7 @@ Success records only the composite notice message ID on the existing attempt, ne
 ordinary route or session activity. Rejection, ambiguous delivery, cancellation and failed
 success bookkeeping cannot authorize replay. Rate-limit delays postpone other notice attempts
 without retrying the consumed one. Shutdown, loss of the supervisor or dropping the run future
-cancels the current request and releases admission. Production composition remains later work.
+cancels the current request and releases admission. Daemon supervision owns this scheduler.
 
 Ingress silently commits Replies to retained composite notice IDs as ignored. If the success
 ID was lost, bot-authored quoted text matching the reserved service wording (including an old
@@ -681,7 +682,7 @@ transaction failure preserves the reply and ownership; no valid records are evic
 
 `OutboundService::typing` exposes one shared `services::typing::TypingService` for sender clones,
 `InboxService::with_typing` and `CleanupService::with_typing`. `McpHandler` connects sender/inbox
-activity once for all request factories; daemon cleanup wiring remains pending.
+activity once for all request factories; daemon cleanup attaches that same typing handle.
 Only a successful durable `processing(active=true)` enables activity. Receipt, claims, reads,
 waits and registration never start typing. A new reconciliation rotation stops the previous
 RAM activity; an explicit active call with the rotated token resumes within the original
@@ -710,7 +711,8 @@ Admission never evicts remembered caps.
 Cooldowns and outstanding request futures are bounded by the allowlisted chats.
 At idle the task exits, with no periodic timer for retained caps. The last shared handle
 cancels the worker; a new service starts empty. Typing expiry affects no durable processing/ack state,
-wait or agent execution, and sends no notice. Production supervision remains later work.
+wait or agent execution, and sends no notice. Daemon supervision observes unexpected worker
+abort/panic or scheduler-state failure through a bounded watch signal, without an idle timer.
 
 ## Telegram long polling
 
@@ -742,10 +744,37 @@ After the client's finite read retries, transient failures use quiet exponential
 jitter (one to 30 seconds locally); `retry_after` can extend that delay and is never shortened.
 Storage pressure uses the same bounded local backoff. Shutdown, loss of the supervisor's watch
 sender or dropping the run future cancels HTTP and waits, releases the lease and preserves
-committed replies/cursor. The next consumer resumes from SQLite. Production supervision and
-shutdown draining of admitted sends remain later steps. New poller tests await FINALIZE.
+committed replies/cursor. The next consumer resumes from SQLite. Daemon supervision stops peer
+services on terminal poll failure; shutdown draining of admitted sends remains a later step.
+New poller tests await FINALIZE.
 
 ## Runtime and ownership
+
+`app::run` loads the supplied configuration path, resolves protected secrets, opens one SQLite
+connection, pins export roots and constructs all services before binding the loopback listener.
+The same `Arc<Mutex<Database>>` reaches MCP handlers, outbound delivery, ingress, cleanup and
+notices. All Telegram adapters clone one reusable client. Post-commit subscription/wait
+signals remain database-owned; no extra relay or periodic inbox reader is needed.
+
+One fixed supervisor owns cleanup, polling, notices, MCP serving and a typing-failure observer.
+Cleanup retains its exclusive lease and completes startup deletion/reclamation before the
+other loops start. Each loop remains bounded by its existing admission policy; these fixed
+supervisors are additional to `limits.background_tasks` admitted sends. The typing scheduler
+still starts lazily on confirmed processing, merges chats and retires when idle. Restart
+constructs empty RAM typing state rather than replaying durable processing into activity.
+
+An unexpected service exit or panic fails the composition, cancels its peers and awaits their
+retirement. Safe diagnostics include only static service/error codes and package version;
+join panic payloads, settings, secrets and paths are never formatted by supervision.
+Construction/bind failure starts no worker; failed startup cleanup starts no serving or
+Telegram activity. Initialization may leave a private database/token file; startup never
+deletes or repairs operator files to roll back an error.
+
+`app::run_until` accepts a host cancellation future, stops the loops and retires owned service
+tasks. Dropping it cancels the SDK and aborts its task set. Complete graceful draining of
+detached accepted sends and OS signal integration remain the next shutdown step. Until then,
+process termination can interrupt admitted bookkeeping, as can a crash. Composition tests use
+the same private constructor with a mocked client; production exposes no endpoint override.
 
 One Rust binary serves concurrent MCP clients at a loopback Streamable HTTP endpoint and
 owns one Telegram long-poll consumer, one reusable HTTP client and one embedded SQLite store.

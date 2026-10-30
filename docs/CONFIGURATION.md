@@ -1,8 +1,11 @@
 # Configuration and Secrets
 
 The library provides `Config::load`, side-effect-free `Config::parse` and explicit
-`Config::load_secrets`, with no network I/O. Binary startup wiring is pending; the scaffold
-still logs and exits. Start with the [synthetic example](../config/relay.example.toml);
+`Config::load_secrets`, with no network I/O in these operations. The binary takes exactly one
+TOML path: `telegram-mcp-relay /absolute/path/to/config.toml`. Startup validates settings and
+secrets, opens protected SQLite/export roots and binds the configured listener, then completes
+startup cleanup before serving MCP or starting Telegram activity. Start with the
+[synthetic example](../config/relay.example.toml);
 unlisted settings retain [central defaults](../src/config.rs). Unknown fields, inline
 credentials and API overrides fail. TOML input is bounded to 64 KiB.
 
@@ -42,7 +45,8 @@ Library notice arbitration uses `delivery.processing_start_grace_seconds` (defau
 durable receipt and honors `notifications.notify_unconfirmed_processing` and
 `notifications.notify_unroutable` (both default true). Disabled categories consume no attempts.
 The library dispatcher sweeps once per second, sends one admitted attempt at a time and
-rechecks the current chat allowlist. Production scheduler wiring remains pending.
+rechecks the current chat allowlist. Daemon composition owns this scheduler and cleanup,
+and shares one typing scheduler between processing, sends and retention deletion.
 
 `telegram_ask` honors `delivery.wait_fallback_enabled` (default true) and
 `delivery.wait_timeout_seconds` (default 600), starting its deadline after send bookkeeping.
@@ -57,7 +61,8 @@ whose targets remain inside a root), nonregular and unreadable files. Keep expor
 and their contents trusted; confinement does not prevent same-user hard links, mounted content
 or in-place writes. Files with all read bits cleared are rejected even under elevated privileges.
 Only sanitized, at-most-128-byte ASCII basenames are prepared for upload; errors omit paths.
-Document streaming and its enforcement of the opening size during mutation remain pending.
+Document streaming enforces the opening size during mutation; see
+[document delivery](ARCHITECTURE.md#document-delivery).
 Final outbound text/captions always have the fixed 1,000-scalar
 policy. Positive request/task/subscription/inbox/payload/metadata budgets reject excessive values
 and inconsistent capacities. SQLite's physical budget must exceed payload plus metadata budgets;
@@ -106,5 +111,7 @@ database copy or other temporary disk file. The startup/daily library scheduler 
 most 32 free-list pages per transaction, yielding between commits under a fixed sweep budget.
 No new configuration setting is required. See
 [disk maintenance](ARCHITECTURE.md#physical-disk-maintenance) for usage accounting, recovery,
-filesystem bounds and limitations. Production wiring remains pending.
+filesystem bounds and limitations. OS signal handling and graceful draining of accepted sends
+remain the next shutdown step; termination currently has the same bookkeeping limitations as
+process loss. Embedders can stop service loops through `app::run_until`.
 See [architecture](ARCHITECTURE.md#session-and-route-persistence).
