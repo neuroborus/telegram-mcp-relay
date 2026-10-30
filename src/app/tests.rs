@@ -26,6 +26,7 @@ use crate::{
 };
 
 mod conversations;
+mod recovery;
 
 struct Fixture {
     directory: PathBuf,

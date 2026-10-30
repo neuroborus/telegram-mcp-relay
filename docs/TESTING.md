@@ -99,6 +99,20 @@ contains only SQLite, with no outbound bodies, captions, quoted original text, f
 local paths. The bounded mock accepts actual multipart uploads; response gates replace sleeps.
 Execution remains pending the complete trusted FINALIZE suite.
 
+`app::tests::recovery` combines actual modern subscriptions/listen, Telegram long polling,
+an ask and two competing inbox consumers with three reply slots and one-slot event queues.
+It asserts three distinct durable reply IDs and fencing tokens, resource invalidations despite
+the waiter, one winning resume reconciliation and unchanged first-start identity. A discarded
+acknowledgment response, daemon restart, registration resume and Telegram redelivery recover
+from the same processing record/receipt; old tokens remain fenced and completion stays explicit.
+A separate scenario models the crash gap with an independent SQLite writer that cannot signal
+the daemon's live interests, while its earlier poll remains unresolved. After restart, the
+first offset and initial subscription invalidation recover the one pending reply with its
+original ID; redelivery does not duplicate it. This models lost post-commit wakeups rather
+than injecting a process kill between synchronous commit/publish instructions. Fixtures use
+the production composition, private TMPDIR-aware storage and explicit HTTP response gates.
+Execution remains pending the dedicated complete trusted FINALIZE suite.
+
 `services::outbound::tests` holds admitted document responses across admission closure, proving
 the drain waits for success, rejection, uncertainty and failed persistence, with released task/
 send/route capacity and no replay. A synthetic post-send panic with a disconnected caller must
@@ -111,8 +125,8 @@ retire while clients remain connected, and closed tool admission rejects later s
 Existing transport shutdown and poller lease/cancellation cases cover stalled clients and
 uncommitted input without repeating them.
 These cases address shutdown and bounded-resource recovery in specification §§3, 6, 11, 16 and 19.
-Execution remains pending the dedicated trusted FINALIZE suite; full-composition subscription,
-ask and recovery acceptance interactions remain the next step.
+Execution remains pending the dedicated trusted FINALIZE suite; subscription, ask and recovery
+acceptance interactions are defined in `app::tests::recovery` above.
 
 `routes::tests` exercises real loopback HTTP discovery, native/same-origin clients, bearer auth,
 hostile/duplicate headers, paths, missing/mismatched `Mcp-Method`, required version/capability
@@ -175,9 +189,15 @@ released waiter admission and detached route bookkeeping. Invalid arguments/ques
 rejections and uncertain sends preserve zero-route/no-replay and safe-error behavior.
 Injected claim failure preserves the committed question IDs and recoverable inbox payload,
 reports inbox recovery without resend, and releases waiter admission.
+An undrained bounded two-inbox interest forces slow-listener overflow without relying on OS
+socket buffering. A healthy real SSE listener and ask still receive the same durable reply;
+retiring the slow interest releases admission for reconnect, and competing inbox calls claim
+the other session's reply only once. The disconnect scenarios keep a real subscription active
+through cancellation before/after send and after reply commit, preserving event delivery and
+restart recovery independently of the canceled waiter.
 These cases cover the ask/event/race, timeout and wait-cancellation portions of §§6.2–6.3,
 16 and 19. Fixtures are private and TMPDIR-aware. Execution remains pending FINALIZE;
-full-composition acceptance and named-client interoperability remain later work.
+full-composition interactions are defined above, and named-client interoperability is unverified.
 
 `services::typing::tests` uses controlled time for per-chat merging, independent session/reply
 stops, cooldowns across stop/start races, the original 600-second cap across repeated starts
@@ -392,9 +412,12 @@ without skips. Earlier Native attempts failed before HTTP requests at loopback `
 
 ## Specification §§16/19 coverage map
 
-This maps observable contracts to source-defined proofs, not check receipts. Current changes
-await the complete trusted FINALIZE suite. Focused proofs remain in their owning suites;
-the conversation scenario adds their full-daemon interaction without repeating boundary cases.
+This maps every mandatory section 16 criterion and section 19 requirement group to its
+source-defined behavioral proof or outstanding evidence owner, not to a check receipt.
+Current changes await the complete trusted FINALIZE suite. Focused proofs remain in their
+owning suites; conversation/recovery scenarios add full-daemon interactions without repeating
+boundary cases. Pending documentation, protocol/client evidence and HOST measurements cannot
+be inferred from test source or successful implementation alone.
 
 | Acceptance / traceability contract | Owning proof |
 | --- | --- |
@@ -403,11 +426,19 @@ the conversation scenario adds their full-daemon interaction without repeating b
 | Title graphemes, final scalar/native caption limits, structured rejection without splitting/truncation or effects (§§4.2, 9, 16, 19) | [Outbound domain tests](../src/domain/outbound/tests.rs), [MCP tools](../src/routes/tools.rs) and [ask tests](../src/routes/ask.rs) |
 | Streamed, confined, Reply-routable files without retained outbound history/copies (§§9, 12, 16, 19) | Daemon conversation checks actual multipart contents, routes and persisted files; [file tests](../src/services/files/tests.rs), [document tests](../src/services/outbound/documents.rs) and [upload tests](../src/clients/telegram/upload.rs) retain path-race, mutation and bounded-read proofs |
 | Unknown/expired routes never reassigned; unauthorized input excluded; durable atomic cursor (§§4.3, 10–12, 16, 19) | [Ingress](../tests/ingress.rs), [retention](../tests/retention.rs) and [poller tests](../src/services/polling/tests.rs) |
-| Always-active events, optional bounded wait, shared reply/claim ownership, timeout/disconnect safety (§§5–6, 16, 19) | [Subscription tests](../src/routes/subscriptions.rs) and [ask tests](../src/routes/ask.rs); remaining full-composition race/recovery acceptance is the next step |
-| Durable claims, first processing start, reconciliation, acknowledgment and reconnect recovery (§§6, 10–11, 16, 19) | [Inbox storage tests](../tests/inbox.rs) and [MCP inbox tests](../src/routes/inbox.rs); daemon shutdown tests retain accepted ingress and detached-send proofs |
+| Always-active events, enabled/disabled bounded waits, one reply shared by ask/inbox/resource consumers (§§5–6, 16, 19) | [Daemon recovery](../src/app/tests/recovery.rs), `subscribed_ask_and_inbox_claims_reconcile_and_recover_missed_acknowledgments`; [ask tests](../src/routes/ask.rs) retain disabled waiting, initial recheck and question-targeting proofs |
+| Wait timeout/cancellation never deletes routes/replies, acknowledges work, interrupts agents or emits timeout notices (§§6.2, 11, 16, 19) | [Ask tests](../src/routes/ask.rs), controlled timeout/late-reply recovery and subscribed disconnect cases; [daemon shutdown](../src/app/tests.rs) retains admitted send/ingress draining proofs |
+| Idempotent concurrent claims/start/ack; rotating tokens, explicit reconciliation and missed acknowledgment recovery (§§6, 10–11, 16, 19) | Daemon recovery above; [inbox storage](../tests/inbox.rs) and [MCP inbox](../src/routes/inbox.rs) retain lease, wrong-session, transaction rollback and lost reconciliation-response boundaries |
+| Offline replies and crash after commit before signal/next poll; restart offset and stable IDs without duplicates (§§6, 10–11, 16, 19) | Daemon recovery, `committed_reply_without_a_wakeup_or_next_poll_recovers_after_restart` models the lost-signal gap; [ingress](../tests/ingress.rs) retains atomicity and [poller tests](../src/services/polling/tests.rs) exercise actual restart offsets/redelivery |
+| Subscription reconnection reads SQLite instead of replaying events; slow/disconnected clients remain bounded (§§6.1, 16, 19) | Daemon recovery; [subscription tests](../src/routes/subscriptions.rs) retain setup-gap/disconnect/overflow proofs; [ask tests](../src/routes/ask.rs), `slow_listener_overflow_preserves_a_healthy_stream_waiter_and_claims` isolates overflow from healthy events and waits |
 | Confirmed capped typing, no idle refresh, factual once-only notices without loops (§§7–8, 16, 19) | [Typing tests](../src/services/typing/tests.rs), [notice storage tests](../tests/notices.rs) and [notice dispatch tests](../src/services/notices/tests.rs) |
 | Independent TTLs, bounded cleanup and physical reclamation without losing valid replies (§§10–11, 16, 19) | [Retention](../tests/retention.rs), [maintenance](../tests/maintenance.rs) and [cleanup scheduler tests](../src/services/cleanup/tests.rs) |
-| Protected single-process composition and local-only transport (§§1–3, 12, 16, 19) | [Application tests](../src/app/tests.rs) and [HTTP transport tests](../src/routes/tests.rs); measured resource targets and operational/client evidence remain pending |
+| Protected secrets/roots, loopback defaults and secure MCP transport (§§12–13, 16, 19) | [Configuration tests](../src/config.rs), [secret tests](../src/config/secrets.rs), [storage tests](../tests/storage.rs), file tests above and [HTTP transport tests](../src/routes/tests.rs) cover authorization, Host/Origin, redaction, body/concurrency bounds |
+| One native daemon, one poller, no vendor adapters/agent management, external database, broker, Node.js or Docker requirement; no public HTTPS/webhook needed (§§1–3, 13, 16, 19) | [Application](../src/app.rs), application/poller tests and [architecture](ARCHITECTURE.md) define and exercise the composition; release/setup operational evidence remains pending later steps |
+| Concise agent text/file policy; no periodic agent polling and no universal LLM wake promise (§§2, 6, 14, 16, 19) | Existing [contributor policy](../AGENTS.md); [architecture](ARCHITECTURE.md) documents event/wait limits. Complete copyable installed-user policy and client tool-timeout guidance remain pending the setup step |
+| Telegram at-most-24-hour unconsumed backlog, independent TTLs and reconnect limitations explained to users (§§10–11, 16, 19) | [Architecture](ARCHITECTURE.md) and [configuration](CONFIGURATION.md) document library behavior; README/setup reconciliation remains pending the documentation step |
+| Protocol support and actual client capabilities (§§5–6, 16–19) | [Subscription](../src/routes/subscriptions.rs), transport and daemon recovery fixtures exercise locked rmcp 3.8.0 with synthetic MCP 2026-07-28 HTTP clients. Older revisions are unsupported; named-client interoperability, live Telegram and automatic host wake are unverified |
+| Near-zero idle CPU, best-effort idle RSS below approximately 30 MB, startup, near-limit upload peak RSS, stripped locked release size and dependency profile (§§3, 9, 16–19) | Bounded-read/idle-scheduler behavior has focused proofs above; quantitative release/build/probe and HOST evidence remain pending the measurement/release steps. Unit tests do not establish runtime resource targets |
 
 ## Measurements and check ownership
 

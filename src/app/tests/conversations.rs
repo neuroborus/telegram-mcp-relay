@@ -9,7 +9,7 @@ const TEXT_C: &str = "outbound-only text for thread C";
 const CAPTION: &str = "outbound-only document description";
 const DOCUMENT: &[u8] = b"outbound-only document bytes\0\xff\n";
 
-fn accepted(id: i64) -> Value {
+pub(super) fn accepted(id: i64) -> Value {
     json!({"ok":true,"result":{"message_id":id,"chat":{"id":-101},
         "date":unix_millis().unwrap()/1000}})
 }
@@ -21,7 +21,7 @@ fn assert_document(request: &TelegramRequest, caption: &str) {
     assert_eq!(request.part("document"), DOCUMENT);
 }
 
-async fn snapshot(address: SocketAddr, session: &Value) -> Value {
+pub(super) async fn snapshot(address: SocketAddr, session: &Value) -> Value {
     let result = rpc(
         address,
         "resources/read",
@@ -31,7 +31,7 @@ async fn snapshot(address: SocketAddr, session: &Value) -> Value {
     serde_json::from_str(result["contents"][0]["text"].as_str().unwrap()).unwrap()
 }
 
-fn incoming(update: i64, parent: i64, text: Option<&str>) -> Value {
+pub(super) fn incoming(update: i64, parent: i64, text: Option<&str>) -> Value {
     let mut message = json!({"message_id":update+1000,"date":1,"chat":{"id":-101},
         "from":{"id":7,"is_bot":false},"reply_to_message":{"message_id":parent,
             "from":{"id":99,"is_bot":true}}});

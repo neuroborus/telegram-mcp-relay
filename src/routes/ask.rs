@@ -273,6 +273,91 @@ async fn waiter_and_events_share_one_reply_and_inbox_cannot_claim_it_twice() {
 }
 
 #[tokio::test]
+async fn slow_listener_overflow_preserves_a_healthy_stream_waiter_and_claims() {
+    let mut fixture = Fixture::new();
+    fixture.config.limits.concurrent_requests = 8;
+    fixture.config.limits.subscriptions = 2;
+    fixture.config.limits.subscription_queue = 1;
+    fixture.config.limits.waiters = 1;
+    let mut mock = Mock::new(&fixture.config).await;
+    let (database, state) = mock.shared(&fixture);
+    let http = fixture.serve(state, None).await;
+    let a = http.register(json!({"title":"Same"})).await;
+    let b = http.register(json!({"title":"Same"})).await;
+    let key = a["session_key"].as_str().unwrap();
+    let other_key = b["session_key"].as_str().unwrap();
+    let uri = a["inbox_uri"].as_str().unwrap();
+    let other_uri = b["inbox_uri"].as_str().unwrap();
+    route(&database, other_key, 6);
+    let hub = database.lock().unwrap().inbox_notifications.clone();
+    // Retain a real bounded interest without draining it; OS socket buffers cannot
+    // decide when this synthetic slow listener saturates.
+    let slow = hub.subscribe(vec![key.into(), other_key.into()]).unwrap();
+    let filter = json!({"resourceSubscriptions":[uri]});
+    let mut healthy = http.listen(filter.clone(), filter).await;
+    healthy.updated(uri).await;
+    let asked = http.start_ask(key, "Question");
+    mock.accept(&database, 7).await;
+    let ingress = IngressService::new(&fixture.config).unwrap();
+    // No yield between distinct commits: only the undrained two-inbox interest overflows.
+    ingest(&ingress, &database, 11, 7).unwrap();
+    ingest(&ingress, &database, 12, 6).unwrap();
+    assert!(slow.stopped.is_cancelled());
+    assert!(hub.subscribe(vec![key.into()]).is_err());
+    let result = asked.await.unwrap();
+    assert_eq!(result["isError"], false);
+    let claim = &result["structuredContent"]["reply"];
+    assert_eq!(claim["telegram_update_id"], 11);
+    healthy.updated(uri).await;
+    assert_eq!(
+        http.snapshot(uri).await["replies"][0]["reply_id"],
+        claim["reply_id"]
+    );
+    assert_eq!(
+        http.snapshot(other_uri).await["replies"][0]["state"],
+        "pending"
+    );
+    drop(slow);
+    // Admission released by retirement can immediately serve a real reconnect/catch-up.
+    let filter = json!({"resourceSubscriptions":[other_uri]});
+    let mut recovered = http.listen(filter.clone(), filter).await;
+    recovered.updated(other_uri).await;
+    let (first, second) = tokio::join!(
+        http.tool("telegram_inbox", json!({"session_key":other_key})),
+        http.tool("telegram_inbox", json!({"session_key":other_key})),
+    );
+    assert_eq!(first["isError"], false);
+    assert_eq!(second["isError"], false);
+    let claims: Vec<_> = [first, second]
+        .into_iter()
+        .flat_map(|r| {
+            r["structuredContent"]["replies"]
+                .as_array()
+                .unwrap()
+                .clone()
+        })
+        .collect();
+    assert_eq!(claims.len(), 1);
+    assert_eq!(claims[0]["telegram_update_id"], 12);
+    assert_ne!(claims[0]["reply_id"], claim["reply_id"]);
+    recovered.updated(other_uri).await;
+    let reopened = Database::open(&fixture.config.storage, &fixture.config.limits).unwrap();
+    for (key, expected) in [(key, claim), (other_key, &claims[0])] {
+        let page = reopened
+            .inbox_snapshot(key, None, 10, unix_millis().unwrap())
+            .unwrap();
+        assert_eq!(page.replies.len(), 1);
+        assert_eq!(
+            page.replies[0].reply_id,
+            expected["reply_id"].as_str().unwrap()
+        );
+        assert_eq!(page.replies[0].state, ReplyState::Claimed);
+        assert_eq!(page.replies[0].processing_started_at, None);
+    }
+    assert!(mock.requests.try_recv().is_err());
+}
+
+#[tokio::test]
 async fn initial_recheck_and_competing_inbox_claims_preserve_question_targeting() {
     for inbox_wins in [false, true] {
         let fixture = Fixture::new();
@@ -513,6 +598,15 @@ impl ServerHandler for Observed {
     fn supported_protocol_versions(&self) -> std::borrow::Cow<'static, [ProtocolVersion]> {
         self.state.supported_protocol_versions()
     }
+    fn accepted_subscription_filter(
+        &self,
+        filter: &SubscriptionFilter,
+    ) -> Option<SubscriptionFilter> {
+        self.state.accepted_subscription_filter(filter)
+    }
+    async fn listen(&self, context: SubscriptionContext) -> Result<(), ErrorData> {
+        self.state.listen(context).await
+    }
     async fn call_tool(
         &self,
         request: rmcp::model::CallToolRequestParams,
@@ -528,6 +622,8 @@ async fn disconnect_cancels_waiter_but_an_admitted_send_finishes_and_replies_rec
     for stage in 0..3 {
         let mut fixture = Fixture::new();
         fixture.config.limits.waiters = 1;
+        fixture.config.limits.concurrent_requests = 4;
+        fixture.config.limits.subscriptions = 1;
         let mut mock = Mock::new(&fixture.config).await;
         let (database, state) = mock.shared(&fixture);
         let session = mock.session(&database);
@@ -535,6 +631,10 @@ async fn disconnect_cancels_waiter_but_an_admitted_send_finishes_and_replies_rec
         let http = fixture
             .serve(Arc::new(Observed { state, ended }), None)
             .await;
+        let uri = session.inbox_uri();
+        let filter = json!({"resourceSubscriptions":[uri]});
+        let mut events = http.listen(filter.clone(), filter).await;
+        events.updated(&uri).await;
         let mut body = message("tools/call");
         body["params"]["name"] = "telegram_ask".into();
         body["params"]["arguments"] = json!({"session_key":session.session_key,"text":"Question"});
@@ -568,6 +668,8 @@ async fn disconnect_cancels_waiter_but_an_admitted_send_finishes_and_replies_rec
         if stage < 2 {
             ingest(&ingress, &database, 11, 7).unwrap();
         }
+        // Disconnecting an ask releases only its waiter; this subscription stays live.
+        events.updated(&uri).await;
         let reopened = Arc::new(Mutex::new(
             Database::open(&fixture.config.storage, &fixture.config.limits).unwrap(),
         ));
