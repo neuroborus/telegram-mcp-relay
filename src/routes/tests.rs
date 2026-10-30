@@ -20,6 +20,8 @@ use tokio::{
 
 use crate::repositories::Database;
 
+#[path = "ask.rs"]
+mod ask;
 #[path = "inbox.rs"]
 mod inbox;
 #[path = "subscriptions.rs"]

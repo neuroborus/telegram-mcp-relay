@@ -34,6 +34,14 @@ an incomplete private file requiring operator removal. No parent directories are
 Wait/grace settings accept 1–86,400 seconds; claims 1–600; independent typing duration 1–600
 with refresh 1–5 seconds no longer than that duration. Long polling defaults to 45 (1–50).
 Independent session/route/reply TTLs default to 30 days (1–3,650); cleanup to 24 hours (1–168).
+
+`telegram_ask` honors `delivery.wait_fallback_enabled` (default true) and
+`delivery.wait_timeout_seconds` (default 600), starting its deadline after send bookkeeping.
+`limits.waiters` (default 16, at most `limits.concurrent_requests`) reserves armed asks before
+sending, independently of subscriptions. Disabled waits return immediately after sending;
+events and inbox recovery remain active. See [bounded asks](ARCHITECTURE.md#bounded-asks)
+for cancellation, errors and client timeout requirements.
+
 Uploads accept 1–50 decimal MB, with an inclusive ceiling of 50,000,000 bytes or the lower
 configured limit. Opening rejects relative paths, parent traversal, symlinks (including ones
 whose targets remain inside a root), nonregular and unreadable files. Keep exported directories

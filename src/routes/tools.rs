@@ -149,7 +149,8 @@ async fn tools_have_typed_schemas_and_registration_survives_separate_requests_an
             "telegram_send_file",
             "telegram_inbox",
             "telegram_processing",
-            "telegram_ack"
+            "telegram_ack",
+            "telegram_ask"
         ]
     );
     for (tool, required) in tools.iter().zip([
@@ -159,6 +160,7 @@ async fn tools_have_typed_schemas_and_registration_survives_separate_requests_an
         json!(["session_key"]),
         json!(["session_key", "reply_id", "claim_token"]),
         json!(["session_key", "reply_id", "claim_token"]),
+        json!(["session_key", "text"]),
     ]) {
         assert_eq!(tool["inputSchema"]["type"], "object");
         assert_eq!(tool["inputSchema"]["additionalProperties"], false);

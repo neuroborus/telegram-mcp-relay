@@ -11,7 +11,8 @@ endpoint is available through the [library](docs/ARCHITECTURE.md#protected-mcp-t
 typed [registration and outbound tools](docs/ARCHITECTURE.md#mcp-registration-and-outbound-tools),
 [durable inbox resources and reply tools](docs/ARCHITECTURE.md#mcp-inbox-resources-and-reply-tools)
 and [modern resource subscriptions](docs/ARCHITECTURE.md#mcp-resource-subscriptions)
-are available in the library; asks, typing and runnable relay setup remain pending.
+are available in the library, alongside [bounded asks](docs/ARCHITECTURE.md#bounded-asks).
+Typing and runnable relay setup remain pending.
 The library also implements validated [configuration and protected secrets](docs/CONFIGURATION.md);
 the binary does not load configuration yet.
 Pure [outbound formatting rules](docs/ARCHITECTURE.md#outbound-formatting) normalize session

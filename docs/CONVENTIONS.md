@@ -17,7 +17,7 @@ and lockfile. Root workspace checks do not cover it; see [testing](TESTING.md).
 | `src/dto.rs` | Typed MCP tool requests/results and their SDK-generated schemas |
 | `src/handlers.rs`, `src/handlers/`, `src/routes.rs`, `src/routes/` | Shared SDK handler state, thin typed tools/read-only inbox resources, bounded modern subscriptions, protected HTTP transport and its tests |
 | `src/domain/` | Session/title/text rules, reply state and retention invariants |
-| `src/services.rs`, `src/services/` | Text/document delivery, confined outbound file handles, authorized reply ingestion, one restart-safe poller, bounded inbox claims and durable processing/completion |
+| `src/services.rs`, `src/services/` | Text/document delivery, bounded question waits, confined outbound file handles, authorized reply ingestion, one restart-safe poller, bounded inbox claims and durable processing/completion |
 | `src/repositories.rs`, `src/repositories/` | SQLite initialization/migrations, transactions, queries and bounded post-commit inbox interests |
 | `src/clients/` | Direct Telegram HTTP client and transport DTOs |
 | `tests/`, `tests/fixtures/` | Cross-module/MCP/mock-Telegram tests and sanitized inputs |

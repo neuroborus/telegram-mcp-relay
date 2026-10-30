@@ -117,7 +117,7 @@ impl McpHandler {
     }
 }
 
-fn reply(reply: InboxReply) -> Result<Reply, AppError> {
+pub(super) fn reply(reply: InboxReply) -> Result<Reply, AppError> {
     Ok(Reply {
         reply_id: reply.reply_id,
         telegram_update_id: reply.telegram_update_id,

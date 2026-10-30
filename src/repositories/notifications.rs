@@ -12,9 +12,11 @@ pub(crate) struct InboxNotifications {
     interests: Arc<Mutex<Vec<Interest>>>,
     pub(crate) limit: usize,
     queue: usize,
+    waiter_limit: usize,
 }
 
 struct Interest {
+    waiter: bool,
     keys: Vec<String>,
     pending: Vec<String>,
     sender: mpsc::Sender<String>,
@@ -36,10 +38,14 @@ impl InboxNotifications {
         {
             return Err(AppError::InvalidConfig("limits subscriptions"));
         }
+        if !(1..=1_024).contains(&limits.waiters) {
+            return Err(AppError::InvalidConfig("limits.waiters"));
+        }
         Ok(Self {
             interests: Arc::default(),
             limit: limits.subscriptions as usize,
             queue: limits.subscription_queue as usize,
+            waiter_limit: limits.waiters as usize,
         })
     }
 
@@ -48,16 +54,35 @@ impl InboxNotifications {
         if keys.is_empty() || keys.len() > self.limit {
             return Err(AppError::InvalidRequest("inbox subscriptions"));
         }
+        self.interest(keys, false)
+    }
+
+    /// Reserve before sending. Waiters cannot consume resource-listener admission.
+    pub(crate) fn waiter(&self, key: String) -> Result<InboxSubscription, AppError> {
+        self.interest(vec![key], true)
+    }
+
+    fn interest(&self, keys: Vec<String>, waiter: bool) -> Result<InboxSubscription, AppError> {
         let mut interests = self
             .interests
             .lock()
             .map_err(|_| AppError::McpUnavailable)?;
-        if interests.len() >= self.limit {
-            return Err(AppError::McpUnavailable);
+        let limit = if waiter {
+            self.waiter_limit
+        } else {
+            self.limit
+        };
+        if interests.iter().filter(|i| i.waiter == waiter).count() >= limit {
+            return Err(if waiter {
+                AppError::WaitCapacity
+            } else {
+                AppError::McpUnavailable
+            });
         }
-        let (sender, changes) = mpsc::channel(self.queue);
+        let (sender, changes) = mpsc::channel(if waiter { 1 } else { self.queue });
         let stopped = CancellationToken::new();
         interests.push(Interest {
+            waiter,
             keys,
             pending: Vec::new(),
             sender: sender.clone(),
@@ -162,6 +187,15 @@ mod tests {
 
     #[test]
     fn invalid_budgets_and_excessive_interest_sets_are_rejected() {
+        for waiters in [0, 1_025] {
+            assert!(
+                InboxNotifications::new(&Limits {
+                    waiters,
+                    ..Limits::default()
+                })
+                .is_err()
+            );
+        }
         for (subscriptions, subscription_queue) in [(0, 1), (1, 0), (1_025, 1), (1, 1_025)] {
             assert!(
                 InboxNotifications::new(&Limits {

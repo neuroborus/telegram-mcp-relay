@@ -64,7 +64,10 @@ pub enum AppError {
     TextTooLong(TextTooLong),
     InvalidRequest(&'static str),
     FileUnavailable,
-    FileTooLarge { limit_bytes: u64, actual_bytes: u64 },
+    FileTooLarge {
+        limit_bytes: u64,
+        actual_bytes: u64,
+    },
     SessionNotFound,
     SessionIdentityConflict,
     InvalidClaim,
@@ -73,6 +76,11 @@ pub enum AppError {
     PollerActive,
     McpUnavailable,
     SendCapacity,
+    WaitCapacity,
+    AskWaitFailed {
+        telegram_chat_id: i64,
+        outbound_message_id: i64,
+    },
     SendBookkeepingFailed,
     RandomUnavailable,
     StorageUnavailable,
@@ -103,6 +111,8 @@ impl AppError {
             Self::PollerActive => "TELEGRAM_POLL_ACTIVE",
             Self::McpUnavailable => "MCP_UNAVAILABLE",
             Self::SendCapacity => "SEND_CAPACITY",
+            Self::WaitCapacity => "WAIT_CAPACITY",
+            Self::AskWaitFailed { .. } => "ASK_WAIT_FAILED",
             Self::SendBookkeepingFailed => "SEND_BOOKKEEPING_FAILED",
             Self::RandomUnavailable => "RANDOM_UNAVAILABLE",
             Self::StorageUnavailable => "STORAGE_UNAVAILABLE",
@@ -157,6 +167,14 @@ impl fmt::Display for AppError {
             }
             Self::McpUnavailable => write!(f, "{}: local HTTP transport unavailable", self.code()),
             Self::SendCapacity => write!(f, "{}: admitted send limit reached", self.code()),
+            Self::WaitCapacity => {
+                write!(f, "{}: admitted question wait limit reached", self.code())
+            }
+            Self::AskWaitFailed { .. } => write!(
+                f,
+                "{}: question sent and routed, but waiting failed; recover through the inbox and do not resend automatically",
+                self.code()
+            ),
             Self::SendBookkeepingFailed => write!(
                 f,
                 "{}: Telegram accepted the send, but its reply route could not be saved; do not resend automatically",

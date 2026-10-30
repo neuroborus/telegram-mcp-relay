@@ -24,7 +24,7 @@ fn shared(fixture: &Fixture) -> (Arc<Mutex<Database>>, Arc<McpHandler>) {
     (database, handler)
 }
 
-fn route(database: &Arc<Mutex<Database>>, key: &str, parent: i64) {
+pub(super) fn route(database: &Arc<Mutex<Database>>, key: &str, parent: i64) {
     let mut database = database.lock().unwrap();
     let reservation = database.reserve_route(key).unwrap();
     let now = unix_millis().unwrap();
@@ -40,7 +40,7 @@ fn update(id: i64, parent: i64) -> Update {
     .unwrap()
 }
 
-fn ingest(
+pub(super) fn ingest(
     ingress: &IngressService,
     database: &Arc<Mutex<Database>>,
     id: i64,
@@ -50,7 +50,7 @@ fn ingest(
     ingress.ingest(&mut database.lock().unwrap(), &update(id, parent), now)
 }
 
-struct Events {
+pub(super) struct Events {
     response: reqwest::Response,
     pending: Vec<u8>,
 }
@@ -84,7 +84,7 @@ impl Events {
         .unwrap()
     }
 
-    async fn updated(&mut self, uri: &str) {
+    pub(super) async fn updated(&mut self, uri: &str) {
         let event = self.next().await;
         assert_eq!(
             event["method"], "notifications/resources/updated",
@@ -100,7 +100,7 @@ impl Events {
 }
 
 impl Http {
-    async fn listen(&self, filter: Value, accepted: Value) -> Events {
+    pub(super) async fn listen(&self, filter: Value, accepted: Value) -> Events {
         let mut request = message("subscriptions/listen");
         request["params"]["notifications"] = filter;
         let response = self.post(request).send().await.unwrap();

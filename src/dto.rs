@@ -55,6 +55,26 @@ pub struct SendResult {
     pub outbound_message_id: i64,
 }
 
+#[derive(Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[schemars(crate = "rmcp::schemars")]
+pub enum AskStatus {
+    Sent,
+    ReplyReceived,
+    WaitTimeout,
+}
+
+#[derive(Serialize, JsonSchema)]
+#[schemars(crate = "rmcp::schemars")]
+pub struct AskResult {
+    pub telegram_chat_id: i64,
+    pub outbound_message_id: i64,
+    /// Sent means waiting is disabled. Timeout grants no permission; later replies remain valid.
+    pub status: AskStatus,
+    /// A claim is not processing or completion. Preserve its reply ID and current token.
+    pub reply: Option<ClaimedReplyResult>,
+}
+
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[schemars(crate = "rmcp::schemars")]

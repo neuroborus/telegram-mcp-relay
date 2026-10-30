@@ -98,7 +98,7 @@ stale/wrong-session fencing and idempotent per-reply completion use the shared t
 Invalid URIs, limits, listing cursors and tool arguments return safe errors without claiming.
 Fixtures honor TMPDIR and use private randomized directories; no live Telegram calls are made.
 Execution remains pending FINALIZE. These cases cover the read/claim/recovery portion of
-specification §§6.3, 16 and 19; subscription/ask interactions remain later acceptance work.
+specification §§6.3, 16 and 19; cross-feature ask interactions are described below.
 
 `routes::tests::subscriptions` defines actual MCP 2026-07-28 POST SSE interactions through
 locked rmcp 3.8.0 and the production handler. It covers accepted URI filters, omitted unknown,
@@ -112,8 +112,24 @@ recovery of offline commits through a fresh handler/database. Pure queue tests i
 prove coalescing, slow-listener isolation, uninterested-session silence, drop-based admission
 release and budget validation. Fixtures are private and TMPDIR-aware; no live Telegram calls are made.
 These tests address subscription/reconnect and bounded slow-client criteria in §§6.1, 16 and 19;
-their execution remains pending the complete trusted FINALIZE suite. Ask/event races and
-named-client interoperability remain later acceptance work.
+their execution remains pending the complete trusted FINALIZE suite. Named-client
+interoperability remains later acceptance work.
+
+`routes::tests::ask` defines actual mocked Telegram sends and modern MCP calls alongside
+resource subscriptions. It covers exact formatted question boundaries, independent waiter
+admission, always-active events with waiting enabled/disabled, one durable reply shared by
+ask/inbox/resource consumers, and an inbox claim winning before a later reply wakes the ask.
+Manual future polling forces a reply to commit before wait setup through a separate database
+connection without a signal, proving initial SQLite catch-up and question-target filtering.
+Controlled time checks the default 600-second deadline and late-reply/restart recovery.
+Explicit HTTP response gates and completion guards cover disconnect during and after sending,
+released waiter admission and detached route bookkeeping. Invalid arguments/questions,
+rejections and uncertain sends preserve zero-route/no-replay and safe-error behavior.
+Injected claim failure preserves the committed question IDs and recoverable inbox payload,
+reports inbox recovery without resend, and releases waiter admission.
+These cases cover the ask/event/race, timeout and wait-cancellation portions of §§6.2–6.3,
+16 and 19. Fixtures are private and TMPDIR-aware. Execution remains pending FINALIZE;
+full-composition acceptance and named-client interoperability remain later work.
 
 Use the specification's complete section 16 matrix and [test-authoring](../.agents/skills/test-authoring/SKILL.md).
 Pure domain tests cover grapheme title normalization, final scalar text limits and native
@@ -146,7 +162,7 @@ multiline bodies and shared plain headers. They exercise final 1,000/1,001-scala
 for ASCII, Cyrillic, combining marks and supplementary symbols, native 1,024/1,025-UTF-16-unit
 captions including the title, unusually large title graphemes and redacted structured errors.
 Text/question/notice formatting and caption validation are pure. Text/document services add
-zero-send/zero-route assertions; question service integration remains pending.
+zero-send/zero-route assertions; question integration is covered by `routes::tests::ask`.
 
 Storage tests in `tests/storage.rs` cover private initialization/reopen, persisted records and
 cursor, foreign/future schema rejection without mutation, composite routes, distinct replies,

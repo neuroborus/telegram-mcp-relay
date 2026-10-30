@@ -17,7 +17,7 @@ Bounded library inbox snapshots, pre-processing claims, durable processing-start
 explicit reconciliation and acknowledgment operations are available. MCP registration and
 outbound tools, read-only inbox resources and inbox/processing/acknowledgment tools are
 available. Modern resource subscriptions deliver bounded post-commit inbox invalidations;
-asks and typing remain later work.
+bounded asks use the common claim path without disabling events. Typing remains later work.
 
 The library now provides centralized validated TOML settings and typed, redacted startup
 errors in `config`/`error`, with protected Unix secret resolution under `config::secrets`.
@@ -235,8 +235,31 @@ Clients read SQLite-backed resources or claim through `telegram_inbox`, includin
 reconnect/restart; signals are neither persistent nor replayed and never claim or acknowledge.
 There is no guarantee that a host wakes an idle LLM. Actual HTTP protocol tests are defined in
 [testing](TESTING.md); their execution remains pending FINALIZE. No named client or live
-Telegram interoperability is claimed. Production daemon composition and ask/event races
-remain later work.
+Telegram interoperability is claimed. Production daemon composition remains later work.
+
+## Bounded asks
+
+The seventh tool, `telegram_ask`, shares `telegram_send`'s `session_key`/`text` schema,
+validation and cancellation-safe bookkeeping. Server-configured waiting defaults to 600 seconds
+(1–86,400). Results include the committed `telegram_chat_id`/`outbound_message_id`, `status`
+and nullable `reply`: `sent` means waiting is disabled, `reply_received` includes one fenced
+claim, and `wait_timeout` means no claim was acquired before the deadline. An inbox consumer
+winning a claim leaves the ask waiting for another eligible reply to that question.
+
+`services::ask` reserves and arms a one-slot coalescing interest before sending, then rechecks
+SQLite after route commit and every signal. Claims match session and composite question
+identity through `InboxService`. `limits.waiters` (default 16) is independent of listener
+admission; exhaustion returns `WAIT_CAPACITY` before Telegram effects. One finite deadline
+starts after send bookkeeping, without inbox polling or extra workers. Resource events
+continue when an ask claims a reply, waiting is disabled or admission is full.
+
+The handler observes SDK cancellation, including HTTP disconnects. Dropping the ask releases
+admission; admitted sends still finish bookkeeping. Wait termination never deletes routes/replies,
+acknowledges work, starts processing, interrupts agents or emits Telegram notices. Claims lost
+with responses recover under the existing lease. Post-send `ASK_WAIT_FAILED` includes committed
+outbound IDs and inbox recovery guidance, never permission to resend. Clients may need tool
+timeouts exceeding wait plus send time; the bridge cannot configure them or guarantee a new
+LLM turn. New tests in [testing](TESTING.md) remain pending FINALIZE.
 
 ## Outbound formatting
 

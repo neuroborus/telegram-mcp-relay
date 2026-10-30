@@ -22,12 +22,16 @@ use crate::{
     clients::telegram::TelegramClient,
     config::Config,
     dto::{
-        AckRequest, AckResult, InboxRequest, InboxResult, ProcessingRequest, ProcessingResult,
-        RegisterRequest, RegisterResult, SendFileRequest, SendRequest, SendResult,
+        AckRequest, AckResult, AskResult, AskStatus, ClaimedReplyResult, InboxRequest, InboxResult,
+        ProcessingRequest, ProcessingResult, RegisterRequest, RegisterResult, SendFileRequest,
+        SendRequest, SendResult,
     },
     error::{AppError, TelegramError},
     repositories::{Database, InboxNotifications},
-    services::{files::OutboundFiles, inbox::InboxService, outbound::OutboundService, unix_millis},
+    services::{
+        ask::AskService, files::OutboundFiles, inbox::InboxService, outbound::OutboundService,
+        unix_millis,
+    },
 };
 
 mod inbox;
@@ -37,6 +41,7 @@ mod subscriptions;
 pub struct McpHandler {
     database: Arc<Mutex<Database>>,
     outbound: OutboundService,
+    asks: AskService,
     files: OutboundFiles,
     inbox: InboxService,
     notifications: InboxNotifications,
@@ -54,8 +59,10 @@ impl McpHandler {
             .map_err(|_| AppError::StorageFailure)?
             .inbox_notifications
             .clone();
+        let outbound = OutboundService::new(database.clone(), telegram, config)?;
         Ok(Self {
-            outbound: OutboundService::new(database.clone(), telegram, config)?,
+            asks: AskService::new(database.clone(), outbound.clone(), &config.delivery)?,
+            outbound,
             files: OutboundFiles::new(&config.files)?,
             inbox: InboxService::new(&config.delivery)?,
             database,
@@ -101,6 +108,31 @@ impl McpHandler {
         Ok(SendResult {
             telegram_chat_id: sent.chat.id,
             outbound_message_id: sent.message_id,
+        })
+    }
+
+    async fn ask(&self, request: SendRequest) -> Result<AskResult, AppError> {
+        let asked = self.asks.ask(&request.session_key, &request.text).await?;
+        let status = if asked.reply.is_some() {
+            AskStatus::ReplyReceived
+        } else if asked.waited {
+            AskStatus::WaitTimeout
+        } else {
+            AskStatus::Sent
+        };
+        Ok(AskResult {
+            telegram_chat_id: asked.sent.chat.id,
+            outbound_message_id: asked.sent.message_id,
+            status,
+            reply: asked
+                .reply
+                .map(|claim| -> Result<_, AppError> {
+                    Ok(ClaimedReplyResult {
+                        reply: inbox::reply(claim.reply)?,
+                        claim_token: claim.claim_token,
+                    })
+                })
+                .transpose()?,
         })
     }
 }
@@ -188,12 +220,20 @@ impl ServerHandler for McpHandler {
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
         let result = match request.name.as_ref() {
             "telegram_register" => tool_result(self.register(arguments(&request)?)),
             "telegram_send" => tool_result(self.send(arguments(&request)?).await),
             "telegram_send_file" => tool_result(self.send_file(arguments(&request)?).await),
+            "telegram_ask" => {
+                let request = arguments(&request)?;
+                tokio::select! {
+                    biased;
+                    _ = context.ct.cancelled() => return Err(ErrorData::internal_error("Request cancelled", None)),
+                    result = self.ask(request) => tool_result(result),
+                }
+            }
             "telegram_inbox" => tool_result(self.claim_inbox(arguments(&request)?)),
             "telegram_processing" => tool_result(self.processing(arguments(&request)?)),
             "telegram_ack" => tool_result(self.acknowledge(arguments(&request)?)),
@@ -217,6 +257,8 @@ fn tools() -> Vec<Tool> {
             .with_input_schema::<ProcessingRequest>().with_output_schema::<ProcessingResult>(),
         Tool::new("telegram_ack", "Acknowledge successful handling with the current session, reply ID and token. Identical valid-token retries are idempotent; stale tokens cannot complete work.", serde_json::Map::new())
             .with_input_schema::<AckRequest>().with_output_schema::<AckResult>(),
+        Tool::new("telegram_ask", "Send a concise question and, when enabled, wait for a matching reply up to the server timeout. Events stay active. Preserve the reply ID and token; confirm processing and acknowledge separately. Timeout grants no permission and later replies remain valid. Never automatically retry an uncertain send.", serde_json::Map::new())
+            .with_input_schema::<SendRequest>().with_output_schema::<AskResult>(),
     ]
 }
 
@@ -238,6 +280,12 @@ fn tool_result<T: Serialize>(result: Result<T, AppError>) -> Result<CallToolResu
                     limit_bytes,
                     actual_bytes,
                 } => json!({"limit_bytes":limit_bytes,"actual_bytes":actual_bytes}),
+                AppError::AskWaitFailed {
+                    telegram_chat_id,
+                    outbound_message_id,
+                } => {
+                    json!({"telegram_chat_id":telegram_chat_id,"outbound_message_id":outbound_message_id})
+                }
                 AppError::Telegram(TelegramError::Rejected {
                     code,
                     retry_after_seconds,
