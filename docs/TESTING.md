@@ -186,9 +186,23 @@ They verify that removing a route preserves replies and removing reply payloads 
 acknowledgment receipts. Unsafe permissions, links, FIFOs and sidecars fail before database use.
 Repository unit tests force mid-migration disk-full rollback and page-limit failure without
 loss of committed rows. Fixtures use private randomized, TMPDIR-aware directories.
-Storage tests use the locked bundled SQLite build and cover v1–v4-to-v5 migration preserving
-replies, processing first start, cursor and uncertain notice attempts. Cleanup tests land
-with their services.
+Storage tests use the locked bundled SQLite build and cover v1–v5-to-v6 migration preserving
+replies, processing first start, cursor and uncertain notice attempts.
+
+`tests/retention.rs` covers independent route/reply/session boundaries, processing recovery
+after parent expiry and restart, retained valid-token receipts, admitted-send identity pins,
+capacity recovery without early eviction, referential integrity and whole-batch rollback.
+Large sweeps prove bounded progress past protected sessions and restart after partial cleanup;
+queries exclude expired routes/replies/receipts before deletion and preserve the update cursor.
+`services::cleanup::tests` uses paused time and explicit future polling to check startup,
+the default daily interval, exclusive scheduling, shutdown and cancellation between batches.
+Fixtures are private, randomized and TMPDIR-aware. These cases address logical retention in
+specification §§10, 16 and 19; execution awaits the dedicated complete trusted FINALIZE suite.
+Physical reclamation and production startup wiring remain separate planned acceptance work.
+`services::outbound::tests::typing` also combines actual mocked Telegram HTTP, processing and
+cleanup with a single inbox slot: rollback preserves typing refreshes, and committed retention
+deletion frees the expired cap so a fresh reply can start typing. Controlled time separates
+typing expiry from retention; execution remains pending the complete trusted FINALIZE suite.
 
 `tests/notices.rs` covers exact receipt/grace and retention boundaries, ordered bounded batches,
 claims without first start, confirmed long work/inactivity, direct completion and notice-first

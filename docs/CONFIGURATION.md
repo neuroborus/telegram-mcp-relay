@@ -34,6 +34,10 @@ an incomplete private file requiring operator removal. No parent directories are
 Wait/grace settings accept 1–86,400 seconds; claims 1–600; independent typing duration 1–600
 with refresh 1–5 seconds no longer than that duration. Long polling defaults to 45 (1–50).
 Independent session/route/reply TTLs default to 30 days (1–3,650); cleanup to 24 hours (1–168).
+The library cleanup scheduler sweeps on startup and after each configured interval, yielding
+between indexed bounded transactions. Expired records count against capacity until deleted;
+valid children, completion receipts and admitted sends protect session identity. See
+[retention cleanup](ARCHITECTURE.md#retention-cleanup) for independent expiry and recovery.
 Library notice arbitration uses `delivery.processing_start_grace_seconds` (default 60) from
 durable receipt and honors `notifications.notify_unconfirmed_processing` and
 `notifications.notify_unroutable` (both default true). Disabled categories consume no attempts.
@@ -93,5 +97,6 @@ Acknowledgment atomically removes payloads and that proof
 and retains a minimal receipt for `storage.reply_ttl_days` from completion. Receipts consume
 the shared receipt/metadata budgets; capacity failure leaves the reply recoverable. Repeating
 an acknowledgment with the same valid token consumes no new capacity or retention time.
-Physical journal accounting and cleanup remain later work.
+Physical journal accounting and disk reclamation remain later work; bounded logical cleanup
+is available in the library, with production wiring pending.
 See [architecture](ARCHITECTURE.md#session-and-route-persistence).

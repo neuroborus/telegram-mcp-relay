@@ -22,6 +22,8 @@ Pure [outbound formatting rules](docs/ARCHITECTURE.md#outbound-formatting) norma
 titles and enforce final text/caption limits.
 The library also provides [private SQLite initialization](docs/ARCHITECTURE.md#sqlite-initialization);
 the binary does not open storage yet.
+Library [retention cleanup](docs/ARCHITECTURE.md#retention-cleanup) provides bounded startup/daily
+sweeps preserving valid replies and recovery identity; physical reclamation remains pending.
 Persistent [session registration and message routes](docs/ARCHITECTURE.md#session-and-route-persistence)
 support saved-handle/external-ID resume and independent route expiry through the library.
 The library adds a bounded [Bot API client](docs/ARCHITECTURE.md#telegram-http-client) and

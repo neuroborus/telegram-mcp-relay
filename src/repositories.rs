@@ -34,8 +34,10 @@ mod notices;
 pub use notices::{NoticeAttempt, NoticeKind, NoticePolicy};
 mod notifications;
 pub(crate) use notifications::{InboxNotifications, InboxSubscription};
+mod retention;
+pub use retention::{CleanupBatch, CleanupSweep};
 
-const SCHEMA_VERSION: i64 = 5;
+const SCHEMA_VERSION: i64 = 6;
 const APPLICATION_ID: i64 = 0x544d4352; // TMCR
 
 /// One private connection; services will expose narrowly scoped transactions, not raw SQL.
@@ -43,9 +45,10 @@ pub struct Database {
     connection: Connection,
     registry: registry::RegistryPolicy,
     reserved_routes: Arc<registry::ReservedRoutes>,
-    pending_routes: Vec<Weak<()>>,
+    pending_routes: Vec<Weak<String>>,
     pub(crate) poll_admission: Arc<Semaphore>,
     pub(crate) notice_admission: Arc<Semaphore>,
+    pub(crate) cleanup_admission: Arc<Semaphore>,
     pub(crate) inbox_notifications: InboxNotifications,
 }
 
@@ -107,6 +110,7 @@ impl Database {
             pending_routes: Vec::new(),
             poll_admission: Arc::new(Semaphore::new(1)),
             notice_admission: Arc::new(Semaphore::new(1)),
+            cleanup_admission: Arc::new(Semaphore::new(1)),
             inbox_notifications,
         })
     }
@@ -156,6 +160,9 @@ fn initialize(connection: &mut Connection) -> Result<(), AppError> {
     }
     if version < 5 {
         transaction.execute_batch(include_str!("repositories/notices.sql"))?;
+    }
+    if version < 6 {
+        transaction.execute_batch(include_str!("repositories/retention.sql"))?;
     }
     transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     let vacuum: i64 = transaction.pragma_query_value(None, "auto_vacuum", |r| r.get(0))?;

@@ -85,7 +85,7 @@ fn initializes_private_database_and_reopens_without_resetting_state() {
     let fixture = Fixture::new();
     let settings = fixture.settings();
     let database = Database::open(&settings, &Limits::default()).unwrap();
-    assert_eq!(database.schema_version().unwrap(), 5);
+    assert_eq!(database.schema_version().unwrap(), 6);
     assert_eq!(
         fs::metadata(&settings.path).unwrap().permissions().mode() & 0o777,
         0o600
@@ -131,19 +131,27 @@ fn initializes_private_database_and_reopens_without_resetting_state() {
     drop(connection);
     drop(database);
     // Recreate each accepted older shape, preserving its records through migration.
-    for version in [1, 2, 3, 4] {
+    for version in [1, 2, 3, 4, 5] {
         let connection = fixture.connect();
         connection
             .execute_batch(
-                "DROP INDEX dispositions_notice;
+                "DROP INDEX sessions_expiry;
+                 CREATE INDEX sessions_expiry ON sessions(expires_at);",
+            )
+            .unwrap();
+        if version < 5 {
+            connection
+                .execute_batch(
+                    "DROP INDEX dispositions_notice;
                 DROP INDEX dispositions_message;
                 DROP INDEX notices_trigger;
                 ALTER TABLE update_dispositions DROP COLUMN notice_attempted;
                 DROP INDEX replies_notice;
                 CREATE INDEX replies_notice ON replies(created_at)
                     WHERE processing_started_at IS NULL AND notice_attempted = 0;",
-            )
-            .unwrap();
+                )
+                .unwrap();
+        }
         if version < 4 {
             connection
                 .execute_batch(
@@ -162,7 +170,7 @@ fn initializes_private_database_and_reopens_without_resetting_state() {
                 .execute_batch("DROP INDEX replies_ordered")
                 .unwrap();
         }
-        if version > 1 {
+        if (2..5).contains(&version) {
             connection.execute(
                 "INSERT OR IGNORE INTO update_dispositions VALUES(12, 'unroutable', -101, 9, 140, 240)", [],
             ).unwrap();
@@ -171,7 +179,7 @@ fn initializes_private_database_and_reopens_without_resetting_state() {
             .pragma_update(None, "user_version", version)
             .unwrap();
         let reopened = Database::open(&settings, &Limits::default()).unwrap();
-        assert_eq!(reopened.schema_version().unwrap(), 5);
+        assert_eq!(reopened.schema_version().unwrap(), 6);
         assert_eq!(
             reopened.inbox_snapshot("a", None, 1, 150).unwrap().replies[0].processing_started_at,
             Some(130)

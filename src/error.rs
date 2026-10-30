@@ -75,6 +75,7 @@ pub enum AppError {
     RoutePending,
     PollerActive,
     NoticeSchedulerActive,
+    CleanupSchedulerActive,
     McpUnavailable,
     SendCapacity,
     WaitCapacity,
@@ -111,6 +112,7 @@ impl AppError {
             Self::RoutePending => "ROUTE_PENDING",
             Self::PollerActive => "TELEGRAM_POLL_ACTIVE",
             Self::NoticeSchedulerActive => "TELEGRAM_NOTICE_ACTIVE",
+            Self::CleanupSchedulerActive => "STORAGE_CLEANUP_ACTIVE",
             Self::McpUnavailable => "MCP_UNAVAILABLE",
             Self::SendCapacity => "SEND_CAPACITY",
             Self::WaitCapacity => "WAIT_CAPACITY",
@@ -175,6 +177,9 @@ impl fmt::Display for AppError {
                 )
             }
             Self::McpUnavailable => write!(f, "{}: local HTTP transport unavailable", self.code()),
+            Self::CleanupSchedulerActive => {
+                write!(f, "{}: a cleanup scheduler is already running", self.code())
+            }
             Self::SendCapacity => write!(f, "{}: admitted send limit reached", self.code()),
             Self::WaitCapacity => {
                 write!(f, "{}: admitted question wait limit reached", self.code())

@@ -67,7 +67,7 @@ pub struct RouteReservation {
     session_key: String,
     bytes: u64,
     reserved: Arc<ReservedRoutes>,
-    pending: Option<Arc<()>>,
+    pending: Option<Arc<String>>,
 }
 
 impl Drop for RouteReservation {
@@ -100,7 +100,7 @@ pub(super) struct ReservedRoutes {
 }
 
 /// A finite observation of admissions; later sends cannot extend its lifetime.
-pub(crate) struct PendingRoutes(Vec<Weak<()>>);
+pub(crate) struct PendingRoutes(Vec<Weak<String>>);
 
 impl PendingRoutes {
     pub(crate) fn is_pending(&self) -> bool {
@@ -290,7 +290,8 @@ impl Database {
         {
             return Err(AppError::StorageCapacity);
         }
-        let pending = Arc::new(());
+        // The admission pins recovery identity until bookkeeping settles or is dropped.
+        let pending = Arc::new(session.session_key.clone());
         self.pending_routes
             .retain(|route| route.strong_count() != 0);
         self.pending_routes.push(Arc::downgrade(&pending));

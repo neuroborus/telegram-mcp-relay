@@ -18,8 +18,8 @@ use crate::{
     repositories::ProcessingStatus,
 };
 
-/// Share this handle between inbox transitions and outbound delivery. It holds no payloads
-/// or claim tokens, and is never reconstructed from stored processing replies at startup.
+/// Share this handle between inbox transitions, cleanup and outbound delivery. It holds no
+/// payloads or claim tokens, and is never reconstructed from stored processing replies at startup.
 #[derive(Clone)]
 pub struct TypingService {
     state: Arc<Mutex<State>>,
@@ -46,7 +46,8 @@ struct InFlight {
 
 #[derive(Default)]
 struct State {
-    // Retain inactive/expired caps until completion. Never evict one to admit activity.
+    // Retain inactive/expired caps until acknowledgment or retention deletion.
+    // Never evict one to admit activity.
     replies: HashMap<String, Lease>,
     in_flight: BTreeMap<i64, InFlight>,
     // Keep cooldowns through stop/start races. None means an unrepresentable retry_after.
@@ -178,7 +179,7 @@ impl TypingService {
         }
     }
 
-    /// Completion makes further starts impossible through the durable claim fence.
+    /// Acknowledgment or retention deletion makes further durable starts impossible.
     pub(crate) fn complete(&self, reply: &str) {
         if let Ok(mut state) = self.state.lock()
             && state.replies.remove(reply).is_some()

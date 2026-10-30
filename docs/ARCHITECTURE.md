@@ -21,6 +21,8 @@ bounded asks use the common claim path without disabling events. Confirmed proce
 one shared, capped typing scheduler in the library.
 Durable notice-attempt arbitration and one bounded factual-notice dispatcher are available
 in the library, including service-Reply loop suppression across restart and uncertain sends.
+Indexed bounded retention cleanup and a startup/daily library scheduler are available;
+production wiring and physical disk reclamation remain later work.
 
 The library now provides centralized validated TOML settings and typed, redacted startup
 errors in `config`/`error`, with protected Unix secret resolution under `config::secrets`.
@@ -309,14 +311,14 @@ Version 4 adds nullable recovery-proof columns for the latest processing reconci
 existing claims and first-start timestamps survive the transactional migration.
 Version 5 adds an unroutable-attempt flag and indexes for receipt-ordered notice eligibility
 and composite trigger deduplication, preserving existing attempts and receipt times.
+Version 6 extends the session expiry index with its key for bounded cleanup pagination.
 
 Initialization enables incremental auto-vacuum before the schema transaction. DDL, initial
 cursor, application ID and version commit together under an immediate transaction; errors
 roll back the schema. Foreign/unversioned nonempty databases and unknown versions are rejected.
 Foreign keys restrict session deletion while children survive; replies have no route foreign
 key, so an expired route can later be removed independently. Indexes cover identity, ordered
-inboxes, question matching, notice eligibility and each record's expiry. These are schema
-constraints; cleanup services are not implemented yet.
+inboxes, question matching, notice eligibility and each record's expiry.
 
 Connections use DELETE rollback journals, FULL synchronization, a 100 ms busy timeout, a
 512 KiB suggested page cache, eight cached statements, disabled mmap and in-memory temporary
@@ -330,6 +332,36 @@ rusqlite 0.32.1 embeds SQLite 3.46.0 through libsqlite3-sys 0.30.1; `bundled` al
 archives, and the used APIs were inspected. Focused storage tests use this embedded build.
 Live registry/SQLite documentation requests failed at DNS resolution; no latest-version claim
 or live Telegram behavior is implied by the pinned dependency verification.
+
+## Retention cleanup
+
+`Database::cleanup_batch` uses one immediate transaction to delete at most 100 expired rows
+from each of replies, acknowledgment receipts, notice attempts, update dispositions and routes.
+It then examines at most 100 expired sessions after expired child batches have drained.
+Expiry-index scans and a session `(expires_at, session_key)` cursor bound candidate selection;
+protected sessions cannot stall later candidates. Failed transactions advance no sweep cursor
+and publish no inbox invalidations. Successful reply deletion signals only after commit.
+Each batch returns bounded committed reply-deletion identities to the cleanup service.
+The durable Telegram cursor is never removed or reset, including when its last reply expires.
+
+Independent default 30-day deadlines remain anchored to original route creation, reply receipt
+and last session activity. Processing replies expire only at reply retention, regardless of
+claim, typing or wait deadlines. Route, inbox, claim, processing and acknowledgment queries
+exclude expired records before physical deletion. A session identity remains resumable while
+retained: cleanup preserves it while any route, reply, acknowledgment receipt or admitted send
+needs it. This includes expired children awaiting a later bounded batch. Registration can
+refresh a retained identity; after deletion an old saved handle fails, and an external ID can
+register a fresh session. Cleanup never refreshes activity or evicts valid records for capacity.
+
+`services::cleanup::CleanupService` performs a startup sweep, yields between committed batches,
+then sleeps for `storage.cleanup_interval_hours` (default 24). One shared-database admission
+permit prevents duplicate schedulers. Shutdown or cancellation stops between transactions;
+restart safely scans durable state again. No record has its own timer.
+`CleanupService::with_typing` attaches the same scheduler as inbox/outbound services and
+releases deleted replies' remembered caps after commit, under the shared database guard.
+Rollback preserves both durable replies and RAM activity/caps.
+The binary remains a scaffold; daemon startup supervision and physical reclamation belong to
+later planned steps.
 
 ## Session and route persistence
 
@@ -354,8 +386,8 @@ reservations in its budget. Retained expired rows still count until cleanup; pre
 evicts data. Logical session/route charges are 128 bytes per row plus UTF-8 identity/title
 bytes (route rows include the session key). SQLite pages have their separate physical cap.
 Reservations live only in RAM and do not guarantee post-send disk success: the sending service
-reports failed bookkeeping distinctly from an unknown send outcome. Received-Reply activity
-updates, cross-component metadata accounting and physical maintenance remain later steps.
+reports failed bookkeeping distinctly from an unknown send outcome. Physical maintenance
+remains a later step.
 
 ## Text delivery
 
@@ -605,8 +637,9 @@ transaction failure preserves the reply and ownership; no valid records are evic
 
 ## Confirmed-processing typing
 
-`OutboundService::typing` exposes one shared `services::typing::TypingService` for sender clones
-and `InboxService::with_typing`. `McpHandler` connects these once for all request factories.
+`OutboundService::typing` exposes one shared `services::typing::TypingService` for sender clones,
+`InboxService::with_typing` and `CleanupService::with_typing`. `McpHandler` connects sender/inbox
+activity once for all request factories; daemon cleanup wiring remains pending.
 Only a successful durable `processing(active=true)` enables activity. Receipt, claims, reads,
 waits and registration never start typing. A new reconciliation rotation stops the previous
 RAM activity; an explicit active call with the rotated token resumes within the original
@@ -630,10 +663,11 @@ including when detached bookkeeping later fails. Rejected/uncertain sends preser
 Other active sessions keep the merged chat eligible. Failed transitions have no typing effect.
 
 Active and inactive cap entries contain only IDs/deadlines/flags and together are bounded by
-`limits.inbox_items`; acknowledgment releases an entry. Admission never evicts remembered caps.
+`limits.inbox_items`; acknowledgment or committed retention cleanup releases an entry.
+Admission never evicts remembered caps.
 Cooldowns and outstanding request futures are bounded by the allowlisted chats.
 At idle the task exits, with no periodic timer for retained caps. The last shared handle
-cancels the worker; a new service starts empty. Expiry affects no durable processing/ack state,
+cancels the worker; a new service starts empty. Typing expiry affects no durable processing/ack state,
 wait or agent execution, and sends no notice. Production supervision remains later work.
 
 ## Telegram long polling
@@ -708,8 +742,9 @@ network/protocol behavior and cancellation. Shared state contains handles, not d
 
 Routes expire 30 days after their original message, sessions after last activity and unacked
 replies 30 days after receipt by default. Active session traffic does not extend old routes.
-Cleanup must preserve still-valid replies and referential integrity, work in bounded batches
-and account for actual disk reclamation. Capacity pressure cannot silently evict valid replies.
+Library cleanup preserves still-valid replies and referential integrity in bounded batches.
+Physical disk reclamation remains pending; deletion alone need not shrink the database file.
+Capacity pressure cannot silently evict valid replies.
 Telegram keeps unconsumed updates for at most 24 hours; the bridge cannot reconstruct a longer
 offline gap from conversation history.
 

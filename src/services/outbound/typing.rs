@@ -2,8 +2,8 @@
 
 use super::*;
 use crate::{
-    repositories::{ClaimedReply, IngestOutcome},
-    services::{inbox::InboxService, ingress::IngressService},
+    repositories::{ClaimedReply, CleanupSweep, IngestOutcome},
+    services::{cleanup::CleanupService, inbox::InboxService, ingress::IngressService},
 };
 use std::time::Duration;
 
@@ -14,10 +14,20 @@ fn inbox(service: &OutboundService, fixture: &Fixture) -> InboxService {
 }
 
 fn claim(fixture: &Fixture, database: &Arc<Mutex<Database>>, key: &str, id: i64) -> ClaimedReply {
+    claim_at(fixture, database, key, id, 50_000)
+}
+
+fn claim_at(
+    fixture: &Fixture,
+    database: &Arc<Mutex<Database>>,
+    key: &str,
+    id: i64,
+    now: i64,
+) -> ClaimedReply {
     let mut database = database.lock().unwrap();
     let reservation = database.reserve_route(key).unwrap();
     database
-        .persist_route(reservation, -101, id, RouteKind::Text, 50_000, 50_000)
+        .persist_route(reservation, -101, id, RouteKind::Text, now, now)
         .unwrap();
     let update = serde_json::from_value(json!({"update_id":id,"message":{
         "message_id":id+100,"date":50,"chat":{"id":-101},"from":{"id":7,"is_bot":false},
@@ -26,13 +36,13 @@ fn claim(fixture: &Fixture, database: &Arc<Mutex<Database>>, key: &str, id: i64)
     assert!(matches!(
         IngressService::new(&fixture.config)
             .unwrap()
-            .ingest(&mut database, &update, 50_000)
+            .ingest(&mut database, &update, now)
             .unwrap(),
         IngestOutcome::ReplyStored { .. }
     ));
     InboxService::new(&fixture.config.delivery)
         .unwrap()
-        .claim(&mut database, key, None, 1, 50_000)
+        .claim(&mut database, key, None, 1, now)
         .unwrap()
         .pop()
         .unwrap()
@@ -316,6 +326,122 @@ async fn reconciliation_retry_preserves_resumed_typing_and_the_original_deadline
             &reply.reply.reply_id,
             &resumed.claim_token,
             62_000,
+        )
+        .unwrap();
+}
+
+#[tokio::test]
+async fn retention_commit_restores_typing_admission_and_rollback_preserves_activity() {
+    let mut fixture = fixture();
+    fixture.config.limits.inbox_items = 1;
+    fixture.config.storage.reply_ttl_days = 1;
+    fixture.config.storage.route_ttl_days = 1;
+    let database = fixture.open();
+    let session = fixture.register(&database);
+    let key = &session.session_key;
+    let mut mock = Mock::new(
+        &fixture.config,
+        (0..3)
+            .map(|_| Response::Json(200, json!({"ok":true,"result":true})))
+            .collect(),
+    )
+    .await;
+    let service = mock.service(&fixture, &database);
+    let inbox = inbox(&service, &fixture);
+    let cleanup = CleanupService::new(database.clone(), &fixture.config.storage)
+        .unwrap()
+        .with_typing(service.typing());
+    let first = claim(&fixture, &database, key, 1);
+    inbox
+        .processing(
+            &mut database.lock().unwrap(),
+            key,
+            &first.reply.reply_id,
+            &first.claim_token,
+            true,
+            50_000,
+        )
+        .unwrap();
+    mock.seen.recv().await.unwrap();
+
+    // Fail after DELETE RETURNING has collected the reply, before the transaction commits.
+    fixture
+        .sql()
+        .execute_batch(
+            "CREATE TRIGGER fail_cleanup BEFORE DELETE ON message_routes
+        BEGIN SELECT RAISE(ABORT, 'synthetic private detail'); END",
+        )
+        .unwrap();
+    let expiry = 50_000 + 86_400_000;
+    let mut sweep = CleanupSweep::new(expiry).unwrap();
+    assert_eq!(
+        cleanup.cleanup_batch(&mut sweep),
+        Err(AppError::StorageFailure)
+    );
+    assert_eq!(
+        database
+            .lock()
+            .unwrap()
+            .inbox_snapshot(key, None, 1, 50_000)
+            .unwrap()
+            .replies[0]
+            .reply_id,
+        first.reply.reply_id
+    );
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(4)).await;
+    tokio::time::resume();
+    // Rollback must retain the current activity as well as its remembered cap.
+    tokio::time::timeout(Duration::from_secs(4), mock.seen.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    fixture
+        .sql()
+        .execute_batch("DROP TRIGGER fail_cleanup")
+        .unwrap();
+
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(86_400)).await;
+    tokio::task::yield_now().await;
+    assert_eq!(mock.count(), 2); // Typing expiry keeps the cap, without refreshing forever.
+    tokio::time::resume();
+    assert_eq!(cleanup.cleanup_batch(&mut sweep).unwrap().removed, 2);
+    let second = claim_at(&fixture, &database, key, 2, expiry);
+    inbox
+        .processing(
+            &mut database.lock().unwrap(),
+            key,
+            &second.reply.reply_id,
+            &second.claim_token,
+            true,
+            expiry,
+        )
+        .unwrap();
+    // At inbox_items=1 the deleted reply's cap previously prevented this immediate action.
+    tokio::time::timeout(Duration::from_secs(4), mock.seen.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(mock.count(), 3);
+    let requests = mock.requests.lock().unwrap();
+    assert!(
+        requests
+            .iter()
+            .all(|r| r.method == "/botSynthetic/sendChatAction")
+    );
+    assert_eq!(
+        serde_json::from_slice::<Value>(&requests[2].body).unwrap(),
+        json!({"chat_id":-101,"action":"typing"})
+    );
+    drop(requests);
+    inbox
+        .acknowledge(
+            &mut database.lock().unwrap(),
+            key,
+            &second.reply.reply_id,
+            &second.claim_token,
+            expiry,
         )
         .unwrap();
 }
