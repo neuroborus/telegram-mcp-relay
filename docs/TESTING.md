@@ -96,8 +96,8 @@ Unit tests in `domain::outbound::tests` cover whitespace/control normalization, 
 multiline bodies and shared plain headers. They exercise final 1,000/1,001-scalar boundaries
 for ASCII, Cyrillic, combining marks and supplementary symbols, native 1,024/1,025-UTF-16-unit
 captions including the title, unusually large title graphemes and redacted structured errors.
-Text/question/notice formatting and caption validation are pure; zero-send/zero-route
-integration assertions belong to the later sending services, which are not implemented yet.
+Text/question/notice formatting and caption validation are pure. The text service now adds
+zero-send/zero-route assertions; question and document service integration remains pending.
 
 Storage tests in `tests/storage.rs` cover private initialization/reopen, persisted records and
 cursor, foreign/future schema rejection without mutation, composite routes, distinct replies,
@@ -115,7 +115,18 @@ restart continuity. Explicit timestamps cover session activity and independent r
 Count/UTF-8 metadata limits include in-flight reservations and expired retained rows; rejected
 renames leave activity unchanged. Tests also cover cancellation release, route conflicts,
 transaction rollback after a route insert, invalid inputs and redacted diagnostics. These are
-repository operations; Telegram/MCP send and Reply-ingestion integration remain later work.
+repository operations; MCP send and Reply-ingestion integration remain later work.
+
+`services::outbound::tests` exercises the actual HTTP client and SQLite together: unknown
+sessions, invalid destinations, exact formatted 1,000/1,001-scalar ASCII/astral boundaries,
+route/metadata pressure, definitive rejection, lost responses and failed post-send activity
+transactions. It checks no effects on validation failures, no automatic replay or fabricated
+routes, redacted errors, atomic rollback, released admission and restart-visible composite
+routes with seconds-to-milliseconds conversion. An explicitly gated HTTP response allows
+caller cancellation while a send remains admitted; competing sends stay bounded and the
+detached task finishes durable bookkeeping. Fixtures honor TMPDIR and use private randomized
+directories. These new tests are pending the complete trusted FINALIZE suite; implementation
+and source review do not attest their execution.
 
 Unit tests in `clients::telegram::tests` use a synthetic loopback HTTP peer with explicit
 disconnects, malformed/oversized and chunked bodies, redirects, webhook conflicts, rate limits

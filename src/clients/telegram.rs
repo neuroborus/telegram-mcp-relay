@@ -49,7 +49,12 @@ struct Parameters {
 }
 
 impl TelegramClient {
-    /// Uses only Telegram's cloud endpoint. Mock URLs are private to this module's tests.
+    #[cfg(test)]
+    pub(crate) fn for_test(config: &Config, endpoint: String) -> Result<Self, AppError> {
+        Self::build(config, endpoint, false)
+    }
+
+    /// Uses only Telegram's cloud endpoint. Mock URLs exist only in crate tests.
     pub fn new(config: &Config, token: &Secret) -> Result<Self, AppError> {
         Self::build(
             config,

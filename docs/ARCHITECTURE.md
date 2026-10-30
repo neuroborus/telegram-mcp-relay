@@ -7,8 +7,9 @@ Tokio's current-thread runtime and initializes structured `tracing` diagnostics 
 The library logs the scaffold status and returns without opening sockets or creating files.
 The library provides explicit SQLite initialization and session/route operations, but the
 binary does not open it.
-The library provides a bounded Telegram HTTP client. No MCP transport or production relay
-wiring exists yet. Synthetic HTTP tests passed in Runner's complete workspace test suite,
+The library provides a bounded Telegram HTTP client and a text-delivery service with durable
+reply routes. No MCP transport or production relay wiring exists yet. The accepted HTTP
+adapter's synthetic tests passed in Runner's complete workspace test suite,
 as described below.
 
 The library now provides centralized validated TOML settings and typed, redacted startup
@@ -17,8 +18,8 @@ Parsing has no side effects; secret loading is explicit. The binary remains a sc
 production startup composition is a later step. See [configuration](CONFIGURATION.md).
 
 Pure title normalization and outbound formatting now live in `domain::outbound`, with typed
-length errors in `error`. These functions perform no network or database effects. Services
-will use them before sends and route mutations; those integrations are not implemented yet.
+length errors in `error`. These functions perform no network or database effects. Text delivery
+uses them before admission and sends; document delivery remains pending.
 
 The complete dependency resolution lives in `Cargo.lock`. The release profile enables thin
 LTO, one codegen unit and stripping.
@@ -39,7 +40,7 @@ Telegram requests or MCP interoperability tests have been performed.
 | Dependency | Selected version | Direct features (defaults disabled) | Purpose |
 | --- | --- | --- | --- |
 | [rmcp](https://docs.rs/crate/rmcp/3.8.0/features) | 3.8.0 | `server`, `transport-streamable-http-server` | Official MCP server, schema support and shared HTTP transport foundation |
-| [Tokio](https://docs.rs/crate/tokio/1.54.1/features) | 1.54.1 | `macros`, `rt`, `time` | Current-thread async binary entry point and client deadlines/backoff |
+| [Tokio](https://docs.rs/crate/tokio/1.54.1/features) | 1.54.1 | `macros`, `rt`, `sync`, `time` | Current-thread entry point, bounded send admission and client deadlines/backoff |
 | [tracing](https://docs.rs/crate/tracing/0.1.44/features) | 0.1.44 | `std` | Structured diagnostic events |
 | [tracing-subscriber](https://docs.rs/crate/tracing-subscriber/0.3.23/features) | 0.3.23 | `fmt`, `std` | Fallible stderr diagnostic initialization with an INFO ceiling |
 | [serde](https://docs.rs/crate/serde/1.0.229/features) | 1.0.229 | `derive`, `std` | Typed settings deserialization; already in the SDK graph |
@@ -51,8 +52,10 @@ Telegram requests or MCP interoperability tests have been performed.
 | [reqwest](https://docs.rs/crate/reqwest/0.13.5/features) | 0.13.5 | `json`, `rustls` | Reusable direct Telegram HTTPS client without default features |
 | [serde_json](https://docs.rs/crate/serde_json/1.0.154/features) | 1.0.154 | `std` | Bounded Bot API envelope decoding; already locked through rmcp |
 
-Dev-only Tokio `net`, `io-util`, `sync` and `test-util` support synthetic HTTP peers and
-controlled deadlines. The reqwest archive checksum matches published registry metadata;
+Dev-only Tokio `net`, `io-util` and `test-util` support synthetic HTTP peers and
+controlled deadlines. Direct `sync` use supplies owned send-admission permits; it was already
+enabled in the locked SDK graph and adds no packages or lockfile changes.
+The reqwest archive checksum matches published registry metadata;
 its inspected client, chunked-response and retry sources match the archive. Its `json` and
 `rustls` features enable JSON, rustls with AWS-LC and platform certificate verification;
 default charset, HTTP/2, proxy discovery and compression features are unnecessary. Source
@@ -169,17 +172,41 @@ reservations in its budget. Retained expired rows still count until cleanup; pre
 evicts data. Logical session/route charges are 128 bytes per row plus UTF-8 identity/title
 bytes (route rows include the session key). SQLite pages have their separate physical cap.
 Reservations live only in RAM and do not guarantee post-send disk success: the sending service
-must report failed bookkeeping as uncertain. Durable sends, received-Reply activity updates,
-cross-component metadata accounting and physical maintenance remain later steps.
+reports failed bookkeeping distinctly from an unknown send outcome. Received-Reply activity
+updates, cross-component metadata accounting and physical maintenance remain later steps.
+
+## Text delivery
+
+`services::outbound::OutboundService` clones share the application's `Arc<Mutex<Database>>`,
+Telegram client and bounded send admission. Construct one service with the configured,
+allowlisted destination; tool callers cannot select another chat. It resolves the session
+and validates the complete normalized-title text before acquiring a nonwaiting permit from
+`limits.background_tasks` and reserving route metadata. Saturation returns `SEND_CAPACITY`;
+storage pressure returns `STORAGE_CAPACITY`, without sending or refreshing activity.
+
+After admission, an owned Tokio task attempts the send once and commits its composite route
+and session activity through `persist_route`. No database guard crosses an await. Telegram
+message dates are converted from seconds to repository milliseconds. Dropping/canceling the
+caller leaves this bounded task and reservation alive until the HTTP result and bookkeeping
+finish. This protects against caller cancellation, not process loss; supervised daemon
+shutdown/draining is a later step. No outbound body is written to SQLite.
+
+A consistent 4xx rejection remains definitive. A lost/invalid response remains
+`TELEGRAM_DELIVERY_UNCERTAIN`, with no fabricated route. A confirmed accepted send whose
+route transaction fails returns `SEND_BOOKKEEPING_FAILED`, explicitly warning that Telegram
+accepted it but reply routing could not be saved. Neither outcome authorizes automatic
+resending. Failures from detached work log only a static error code. Successful completion
+requires a committed route; reservations and task permits release on completion/failure.
+New service tests await execution in the dedicated Runner FINALIZE gate.
 
 ## Telegram HTTP client
 
 `clients::telegram::TelegramClient` owns one reusable reqwest/rustls pool; clones share it.
 The production constructor fixes `https://api.telegram.org`, disables proxy discovery,
 redirects and reqwest retries, and retains no transport errors or Telegram descriptions.
-Only module tests can construct a mock endpoint; TOML has no API override. No production
-startup path contacts Telegram yet. Services will own title formatting, destination
-authorization, capacity reservations and durable routes in subsequent steps.
+Only crate tests can construct a mock endpoint; TOML has no API override. No production
+startup path contacts Telegram yet. The text-delivery service owns title formatting,
+destination authorization, capacity reservations and durable routes for text sends.
 
 The adapter provides `getUpdates`, `getWebhookInfo`, plain `sendMessage` and typing
 `sendChatAction`. Document streaming lands with its file boundary later. Updates retain

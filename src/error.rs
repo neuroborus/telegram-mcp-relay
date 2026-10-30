@@ -66,6 +66,8 @@ pub enum AppError {
     SessionNotFound,
     SessionIdentityConflict,
     RouteConflict,
+    SendCapacity,
+    SendBookkeepingFailed,
     RandomUnavailable,
     StorageUnavailable,
     StorageFailure,
@@ -88,6 +90,8 @@ impl AppError {
             Self::SessionNotFound => "SESSION_NOT_FOUND",
             Self::SessionIdentityConflict => "SESSION_IDENTITY_CONFLICT",
             Self::RouteConflict => "ROUTE_CONFLICT",
+            Self::SendCapacity => "SEND_CAPACITY",
+            Self::SendBookkeepingFailed => "SEND_BOOKKEEPING_FAILED",
             Self::RandomUnavailable => "RANDOM_UNAVAILABLE",
             Self::StorageUnavailable => "STORAGE_UNAVAILABLE",
             Self::StorageFailure => "STORAGE_FAILED",
@@ -117,6 +121,12 @@ impl fmt::Display for AppError {
                 write!(f, "{}: session identities disagree", self.code())
             }
             Self::RouteConflict => write!(f, "{}: message already has a route", self.code()),
+            Self::SendCapacity => write!(f, "{}: admitted send limit reached", self.code()),
+            Self::SendBookkeepingFailed => write!(
+                f,
+                "{}: Telegram accepted the send, but its reply route could not be saved; do not resend automatically",
+                self.code()
+            ),
             Self::RandomUnavailable => write!(f, "{}: OS randomness unavailable", self.code()),
             Self::TextTooLong(details) => write!(
                 f,

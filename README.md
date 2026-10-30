@@ -11,13 +11,14 @@ endpoint and runnable relay setup are not implemented yet.
 The library also implements validated [configuration and protected secrets](docs/CONFIGURATION.md);
 the binary does not load configuration yet.
 Pure [outbound formatting rules](docs/ARCHITECTURE.md#outbound-formatting) normalize session
-titles and enforce final text/caption limits; durable send orchestration is not implemented yet.
+titles and enforce final text/caption limits.
 The library also provides [private SQLite initialization](docs/ARCHITECTURE.md#sqlite-initialization);
 the binary does not open storage yet.
 Persistent [session registration and message routes](docs/ARCHITECTURE.md#session-and-route-persistence)
 support saved-handle/external-ID resume and independent route expiry through the library.
-The library adds a bounded [Bot API client](docs/ARCHITECTURE.md#telegram-http-client);
-durable sending and production startup composition remain later steps.
+The library adds a bounded [Bot API client](docs/ARCHITECTURE.md#telegram-http-client) and
+[text delivery](docs/ARCHITECTURE.md#text-delivery) with cancellation-safe durable reply routes.
+Document delivery and production startup composition remain later steps.
 The specification calls the product **Telegram MCP Bridge**; this repository and binary are
 named **telegram-mcp-relay**.
 

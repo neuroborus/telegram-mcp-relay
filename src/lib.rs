@@ -1,6 +1,6 @@
 //! Shared application entry point for Telegram MCP Relay.
 //!
-//! This initial scaffold does not yet open a listener, contact Telegram or create storage.
+//! The scaffold entry point only logs; library storage and delivery operations are explicit.
 
 #![forbid(unsafe_code)]
 
@@ -9,6 +9,7 @@ pub mod config;
 pub mod domain;
 pub mod error;
 pub mod repositories;
+pub mod services;
 
 /// Run the application scaffold without starting relay services.
 pub async fn run() {
