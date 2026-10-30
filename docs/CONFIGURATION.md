@@ -53,5 +53,11 @@ must be owned regular single-link files with owner read/write access and no grou
 Parent/leaf symlinks and special files fail; existing permissions are never changed. The main
 database file is page-limited by `storage.max_database_bytes`. Session/route admission enforces
 `limits.sessions`, `limits.routes` and logical `limits.metadata_bytes`, including in-flight route
-reservations. Physical journal accounting and inbox/other metadata admission remain later work.
+reservations. Ingestion enforces `limits.inbox_items`, `limits.reply_bytes` and
+`limits.inbox_bytes` over retained UTF-8 text and serialized attachment metadata. Attachment
+JSON also counts toward shared metadata; unroutable dispositions share `limits.receipts`
+with acknowledgment receipts. Ignored input compacts into one fixed bookkeeping marker outside
+these variable admission budgets, bounded by the physical database cap. Pressure rejects
+reply/unroutable admission without eviction or cursor advancement.
+Physical journal accounting and cleanup remain later work.
 See [architecture](ARCHITECTURE.md#session-and-route-persistence).

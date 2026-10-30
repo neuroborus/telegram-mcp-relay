@@ -106,8 +106,19 @@ They verify that removing a route preserves replies and removing reply payloads 
 acknowledgment receipts. Unsafe permissions, links, FIFOs and sidecars fail before database use.
 Repository unit tests force mid-migration disk-full rollback and page-limit failure without
 loss of committed rows. Fixtures use private randomized, TMPDIR-aware directories.
-Storage tests use the locked bundled SQLite build. Transactional ingestion, claim arbitration
-and cleanup tests land with their services; schema tests do not claim those behaviors.
+Storage tests use the locked bundled SQLite build and cover v1-to-v2 migration preserving
+replies/cursor. Claim arbitration and cleanup tests land with their services.
+
+`tests/ingress.rs` covers atomic reply/activity/cursor persistence, same-title cross-chat routes,
+multiple replies, attachment-only documents, photo captions, receipt-based TTLs, long incoming
+text, redelivery and restart after commit before signaling. Idle lower-ID resets and retained
+redeliveries across restart prove exact deduplication without numeric high-water assumptions.
+Unauthorized floods compact safely even with full receipt/variable metadata budgets, and a
+subsequent authorized reply remains admissible. Tests also check safe unroutable dispositions,
+authorization, route expiry, serialized metadata bounds, shared item/payload/
+metadata admission including outstanding sends, late transaction failures and actual SQLite
+page exhaustion without losing accepted replies or advancing unresolved input. Fixtures are
+private, randomized and TMPDIR-aware. Execution remains pending the trusted FINALIZE suite.
 
 `tests/registry.rs` exercises three same-title identities, interleaved text/document routes,
 cross-chat message-ID collisions, external-ID and saved-handle resume, normalized renaming and
@@ -115,7 +126,7 @@ restart continuity. Explicit timestamps cover session activity and independent r
 Count/UTF-8 metadata limits include in-flight reservations and expired retained rows; rejected
 renames leave activity unchanged. Tests also cover cancellation release, route conflicts,
 transaction rollback after a route insert, invalid inputs and redacted diagnostics. These are
-repository operations; MCP send and Reply-ingestion integration remain later work.
+repository operations; MCP send integration remains later work.
 
 `services::outbound::tests` exercises the actual HTTP client and SQLite together: unknown
 sessions, invalid destinations, exact formatted 1,000/1,001-scalar ASCII/astral boundaries,

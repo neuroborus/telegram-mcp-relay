@@ -1,6 +1,6 @@
 //! Minimal Bot API transport types; unknown fields are discarded, never persisted here.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize)]
 pub struct Chat {
@@ -26,7 +26,7 @@ pub struct ReplyTarget {
     pub message_id: i64,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub struct Attachment {
     pub file_id: String,
     pub file_unique_id: String,

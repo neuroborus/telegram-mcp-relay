@@ -21,8 +21,11 @@ use crate::{
 
 mod registry;
 pub use registry::{MessageRoute, RouteKind, RouteReservation, Session};
+mod ingress;
+pub(crate) use ingress::IncomingReply;
+pub use ingress::IngestOutcome;
 
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 const APPLICATION_ID: i64 = 0x544d4352; // TMCR
 
 /// One private connection; services will expose narrowly scoped transactions, not raw SQL.
@@ -106,7 +109,7 @@ fn check_schema(connection: &Connection) -> Result<i64, AppError> {
         |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
     )?;
     match (version, application, empty) {
-        (0, 0, true) | (SCHEMA_VERSION, APPLICATION_ID, false) => Ok(version),
+        (0, 0, true) | (1..=SCHEMA_VERSION, APPLICATION_ID, false) => Ok(version),
         _ => Err(AppError::UnsupportedSchema(version)),
     }
 }
@@ -118,11 +121,15 @@ fn initialize(connection: &mut Connection) -> Result<(), AppError> {
     }
     let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
     // Recheck under the write lock: another opener may have initialized the file meanwhile.
-    if check_schema(&transaction)? == 0 {
+    let version = check_schema(&transaction)?;
+    if version == 0 {
         transaction.execute_batch(include_str!("repositories/schema.sql"))?;
         transaction.pragma_update(None, "application_id", APPLICATION_ID)?;
-        transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     }
+    if version < 2 {
+        transaction.execute_batch(include_str!("repositories/ingress.sql"))?;
+    }
+    transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     let vacuum: i64 = transaction.pragma_query_value(None, "auto_vacuum", |r| r.get(0))?;
     if vacuum != 2 {
         return Err(AppError::StorageFailure);

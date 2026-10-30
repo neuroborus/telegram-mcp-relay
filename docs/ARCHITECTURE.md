@@ -11,6 +11,8 @@ The library provides a bounded Telegram HTTP client and text/document delivery w
 reply routes. No MCP transport or production relay wiring exists yet. The accepted HTTP
 adapter's synthetic tests passed in Runner's complete workspace test suite,
 as described below.
+Library reply ingestion now authorizes input and commits replies/dispositions with the cursor;
+the single long poller and notification delivery remain later work.
 
 The library now provides centralized validated TOML settings and typed, redacted startup
 errors in `config`/`error`, with protected Unix secret resolution under `config::secrets`.
@@ -130,11 +132,13 @@ reject leaf/parent symlinks, unsafe existing journal/WAL sidecars and special fi
 SQLite opens the path with `SQLITE_OPEN_NOFOLLOW`. Ancestors and same-user access are trusted.
 Failures retain only safe typed classifications, without SQLite SQL, paths or row values.
 
-Schema version 1 uses strict tables for sessions, composite chat/message routes, incoming
+The version 1 baseline uses strict tables for sessions, composite chat/message routes, incoming
 replies, the singleton cursor, minimal valid-token acknowledgment receipts and notice attempts.
 Only incoming text/captions and attachment metadata have payload columns. No table holds
 outbound bodies, full Telegram updates, file bytes or typing leases. A NULL initial cursor
-means no update has been processed. Timestamps use Unix milliseconds.
+means no update has been processed. Timestamps use Unix milliseconds. Schema version 2 adds
+minimal update dispositions, including one compact ignored marker, through a transactional
+migration preserving existing records.
 
 Initialization enables incremental auto-vacuum before the schema transaction. DDL, initial
 cursor, application ID and version commit together under an immediate transaction; errors
@@ -142,7 +146,7 @@ roll back the schema. Foreign/unversioned nonempty databases and unknown version
 Foreign keys restrict session deletion while children survive; replies have no route foreign
 key, so an expired route can later be removed independently. Indexes cover identity, ordered
 inboxes, question matching, notice eligibility and each record's expiry. These are schema
-constraints; ingestion, claiming and cleanup services are not implemented yet.
+constraints; claiming and cleanup services are not implemented yet.
 
 Connections use DELETE rollback journals, FULL synchronization, a 100 ms busy timeout, a
 512 KiB suggested page cache, eight cached statements, disabled mmap and in-memory temporary
@@ -296,7 +300,9 @@ characters, captions 0–1,024 after entity parsing, cloud document uploads up t
 optional downloads up to 20 MB. The bridge uses a conservative decimal-MB upload ceiling
 and UTF-16 caption count; this does not claim a live Unicode boundary experiment.
 
-The same reference confirms `getUpdates` batches of 1–100, positive long-poll timeouts,
+The same reference documents unique update IDs that can restart randomly after a week without
+updates; they are not a global numeric high-water mark. It confirms `getUpdates` batches of
+1–100, positive long-poll timeouts,
 confirmation by a higher offset, destructive negative offsets (rejected here), and up to
 24 hours of update retention. Webhooks and long polling are mutually exclusive;
 `getWebhookInfo.url` is empty when unset. Switching requires an operator-authorized
@@ -310,6 +316,29 @@ through the read-only trusted route, including the synthetic HTTP client tests. 
 Native attempts failed at loopback `bind` with `Operation not permitted`; that limitation
 did not affect the successful Runner execution. No socket tests were skipped. Live Telegram
 behavior remains untested, and production configuration exposes no endpoint override.
+
+## Reply ingestion
+
+`services::ingress::IngressService` accepts only allowlisted chats and non-bot senders, and
+explicit Replies containing text/captions or document/photo metadata. Unsupported/unapproved
+updates compact into a single ignored marker; authorized unknown/expired routes retain only
+an unroutable disposition with the triggering chat/message IDs. No full update is retained.
+The repository resolves composite routes and commits a distinct pending reply, receipt-based
+expiry, monotonic session activity and cursor together. Redelivery produces no new reply.
+Only a successful commit returns `IngestOutcome::ReplyStored` for later change signaling.
+Exact retained update IDs, composite message identities and acknowledgment receipts suppress
+duplicates across restart; an unseen lower ID can start a new Telegram sequence. Redelivering
+a retained update leaves the current cursor unchanged, including after a sequence reset.
+
+Callers must submit ordered Telegram batches and stop at errors; gaps cannot reveal omitted input.
+Capacity/disk failures preserve cursor/replies. UTF-8 text plus bounded attachment JSON count
+toward inbox bytes; identities, attachment JSON, unroutable dispositions, receipts and notices join shared
+variable metadata accounting including send reservations. Unroutable dispositions share the
+receipt count budget and reply TTL. The fixed ignored marker is bookkeeping like the singleton
+cursor: it consumes no receipt or variable metadata admission and remains under the physical
+database cap. Compacting it removes no reply, receipt or notice obligation; older ignored input
+may be ignored again without retaining contents or generating effects. Cleanup, downloads,
+notices and notification delivery remain later work.
 
 ## Runtime and ownership
 

@@ -19,7 +19,7 @@ use crate::{
 
 const DAY_MS: i64 = 86_400_000;
 // Logical admission charges include fixed row/index overhead, independently of SQLite pages.
-const ROW_BYTES: u64 = 128;
+pub(super) const ROW_BYTES: u64 = 128;
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct Session {
@@ -90,15 +90,20 @@ redacted_debug!(Session, MessageRoute, RouteReservation);
 #[derive(Default)]
 pub(super) struct ReservedRoutes {
     count: AtomicU32,
-    bytes: AtomicU64,
+    pub(super) bytes: AtomicU64,
 }
 
 pub(super) struct RegistryPolicy {
-    session_ttl_ms: i64,
+    pub(super) session_ttl_ms: i64,
     route_ttl_ms: i64,
+    pub(super) reply_ttl_ms: i64,
     sessions: u32,
     routes: u32,
-    metadata_bytes: u64,
+    pub(super) metadata_bytes: u64,
+    pub(super) inbox_items: u32,
+    pub(super) reply_bytes: u64,
+    pub(super) inbox_bytes: u64,
+    pub(super) receipts: u32,
 }
 
 impl RegistryPolicy {
@@ -106,8 +111,25 @@ impl RegistryPolicy {
         for (value, max, field) in [
             (storage.session_ttl_days, 3_650, "storage.session_ttl_days"),
             (storage.route_ttl_days, 3_650, "storage.route_ttl_days"),
+            (storage.reply_ttl_days, 3_650, "storage.reply_ttl_days"),
             (u64::from(limits.sessions), 100_000, "limits.sessions"),
             (u64::from(limits.routes), 1_000_000, "limits.routes"),
+            (
+                u64::from(limits.inbox_items),
+                1_000_000,
+                "limits.inbox_items",
+            ),
+            (u64::from(limits.receipts), 1_000_000, "limits.receipts"),
+            (
+                u64::from(limits.reply_bytes),
+                u64::from(limits.inbox_bytes.min(limits.telegram_response_bytes)),
+                "limits.reply_bytes",
+            ),
+            (
+                u64::from(limits.inbox_bytes),
+                1_073_741_824,
+                "limits.inbox_bytes",
+            ),
             (
                 u64::from(limits.metadata_bytes),
                 1_073_741_824,
@@ -121,9 +143,14 @@ impl RegistryPolicy {
         Ok(Self {
             session_ttl_ms: storage.session_ttl_days as i64 * DAY_MS,
             route_ttl_ms: storage.route_ttl_days as i64 * DAY_MS,
+            reply_ttl_ms: storage.reply_ttl_days as i64 * DAY_MS,
             sessions: limits.sessions,
             routes: limits.routes,
             metadata_bytes: u64::from(limits.metadata_bytes),
+            inbox_items: limits.inbox_items,
+            reply_bytes: u64::from(limits.reply_bytes),
+            inbox_bytes: u64::from(limits.inbox_bytes),
+            receipts: limits.receipts,
         })
     }
 }
@@ -176,7 +203,7 @@ impl Database {
         session.title = title;
         session.last_activity_at = session.last_activity_at.max(now);
         session.expires_at = session.expires_at.max(expires_at);
-        let (sessions, _, bytes) = usage(&transaction)?;
+        let used = usage(&transaction)?;
         let old_bytes = if let Some(existing) = &existing {
             // Schema v1 can contain titles not yet normalized by the registration API.
             let title_bytes: u64 = transaction.query_row(
@@ -188,8 +215,8 @@ impl Database {
         } else {
             0
         };
-        if (existing.is_none() && sessions >= u64::from(self.registry.sessions))
-            || bytes - old_bytes
+        if (existing.is_none() && used.sessions >= u64::from(self.registry.sessions))
+            || used.metadata_bytes - old_bytes
                 + session_bytes(&session)
                 + self.reserved_routes.bytes.load(Ordering::SeqCst)
                 > self.registry.metadata_bytes
@@ -228,11 +255,11 @@ impl Database {
     /// One shared Database owns all admissions, including simultaneous in-flight sends.
     pub fn reserve_route(&mut self, session_key: &str) -> Result<RouteReservation, AppError> {
         let session = self.session(session_key)?;
-        let (_, routes, bytes) = usage(&self.connection)?;
+        let used = usage(&self.connection)?;
         let route_bytes = ROW_BYTES + session.session_key.len() as u64;
-        if routes + u64::from(self.reserved_routes.count.load(Ordering::SeqCst))
+        if used.routes + u64::from(self.reserved_routes.count.load(Ordering::SeqCst))
             >= u64::from(self.registry.routes)
-            || bytes + self.reserved_routes.bytes.load(Ordering::SeqCst) + route_bytes
+            || used.metadata_bytes + self.reserved_routes.bytes.load(Ordering::SeqCst) + route_bytes
                 > self.registry.metadata_bytes
         {
             return Err(AppError::StorageCapacity);
@@ -330,7 +357,7 @@ impl Database {
     }
 }
 
-fn expiry(now: i64, ttl: i64) -> Result<i64, AppError> {
+pub(super) fn expiry(now: i64, ttl: i64) -> Result<i64, AppError> {
     if now < 0 {
         return Err(AppError::InvalidRequest("timestamp"));
     }
@@ -338,7 +365,7 @@ fn expiry(now: i64, ttl: i64) -> Result<i64, AppError> {
         .ok_or(AppError::InvalidRequest("timestamp"))
 }
 
-fn random_key() -> Result<String, AppError> {
+pub(super) fn random_key() -> Result<String, AppError> {
     let mut bytes = [0; 32];
     getrandom::fill(&mut bytes).map_err(|_| AppError::RandomUnavailable)?;
     let mut key = String::with_capacity(64);
@@ -382,14 +409,37 @@ fn session_bytes(session: &Session) -> u64 {
         + session.title.as_str().len() as u64
 }
 
-fn usage(connection: &Connection) -> Result<(u64, u64, u64), AppError> {
+pub(super) struct Usage {
+    pub sessions: u64,
+    pub routes: u64,
+    pub metadata_bytes: u64,
+    pub replies: u64,
+    pub payload_bytes: u64,
+    pub receipts: u64,
+}
+
+pub(super) fn usage(connection: &Connection) -> Result<Usage, AppError> {
+    // Fixed cursor/compacted-ignore bookkeeping is covered by the physical database cap.
     Ok(connection.query_row(
         "SELECT (SELECT count(*) FROM sessions), (SELECT count(*) FROM message_routes),
          (SELECT coalesce(sum(128 + length(CAST(session_key AS BLOB))
              + coalesce(length(CAST(external_session_id AS BLOB)), 0)
              + length(CAST(title AS BLOB))), 0) FROM sessions)
-         + (SELECT coalesce(sum(128 + length(CAST(session_key AS BLOB))), 0) FROM message_routes)",
+         + (SELECT coalesce(sum(128 + length(CAST(session_key AS BLOB))), 0) FROM message_routes)
+         + (SELECT coalesce(sum(128 + length(CAST(reply_id AS BLOB)) + length(CAST(session_key AS BLOB))
+             + coalesce(length(CAST(claim_token AS BLOB)), 0)
+             + coalesce(length(CAST(attachment_metadata_json AS BLOB)), 0)), 0) FROM replies)
+         + (SELECT coalesce(sum(128 + length(CAST(reply_id AS BLOB)) + length(CAST(session_key AS BLOB))
+             + length(CAST(claim_token AS BLOB))), 0) FROM acknowledgment_receipts)
+         + (SELECT count(*) * 128 FROM notice_attempts)
+         + (SELECT count(*) * 128 FROM update_dispositions WHERE kind = 'unroutable'),
+         (SELECT count(*) FROM replies),
+         (SELECT coalesce(sum(coalesce(length(CAST(text_or_caption AS BLOB)), 0)
+             + coalesce(length(CAST(attachment_metadata_json AS BLOB)), 0)), 0) FROM replies),
+         (SELECT count(*) FROM acknowledgment_receipts)
+         + (SELECT count(*) FROM update_dispositions WHERE kind = 'unroutable')",
         [],
-        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        |r| Ok(Usage { sessions: r.get(0)?, routes: r.get(1)?, metadata_bytes: r.get(2)?,
+            replies: r.get(3)?, payload_bytes: r.get(4)?, receipts: r.get(5)? }),
     )?)
 }

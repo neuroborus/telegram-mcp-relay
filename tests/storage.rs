@@ -85,7 +85,7 @@ fn initializes_private_database_and_reopens_without_resetting_state() {
     let fixture = Fixture::new();
     let settings = fixture.settings();
     let database = Database::open(&settings, &Limits::default()).unwrap();
-    assert_eq!(database.schema_version().unwrap(), 1);
+    assert_eq!(database.schema_version().unwrap(), 2);
     assert_eq!(
         fs::metadata(&settings.path).unwrap().permissions().mode() & 0o777,
         0o600
@@ -117,8 +117,13 @@ fn initializes_private_database_and_reopens_without_resetting_state() {
         .unwrap();
     drop(connection);
     drop(database);
+    // Recreate the accepted v1 shape, then verify migration preserves replies and cursor.
+    fixture
+        .connect()
+        .execute_batch("DROP TABLE update_dispositions; PRAGMA user_version = 1;")
+        .unwrap();
     let reopened = Database::open(&settings, &Limits::default()).unwrap();
-    assert_eq!(reopened.schema_version().unwrap(), 1);
+    assert_eq!(reopened.schema_version().unwrap(), 2);
     let connection = fixture.connect();
     let saved: (String, i64) = connection.query_row(
         "SELECT reply_id, last_durably_processed_update_id FROM replies CROSS JOIN telegram_cursor",

@@ -20,6 +20,8 @@ The library adds a bounded [Bot API client](docs/ARCHITECTURE.md#telegram-http-c
 [text delivery](docs/ARCHITECTURE.md#text-delivery) and
 [streamed document delivery](docs/ARCHITECTURE.md#document-delivery) with cancellation-safe
 durable reply routes. Production startup composition remains a later step.
+Library [reply ingestion](docs/ARCHITECTURE.md#reply-ingestion) commits authorized replies and
+the update cursor atomically; long polling and notification delivery are not wired yet.
 The specification calls the product **Telegram MCP Bridge**; this repository and binary are
 named **telegram-mcp-relay**.
 
