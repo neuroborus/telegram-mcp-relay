@@ -12,7 +12,7 @@ use crate::{
     repositories::{Database, RouteKind, RouteReservation},
 };
 
-use super::{files::ValidatedFile, unix_millis};
+use super::{files::ValidatedFile, typing::TypingService, unix_millis};
 
 enum Delivery {
     Text(String),
@@ -28,6 +28,7 @@ pub struct OutboundService {
     chat_id: i64,
     admission: Arc<Semaphore>,
     now: fn() -> Result<i64, AppError>,
+    typing: TypingService,
 }
 
 impl OutboundService {
@@ -50,12 +51,18 @@ impl OutboundService {
             return Err(AppError::InvalidConfig("limits.background_tasks"));
         }
         Ok(Self {
+            typing: TypingService::new(telegram.clone(), config)?,
             database,
             telegram,
             chat_id: config.telegram.chat_id,
             admission: Arc::new(Semaphore::new(config.limits.background_tasks as usize)),
             now: unix_millis,
         })
+    }
+
+    /// Use this scheduler for confirmed inbox processing and all clones of this sender.
+    pub fn typing(&self) -> TypingService {
+        self.typing.clone()
     }
 
     /// Validate the session and complete plain text before reserving capacity or sending.
@@ -98,9 +105,12 @@ impl OutboundService {
         // No await separates admission from transfer to the owned task. Dropping the join
         // handle cannot abort the send or the synchronous post-send transaction.
         let service = self.clone();
+        let session_key = session_key.to_owned();
         tokio::spawn(async move {
             let _permit = permit;
-            let result = service.send_reserved(delivery, reservation).await;
+            let result = service
+                .send_reserved(delivery, reservation, &session_key)
+                .await;
             if let Err(error) = &result {
                 // Detached callers must not hide uncertainty; log only a safe static code.
                 tracing::warn!(code = error.code(), "Admitted Telegram send failed");
@@ -115,6 +125,7 @@ impl OutboundService {
         &self,
         delivery: Delivery,
         reservation: RouteReservation,
+        session_key: &str,
     ) -> Result<SentMessage, AppError> {
         let (sent, kind) = match delivery {
             Delivery::Text(text) => (
@@ -131,6 +142,9 @@ impl OutboundService {
                 )
             }
         };
+        // A known accepted result clears this session even if route persistence fails.
+        // Rejected or ambiguous sends cannot establish that the agent sent its result.
+        self.typing.stop_session(session_key);
         self.record_success(reservation, &sent, kind)?;
         Ok(sent)
     }

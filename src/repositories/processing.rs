@@ -69,6 +69,7 @@ impl Database {
         Ok(owned.status)
     }
 
+    /// Return the recovered/new result and whether this call committed a new token rotation.
     pub(crate) fn reconcile_processing(
         &mut self,
         session_key: &str,
@@ -76,7 +77,7 @@ impl Database {
         claim_token: &str,
         request_id: &str,
         now: i64,
-    ) -> Result<ReconciledProcessing, AppError> {
+    ) -> Result<(ReconciledProcessing, bool), AppError> {
         validate_transition(reply_id, claim_token, now)?;
         if request_id.is_empty() || request_id.len() > 64 || request_id.contains('\0') {
             return Err(AppError::InvalidRequest("reconciliation request ID"));
@@ -104,7 +105,7 @@ impl Database {
             )
             .optional()?;
         if let Some(recovered) = recovered {
-            return Ok(recovered);
+            return Ok((recovered, false));
         }
         let owned = owned_reply(&transaction, session_key, reply_id, claim_token, now)?;
         if owned.status.processing_started_at.is_none() {
@@ -132,10 +133,13 @@ impl Database {
         }
         transaction.commit()?;
         self.inbox_notifications.publish(session_key);
-        Ok(ReconciledProcessing {
-            claim_token: token,
-            status: owned.status,
-        })
+        Ok((
+            ReconciledProcessing {
+                claim_token: token,
+                status: owned.status,
+            },
+            true,
+        ))
     }
 
     pub(crate) fn acknowledge_reply(

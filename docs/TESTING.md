@@ -131,6 +131,21 @@ These cases cover the ask/event/race, timeout and wait-cancellation portions of 
 16 and 19. Fixtures are private and TMPDIR-aware. Execution remains pending FINALIZE;
 full-composition acceptance and named-client interoperability remain later work.
 
+`services::typing::tests` uses controlled time for per-chat merging, independent session/reply
+stops, cooldowns across stop/start races, the original 600-second cap across repeated starts
+and reconciliation, disabled/unconfirmed/unapproved activity, bounded RAM and empty restart.
+Controlled pending/ready request futures prove that a stalled chat cannot delay a healthy
+chat's first action or refreshes. Wall-clock rollback followed by inactivity/resume or expiry
+cannot reset a remembered monotonic cap; completion releases its bounded RAM admission.
+`services::outbound::tests::typing` uses the real mocked Bot API and protected SQLite to cover
+commit-before-action, failed/stale transition safety, a stalled action stopped by inactivity,
+overlapping same-title sessions, accepted text/document sends stopping only their own session,
+rejection preserving activity, explicit resume, reconciliation retry after resumed processing,
+and expiry without completion or notices.
+The client tests also assert single-attempt chat actions with safe rate-limit propagation.
+These cases address typing criteria in §§7, 16 and 19. Execution remains pending FINALIZE;
+no live Telegram behavior or runtime measurements are claimed.
+
 Use the specification's complete section 16 matrix and [test-authoring](../.agents/skills/test-authoring/SKILL.md).
 Pure domain tests cover grapheme title normalization, final scalar text limits and native
 caption limits. Integration tests cover the interactions that pure tests cannot prove:

@@ -17,7 +17,8 @@ Bounded library inbox snapshots, pre-processing claims, durable processing-start
 explicit reconciliation and acknowledgment operations are available. MCP registration and
 outbound tools, read-only inbox resources and inbox/processing/acknowledgment tools are
 available. Modern resource subscriptions deliver bounded post-commit inbox invalidations;
-bounded asks use the common claim path without disabling events. Typing remains later work.
+bounded asks use the common claim path without disabling events. Confirmed processing now drives
+one shared, capped typing scheduler in the library.
 
 The library now provides centralized validated TOML settings and typed, redacted startup
 errors in `config`/`error`, with protected Unix secret resolution under `config::secrets`.
@@ -198,8 +199,8 @@ request ID and prior token. Registration alone never rotates ownership.
 `telegram_ack({session_key, reply_id, claim_token})` removes the successfully handled payload
 through the existing bounded receipt transaction and returns `reply_id`/`acknowledged=true`.
 Identical valid-token retries succeed while the receipt remains valid; stale or wrong-session
-claims return `CLAIM_INVALID`. New MCP interaction tests await FINALIZE; waiting,
-typing and named-client interoperability are not established by these resources.
+claims return `CLAIM_INVALID`. New MCP interaction tests await FINALIZE; named-client
+interoperability is not established by these resources.
 
 ## MCP resource subscriptions
 
@@ -448,7 +449,7 @@ Connection establishment has a five-second limit. Each attempt covers headers an
 response body within 15 seconds, configured poll seconds plus ten for `getUpdates`, or
 600 seconds for documents including upload.
 Advertised and actual body sizes are capped by `limits.telegram_response_bytes` before JSON
-decoding. Reads and idempotent chat actions allow three attempts with exponential 250/500 ms
+decoding. Reads allow three attempts with exponential 250/500 ms
 backoff plus less than that interval of jitter. Telegram `retry_after` takes precedence;
 delays above 30 seconds are returned to the caller without shortening or sleeping. There
 are at most two retry sleeps, so each invocation remains finite. Cancellation drops the call.
@@ -527,7 +528,8 @@ are excluded from automatic recovery; reads/claims never acknowledge, delete or 
 Pre-processing claims must also have an unexpired lease. The first active call atomically
 records processing start and removes the claim lease; repeated calls preserve that first
 timestamp. Inactivity preserves durable ownership and does not complete or requeue a reply.
-These synchronous transactions have no network effects or typing timers.
+The repository transaction has no network effects or typing timers. The shared inbox service
+updates optional RAM typing activity only after a successful fenced transition.
 
 Explicit `reconcile_processing` requires the saved current token as a compare-and-swap fence
 for a processing reply and a fresh, unguessable client request ID of 1–64 UTF-8 bytes
@@ -548,6 +550,39 @@ capacity. Receipt retention uses the configured reply TTL from completion; retri
 refresh it. Receipt counts share `limits.receipts` with unroutable dispositions. Metadata
 admission accounts for replacement bytes and outstanding send reservations. Admission or
 transaction failure preserves the reply and ownership; no valid records are evicted.
+
+## Confirmed-processing typing
+
+`OutboundService::typing` exposes one shared `services::typing::TypingService` for sender clones
+and `InboxService::with_typing`. `McpHandler` connects these once for all request factories.
+Only a successful durable `processing(active=true)` enables activity. Receipt, claims, reads,
+waits and registration never start typing. A new reconciliation rotation stops the previous
+RAM activity; an explicit active call with the rotated token resumes within the original
+first-start cap. Recovering an identical reconciliation result leaves resumed activity intact.
+
+One lazy task merges active replies per chat, sends immediately when the chat is eligible and
+refreshes every configured four seconds by default. Each request is attempted once and bounded
+by the refresh interval and remaining chat activity; rate-limit cooldowns honor `retry_after`.
+The single task polls bounded concurrent request futures, at most one per allowlisted chat,
+admitting all due chats in stable order. A stalled request cannot delay another chat. One
+coordinated timer cancels requests whose chat becomes inactive or reaches its deadline.
+A request already delivered to Telegram cannot be recalled; its visible status lasts at most
+about five seconds and may clear on a bot message.
+Cooldowns survive quick stop/start races, limiting each chat to one attempt per interval.
+
+The durable first-start timestamp bounds activity at 600 seconds (or a lower configured cap).
+Monotonic caps survive inactivity, reconciliation and expiry, so a backwards wall-clock change
+cannot extend them on a later active call. Valid inactivity or acknowledgment stops that reply;
+a known accepted text/document send stops only its session,
+including when detached bookkeeping later fails. Rejected/uncertain sends preserve activity.
+Other active sessions keep the merged chat eligible. Failed transitions have no typing effect.
+
+Active and inactive cap entries contain only IDs/deadlines/flags and together are bounded by
+`limits.inbox_items`; acknowledgment releases an entry. Admission never evicts remembered caps.
+Cooldowns and outstanding request futures are bounded by the allowlisted chats.
+At idle the task exits, with no periodic timer for retained caps. The last shared handle
+cancels the worker; a new service starts empty. Expiry affects no durable processing/ack state,
+wait or agent execution, and sends no notice. Production supervision remains later work.
 
 ## Telegram long polling
 

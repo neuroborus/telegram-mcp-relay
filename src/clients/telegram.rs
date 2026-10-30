@@ -143,14 +143,17 @@ impl TelegramClient {
     }
 
     pub async fn send_chat_action(&self, chat_id: i64) -> Result<(), AppError> {
-        let sent: bool = self
-            .call(
+        // The shared typing scheduler owns refreshes, cancellation and rate-limit cooldowns.
+        // Internal retries could outlive a lease or send twice within one refresh interval.
+        let sent: bool = tokio::time::timeout(
+            REQUEST_TIMEOUT,
+            self.request(
                 "sendChatAction",
                 &json!({"chat_id": chat_id, "action": "typing"}),
-                true,
-                REQUEST_TIMEOUT,
-            )
-            .await?;
+            ),
+        )
+        .await
+        .unwrap_or(Err(TelegramError::Deadline))?;
         if !sent {
             return Err(TelegramError::InvalidResponse.into());
         }
@@ -179,10 +182,7 @@ impl TelegramClient {
             let Some(delay) = retry_delay(&error, attempt, jitter()) else {
                 return Err(error);
             };
-            tracing::debug!(
-                attempt = attempt + 1,
-                "Retrying Telegram read or chat action"
-            );
+            tracing::debug!(attempt = attempt + 1, "Retrying Telegram read");
             self.pause_retry(delay).await;
             attempt += 1;
         }

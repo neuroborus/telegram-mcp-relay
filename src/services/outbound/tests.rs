@@ -14,6 +14,8 @@ use crate::{config::Storage, repositories::Session, services::files::OutboundFil
 
 #[path = "documents.rs"]
 mod documents;
+#[path = "typing.rs"]
+mod typing;
 
 enum Response {
     Json(u16, Value),
@@ -166,8 +168,12 @@ impl Mock {
                             .unwrap()
                             .to_owned();
                         assert!(
-                            ["/botSynthetic/sendMessage", "/botSynthetic/sendDocument"]
-                                .contains(&method.as_str())
+                            [
+                                "/botSynthetic/sendMessage",
+                                "/botSynthetic/sendDocument",
+                                "/botSynthetic/sendChatAction"
+                            ]
+                            .contains(&method.as_str())
                         );
                         let length: usize = header
                             .lines()

@@ -60,11 +60,12 @@ impl McpHandler {
             .inbox_notifications
             .clone();
         let outbound = OutboundService::new(database.clone(), telegram, config)?;
+        let inbox = InboxService::new(&config.delivery)?.with_typing(outbound.typing());
         Ok(Self {
             asks: AskService::new(database.clone(), outbound.clone(), &config.delivery)?,
             outbound,
             files: OutboundFiles::new(&config.files)?,
-            inbox: InboxService::new(&config.delivery)?,
+            inbox,
             database,
             notifications,
         })
@@ -253,7 +254,7 @@ fn tools() -> Vec<Tool> {
             .with_input_schema::<SendFileRequest>().with_output_schema::<SendResult>(),
         Tool::new("telegram_inbox", "Atomically claim eligible replies on startup, resume or notification; preserve reply IDs and tokens. Never poll periodically. Read resources for snapshots without claiming.", serde_json::Map::new())
             .with_input_schema::<InboxRequest>().with_output_schema::<InboxResult>(),
-        Tool::new("telegram_processing", "Confirm processing start or inactivity with active; neither completes the reply. For explicit resume supply only reconcile_request_id and the saved token; retain the rotated token. Typing is not yet implemented.", serde_json::Map::new())
+        Tool::new("telegram_processing", "Confirm processing start or inactivity with active; neither completes the reply. Typing merges per chat and stops by ten minutes from first start. For explicit resume supply only reconcile_request_id and the saved token, then confirm active to resume typing; retain the rotated token.", serde_json::Map::new())
             .with_input_schema::<ProcessingRequest>().with_output_schema::<ProcessingResult>(),
         Tool::new("telegram_ack", "Acknowledge successful handling with the current session, reply ID and token. Identical valid-token retries are idempotent; stale tokens cannot complete work.", serde_json::Map::new())
             .with_input_schema::<AckRequest>().with_output_schema::<AckResult>(),

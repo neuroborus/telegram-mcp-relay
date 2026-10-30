@@ -10,6 +10,7 @@ pub mod inbox;
 pub mod ingress;
 pub mod outbound;
 pub mod polling;
+pub mod typing;
 
 pub(crate) fn unix_millis() -> Result<i64, AppError> {
     SystemTime::now()

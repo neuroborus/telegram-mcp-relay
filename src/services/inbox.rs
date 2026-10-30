@@ -1,4 +1,6 @@
-//! Reply ownership shared by inbox tools and question waiters; no network effects or timers.
+//! Reply ownership shared by inbox tools and question waiters, with post-commit RAM activity.
+
+use super::typing::TypingService;
 
 use crate::{
     config::Delivery,
@@ -8,6 +10,7 @@ use crate::{
 
 pub struct InboxService {
     claim_lease_ms: i64,
+    typing: Option<TypingService>,
 }
 
 impl InboxService {
@@ -17,7 +20,14 @@ impl InboxService {
         }
         Ok(Self {
             claim_lease_ms: settings.claim_lease_seconds as i64 * 1_000,
+            typing: None,
         })
+    }
+
+    /// Attach the same scheduler used by outbound delivery; claims alone never start it.
+    pub fn with_typing(mut self, typing: TypingService) -> Self {
+        self.typing = Some(typing);
+        self
     }
 
     /// Acquire pending or lease-expired pre-processing replies in receipt order.
@@ -45,7 +55,15 @@ impl InboxService {
         active: bool,
         now: i64,
     ) -> Result<ProcessingStatus, AppError> {
-        database.processing(session_key, reply_id, claim_token, active, now)
+        let status = database.processing(session_key, reply_id, claim_token, active, now)?;
+        if let Some(typing) = &self.typing {
+            if active {
+                typing.start(session_key, reply_id, &status, now);
+            } else {
+                typing.stop(reply_id);
+            }
+        }
+        Ok(status)
     }
 
     /// Save a fresh, unguessable request ID (1–64 UTF-8 bytes) with the token before resume.
@@ -60,7 +78,12 @@ impl InboxService {
         request_id: &str,
         now: i64,
     ) -> Result<ReconciledProcessing, AppError> {
-        database.reconcile_processing(session_key, reply_id, claim_token, request_id, now)
+        let (resumed, rotated) =
+            database.reconcile_processing(session_key, reply_id, claim_token, request_id, now)?;
+        if rotated && let Some(typing) = &self.typing {
+            typing.stop(reply_id);
+        }
+        Ok(resumed)
     }
 
     /// Complete only this valid claim, atomically removing payloads and saving a
@@ -73,6 +96,10 @@ impl InboxService {
         claim_token: &str,
         now: i64,
     ) -> Result<(), AppError> {
-        database.acknowledge_reply(session_key, reply_id, claim_token, now)
+        database.acknowledge_reply(session_key, reply_id, claim_token, now)?;
+        if let Some(typing) = &self.typing {
+            typing.complete(reply_id);
+        }
+        Ok(())
     }
 }

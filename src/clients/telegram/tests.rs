@@ -150,6 +150,35 @@ async fn plain_send_and_typing_use_typed_results_and_validate_before_io() {
 }
 
 #[tokio::test]
+async fn chat_actions_return_rate_limits_without_internal_retries() {
+    let mock = Mock::new(
+        vec![reply(
+            429,
+            r#"{"ok":false,"error_code":429,"parameters":{"retry_after":30}}"#,
+        )],
+        8_192,
+    )
+    .await;
+    assert_eq!(
+        mock.client.send_chat_action(101).await.unwrap_err(),
+        AppError::Telegram(TelegramError::Rejected {
+            code: 429,
+            retry_after_seconds: Some(30)
+        })
+    );
+    assert_eq!(mock.count(), 1);
+    assert!(
+        mock.client
+            .retry_delays
+            .as_ref()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
 async fn updates_preserve_reply_and_attachment_metadata_without_recursive_quotes() {
     let body = json!({"ok":true,"result":[{"update_id":12,"message":{
         "message_id":8,"date":101,"chat":{"id":101},"from":{"id":202,"is_bot":false},
