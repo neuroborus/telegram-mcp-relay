@@ -470,6 +470,7 @@ pub(super) fn usage(connection: &Connection) -> Result<Usage, AppError> {
          (SELECT coalesce(sum(coalesce(length(CAST(text_or_caption AS BLOB)), 0)
              + coalesce(length(CAST(attachment_metadata_json AS BLOB)), 0)), 0) FROM replies),
          (SELECT count(*) FROM acknowledgment_receipts)
+         + (SELECT count(*) FROM notice_attempts)
          + (SELECT count(*) FROM update_dispositions WHERE kind = 'unroutable')",
         [],
         |r| Ok(Usage { sessions: r.get(0)?, routes: r.get(1)?, metadata_bytes: r.get(2)?,

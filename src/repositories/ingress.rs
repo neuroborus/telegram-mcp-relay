@@ -86,7 +86,11 @@ impl Database {
         let duplicate: bool = if let Some(reply) = &reply {
             transaction.query_row(
                 "SELECT EXISTS(SELECT 1 FROM replies WHERE telegram_chat_id = ?1
-                 AND telegram_message_id = ?2)",
+                 AND telegram_message_id = ?2
+                 UNION ALL SELECT 1 FROM update_dispositions WHERE kind = 'unroutable'
+                 AND telegram_chat_id = ?1 AND telegram_message_id = ?2
+                 UNION ALL SELECT 1 FROM notice_attempts WHERE telegram_chat_id = ?1
+                 AND trigger_message_id = ?2)",
                 (reply.chat_id, reply.message_id),
                 |r| r.get(0),
             )?
@@ -155,7 +159,8 @@ impl Database {
                 ("ignored", IngestOutcome::Ignored)
             };
             transaction.execute(
-                "INSERT INTO update_dispositions VALUES(?1, ?2, ?3, ?4, ?5, ?6)
+                "INSERT INTO update_dispositions(telegram_update_id, kind, telegram_chat_id,
+                 telegram_message_id, created_at, expires_at) VALUES(?1, ?2, ?3, ?4, ?5, ?6)
                  ON CONFLICT(kind) WHERE kind = 'ignored' DO UPDATE SET
                     telegram_update_id = excluded.telegram_update_id,
                     created_at = excluded.created_at, expires_at = excluded.expires_at",
@@ -188,6 +193,7 @@ fn update_processed(connection: &Connection, update_id: i64) -> Result<bool, App
             SELECT 1 FROM telegram_cursor WHERE last_durably_processed_update_id = ?1
             UNION ALL SELECT 1 FROM replies WHERE telegram_update_id = ?1
             UNION ALL SELECT 1 FROM acknowledgment_receipts WHERE telegram_update_id = ?1
+            UNION ALL SELECT 1 FROM notice_attempts WHERE telegram_update_id = ?1
             UNION ALL SELECT 1 FROM update_dispositions WHERE telegram_update_id = ?1)",
         [update_id],
         |r| r.get(0),

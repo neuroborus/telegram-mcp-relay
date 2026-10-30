@@ -30,10 +30,12 @@ mod inbox;
 pub use inbox::{ClaimedReply, InboxCursor, InboxPage, InboxReply, ReplyState, ReplyTarget};
 mod processing;
 pub use processing::{ProcessingStatus, ReconciledProcessing};
+mod notices;
+pub use notices::{NoticeAttempt, NoticeKind, NoticePolicy};
 mod notifications;
 pub(crate) use notifications::{InboxNotifications, InboxSubscription};
 
-const SCHEMA_VERSION: i64 = 4;
+const SCHEMA_VERSION: i64 = 5;
 const APPLICATION_ID: i64 = 0x544d4352; // TMCR
 
 /// One private connection; services will expose narrowly scoped transactions, not raw SQL.
@@ -149,6 +151,9 @@ fn initialize(connection: &mut Connection) -> Result<(), AppError> {
     }
     if version < 4 {
         transaction.execute_batch(include_str!("repositories/processing.sql"))?;
+    }
+    if version < 5 {
+        transaction.execute_batch(include_str!("repositories/notices.sql"))?;
     }
     transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     let vacuum: i64 = transaction.pragma_query_value(None, "auto_vacuum", |r| r.get(0))?;

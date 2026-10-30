@@ -13,6 +13,8 @@ typed [registration and outbound tools](docs/ARCHITECTURE.md#mcp-registration-an
 and [modern resource subscriptions](docs/ARCHITECTURE.md#mcp-resource-subscriptions)
 are available in the library, alongside [bounded asks](docs/ARCHITECTURE.md#bounded-asks).
 Confirmed-processing typing is available in the library; runnable relay setup remains pending.
+Library [notice arbitration](docs/ARCHITECTURE.md#durable-notice-arbitration) persists once-only
+attempt decisions; Telegram notice dispatch remains pending.
 The library also implements validated [configuration and protected secrets](docs/CONFIGURATION.md);
 the binary does not load configuration yet.
 Pure [outbound formatting rules](docs/ARCHITECTURE.md#outbound-formatting) normalize session

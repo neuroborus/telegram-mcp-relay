@@ -85,7 +85,7 @@ fn initializes_private_database_and_reopens_without_resetting_state() {
     let fixture = Fixture::new();
     let settings = fixture.settings();
     let database = Database::open(&settings, &Limits::default()).unwrap();
-    assert_eq!(database.schema_version().unwrap(), 4);
+    assert_eq!(database.schema_version().unwrap(), 5);
     assert_eq!(
         fs::metadata(&settings.path).unwrap().permissions().mode() & 0o777,
         0o600
@@ -122,17 +122,36 @@ fn initializes_private_database_and_reopens_without_resetting_state() {
             [],
         )
         .unwrap();
+    connection
+        .execute(
+            "INSERT INTO notice_attempts VALUES(12, -101, 9, 'unroutable', NULL, 150, 250)",
+            [],
+        )
+        .unwrap();
     drop(connection);
     drop(database);
     // Recreate each accepted older shape, preserving its records through migration.
-    for version in [1, 2, 3] {
+    for version in [1, 2, 3, 4] {
         let connection = fixture.connect();
         connection
             .execute_batch(
-                "ALTER TABLE replies DROP COLUMN reconciliation_from_token;
-                ALTER TABLE replies DROP COLUMN reconciliation_request_id;",
+                "DROP INDEX dispositions_notice;
+                DROP INDEX dispositions_message;
+                DROP INDEX notices_trigger;
+                ALTER TABLE update_dispositions DROP COLUMN notice_attempted;
+                DROP INDEX replies_notice;
+                CREATE INDEX replies_notice ON replies(created_at)
+                    WHERE processing_started_at IS NULL AND notice_attempted = 0;",
             )
             .unwrap();
+        if version < 4 {
+            connection
+                .execute_batch(
+                    "ALTER TABLE replies DROP COLUMN reconciliation_from_token;
+                    ALTER TABLE replies DROP COLUMN reconciliation_request_id;",
+                )
+                .unwrap();
+        }
         if version == 1 {
             connection
                 .execute_batch("DROP TABLE update_dispositions")
@@ -143,11 +162,16 @@ fn initializes_private_database_and_reopens_without_resetting_state() {
                 .execute_batch("DROP INDEX replies_ordered")
                 .unwrap();
         }
+        if version > 1 {
+            connection.execute(
+                "INSERT OR IGNORE INTO update_dispositions VALUES(12, 'unroutable', -101, 9, 140, 240)", [],
+            ).unwrap();
+        }
         connection
             .pragma_update(None, "user_version", version)
             .unwrap();
         let reopened = Database::open(&settings, &Limits::default()).unwrap();
-        assert_eq!(reopened.schema_version().unwrap(), 4);
+        assert_eq!(reopened.schema_version().unwrap(), 5);
         assert_eq!(
             reopened.inbox_snapshot("a", None, 1, 150).unwrap().replies[0].processing_started_at,
             Some(130)
@@ -157,6 +181,24 @@ fn initializes_private_database_and_reopens_without_resetting_state() {
         [], |r| Ok((r.get(0)?, r.get(1)?)),
     ).unwrap();
         assert_eq!(saved, ("reply-a".into(), 11));
+        let notice: (Option<i64>, i64, i64) = connection
+            .query_row(
+                "SELECT notice_message_id, created_at, expires_at FROM notice_attempts",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(notice, (None, 150, 250));
+        if version > 1 {
+            let disposition: (i64, i64, i64) = connection
+                .query_row(
+                    "SELECT notice_attempted, created_at, expires_at FROM update_dispositions",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+                .unwrap();
+            assert_eq!(disposition, (1, 140, 240));
+        }
     }
 }
 

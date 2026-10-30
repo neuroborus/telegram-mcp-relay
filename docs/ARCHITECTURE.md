@@ -19,6 +19,7 @@ outbound tools, read-only inbox resources and inbox/processing/acknowledgment to
 available. Modern resource subscriptions deliver bounded post-commit inbox invalidations;
 bounded asks use the common claim path without disabling events. Confirmed processing now drives
 one shared, capped typing scheduler in the library.
+Durable notice-attempt arbitration is available; Telegram notice dispatch remains pending.
 
 The library now provides centralized validated TOML settings and typed, redacted startup
 errors in `config`/`error`, with protected Unix secret resolution under `config::secrets`.
@@ -305,6 +306,8 @@ migration preserving existing records.
 Version 3 adds a session/receipt-time/update-ID index for ordered inbox access.
 Version 4 adds nullable recovery-proof columns for the latest processing reconciliation;
 existing claims and first-start timestamps survive the transactional migration.
+Version 5 adds an unroutable-attempt flag and indexes for receipt-ordered notice eligibility
+and composite trigger deduplication, preserving existing attempts and receipt times.
 
 Initialization enables incremental auto-vacuum before the schema transaction. DDL, initial
 cursor, application ID and version commit together under an immediate transaction; errors
@@ -503,8 +506,31 @@ variable metadata accounting including send reservations. Unroutable disposition
 receipt count budget and reply TTL. The fixed ignored marker is bookkeeping like the singleton
 cursor: it consumes no receipt or variable metadata admission and remains under the physical
 database cap. Compacting it removes no reply, receipt or notice obligation; older ignored input
-may be ignored again without retaining contents or generating effects. Cleanup, downloads,
-notices remain later work.
+may be ignored again without retaining contents or generating effects. Cleanup, downloads
+and Telegram notice dispatch remain later work.
+
+## Durable notice arbitration
+
+`NoticePolicy` uses `delivery.processing_start_grace_seconds` (default 60) and the two
+`notifications` switches. `Database::take_notice_attempts` selects at most 100 unexpired
+eligible records in receipt-time/update-ID order through partial eligibility indexes.
+Unconfirmed eligibility starts at durable receipt plus grace; claims do not suppress it.
+A recorded first processing start excludes the reply permanently, including after inactivity,
+reconciliation or typing expiry. Completed replies have no pending notice obligation.
+
+An immediate transaction serializes first start and notice admission across connections.
+If first start commits first, no attempt is returned. If notice admission commits first,
+a later start remains valid but cannot undo that attempt. Each returned attempt already has
+a durable record and source flag; a crash before dispatch or an ambiguous send consumes it.
+It is an attempt decision, not proof of delivery, and never authorizes automatic retries.
+
+Authorized unroutable dispositions commit with ingress and deduplicate by composite trigger
+as well as update ID. Retained attempts also suppress redelivery after disposition removal.
+Notice attempts share the receipt count and metadata budgets with acknowledgments and
+unroutable dispositions, including outstanding send reservations. Any batch admission/SQL
+failure rolls back every decision without removing replies or advancing ingress. Attempt
+expiry stays anchored to the source reply/disposition expiry; attempts have no payload or
+reply/session foreign key. Cleanup and actual notice scheduling/delivery are later steps.
 
 ## Inbox snapshots and claims
 

@@ -34,6 +34,10 @@ an incomplete private file requiring operator removal. No parent directories are
 Wait/grace settings accept 1–86,400 seconds; claims 1–600; independent typing duration 1–600
 with refresh 1–5 seconds no longer than that duration. Long polling defaults to 45 (1–50).
 Independent session/route/reply TTLs default to 30 days (1–3,650); cleanup to 24 hours (1–168).
+Library notice arbitration uses `delivery.processing_start_grace_seconds` (default 60) from
+durable receipt and honors `notifications.notify_unconfirmed_processing` and
+`notifications.notify_unroutable` (both default true). Disabled categories consume no attempts.
+Dispatch and production scheduler wiring remain pending.
 
 `telegram_ask` honors `delivery.wait_fallback_enabled` (default true) and
 `delivery.wait_timeout_seconds` (default 600), starting its deadline after send bookkeeping.
@@ -69,10 +73,14 @@ database file is page-limited by `storage.max_database_bytes`. Session/route adm
 `limits.sessions`, `limits.routes` and logical `limits.metadata_bytes`, including in-flight route
 reservations. Ingestion enforces `limits.inbox_items`, `limits.reply_bytes` and
 `limits.inbox_bytes` over retained UTF-8 text and serialized attachment metadata. Attachment
-JSON also counts toward shared metadata; unroutable dispositions share `limits.receipts`
-with acknowledgment receipts. Ignored input compacts into one fixed bookkeeping marker outside
-these variable admission budgets, bounded by the physical database cap. Pressure rejects
-reply/unroutable admission without eviction or cursor advancement.
+JSON also counts toward shared metadata; unroutable dispositions and notice attempts share
+`limits.receipts` with acknowledgment receipts. Each notice attempt adds a fixed metadata row;
+its source record remains retained independently. Ignored input compacts into one fixed
+bookkeeping marker outside these variable admission budgets, bounded by the physical database
+cap. Pressure rejects reply/unroutable admission without eviction or cursor advancement.
+Notice batches contain at most 100 decisions, with whole-batch rollback on capacity failure;
+unattempted sources remain eligible. Attempts retain the original source expiry, and consumed
+attempts never become retryable after cancellation, uncertain delivery or restart.
 Inbox pages and claim batches contain at most 100 items and `limits.reply_bytes` combined
 payload bytes. Claims enforce `delivery.claim_lease_seconds` (default 60, maximum 600) before
 processing starts; processing work is not lease-expired. Tokens count toward shared metadata
