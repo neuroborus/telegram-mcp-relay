@@ -36,6 +36,9 @@ mod notifications;
 pub(crate) use notifications::{InboxNotifications, InboxSubscription};
 mod retention;
 pub use retention::{CleanupBatch, CleanupSweep};
+mod maintenance;
+pub use maintenance::DiskUsage;
+pub(crate) use maintenance::RECLAIM_PAGES;
 
 const SCHEMA_VERSION: i64 = 6;
 const APPLICATION_ID: i64 = 0x544d4352; // TMCR
@@ -43,6 +46,8 @@ const APPLICATION_ID: i64 = 0x544d4352; // TMCR
 /// One private connection; services will expose narrowly scoped transactions, not raw SQL.
 pub struct Database {
     connection: Connection,
+    files: maintenance::DatabaseFiles,
+    main_file_limit_bytes: u64,
     registry: registry::RegistryPolicy,
     reserved_routes: Arc<registry::ReservedRoutes>,
     pending_routes: Vec<Weak<String>>,
@@ -61,8 +66,9 @@ impl Database {
         if !(1_048_576..=1_073_741_824).contains(&settings.max_database_bytes) {
             return Err(AppError::InvalidConfig("storage.max_database_bytes"));
         }
-        let file = protected_file(&settings.path)?;
-        if file
+        let files = protected_file(&settings.path)?;
+        if files
+            .database
             .metadata()
             .map_err(|_| AppError::StorageUnavailable)?
             .len()
@@ -105,6 +111,8 @@ impl Database {
         initialize(&mut connection)?;
         Ok(Self {
             connection,
+            files,
+            main_file_limit_bytes: u64::from(pages) * u64::from(page_size),
             registry,
             reserved_routes: Arc::default(),
             pending_routes: Vec::new(),
@@ -173,7 +181,7 @@ fn initialize(connection: &mut Connection) -> Result<(), AppError> {
     Ok(())
 }
 
-fn protected_file(path: &Path) -> Result<File, AppError> {
+fn protected_file(path: &Path) -> Result<maintenance::DatabaseFiles, AppError> {
     let unavailable = || AppError::StorageUnavailable;
     if !path.is_absolute() || path.components().any(|c| matches!(c, Component::ParentDir)) {
         return Err(unavailable());
@@ -216,7 +224,13 @@ fn protected_file(path: &Path) -> Result<File, AppError> {
             Err(_) => return Err(unavailable()),
         }
     }
-    Ok(file)
+    let mut journal_name = name.to_os_string();
+    journal_name.push("-journal");
+    Ok(maintenance::DatabaseFiles {
+        database: file,
+        directory: parent,
+        journal_name,
+    })
 }
 
 fn check_file(file: &File) -> Result<(), AppError> {
@@ -321,5 +335,123 @@ mod tests {
             )
             .unwrap();
         assert_eq!(title, "Synthetic");
+    }
+
+    #[test]
+    fn disk_accounting_includes_live_rollback_journal_and_preserves_durability_settings() {
+        let directory = Directory::new();
+        let settings = Storage {
+            path: directory.0.join("test.sqlite"),
+            ..Storage::default()
+        };
+        let mut database = Database::open(&settings, &Limits::default()).unwrap();
+        let key = database
+            .register_session(None, None, "Synthetic", 0)
+            .unwrap()
+            .session_key;
+        let before = database.disk_usage().unwrap();
+        assert_eq!((before.journal_bytes, before.temporary_disk_bytes), (0, 0));
+        database
+            .connection
+            .execute_batch("BEGIN IMMEDIATE; UPDATE sessions SET title = 'Changed'")
+            .unwrap();
+        let during = database.disk_usage().unwrap();
+        let metadata = std::fs::metadata(directory.0.join("test.sqlite-journal")).unwrap();
+        assert!(during.journal_bytes > 0);
+        assert_eq!(during.journal_bytes, metadata.len());
+        assert_eq!(during.journal_allocated_bytes, metadata.blocks() * 512);
+        let metadata = std::fs::metadata(&settings.path).unwrap();
+        assert_eq!(during.database_allocated_bytes, metadata.blocks() * 512);
+        assert_eq!(during.database_bytes, metadata.len());
+        database.connection.execute_batch("ROLLBACK").unwrap();
+        assert_eq!(database.disk_usage().unwrap(), before);
+        assert_eq!(database.session(&key).unwrap().title.as_str(), "Synthetic");
+        database.reclaim_batch().unwrap();
+        for (pragma, expected) in [
+            ("synchronous", 2),
+            ("auto_vacuum", 2),
+            ("temp_store", 2),
+            ("foreign_keys", 1),
+        ] {
+            assert_eq!(
+                database
+                    .connection
+                    .pragma_query_value(None, pragma, |r| r.get::<_, i64>(0))
+                    .unwrap(),
+                expected
+            );
+        }
+        let mode: String = database
+            .connection
+            .pragma_query_value(None, "journal_mode", |r| r.get(0))
+            .unwrap();
+        assert_eq!(mode, "delete");
+    }
+
+    #[test]
+    fn disk_accounting_rejects_unsafe_journal_instead_of_reporting_zero() {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+
+        let directory = Directory::new();
+        let settings = Storage {
+            path: directory.0.join("test.sqlite"),
+            ..Storage::default()
+        };
+        let database = Database::open(&settings, &Limits::default()).unwrap();
+        let journal = directory.0.join("test.sqlite-journal");
+        symlink(&settings.path, &journal).unwrap();
+        assert_eq!(database.disk_usage(), Err(AppError::StorageUnavailable));
+        std::fs::remove_file(&journal).unwrap();
+        File::create(&journal)
+            .unwrap()
+            .set_permissions(std::fs::Permissions::from_mode(0o644))
+            .unwrap();
+        assert_eq!(database.disk_usage(), Err(AppError::StorageUnavailable));
+        std::fs::remove_file(&journal).unwrap();
+        assert_eq!(database.disk_usage().unwrap().journal_bytes, 0);
+    }
+
+    #[test]
+    fn reclamation_commit_failure_rolls_back_page_moves_without_losing_valid_rows() {
+        let directory = Directory::new();
+        let settings = Storage {
+            path: directory.0.join("test.sqlite"),
+            ..Storage::default()
+        };
+        let mut database = Database::open(&settings, &Limits::default()).unwrap();
+        let key = database
+            .register_session(None, None, "Synthetic", 0)
+            .unwrap()
+            .session_key;
+        // Create free overflow pages while retaining the real session row and indexes.
+        database
+            .connection
+            .execute("UPDATE sessions SET title = hex(zeroblob(262144))", [])
+            .unwrap();
+        database
+            .connection
+            .execute("UPDATE sessions SET title = 'Synthetic'", [])
+            .unwrap();
+        database.connection.busy_timeout(Duration::ZERO).unwrap();
+        let before = database.disk_usage().unwrap();
+        assert!(before.free_pages > 32);
+        let reader = Connection::open(&settings.path).unwrap();
+        reader
+            .execute_batch("BEGIN; SELECT count(*) FROM sessions")
+            .unwrap();
+        // The shared read lock permits page moves but denies the exclusive commit lock.
+        // Zero busy timeout makes the failure deterministic without timing-dependent waits.
+        assert_eq!(database.reclaim_batch(), Err(AppError::StorageFailure));
+        assert!(database.connection.is_autocommit());
+        assert_eq!(database.disk_usage().unwrap(), before);
+        assert_eq!(database.session(&key).unwrap().title.as_str(), "Synthetic");
+        reader.execute_batch("ROLLBACK").unwrap();
+        let after = database.reclaim_batch().unwrap();
+        assert_eq!(before.free_pages - after.free_pages, 32);
+        assert!(after.database_bytes < before.database_bytes);
+        drop(database);
+        let database = Database::open(&settings, &Limits::default()).unwrap();
+        assert_eq!(database.disk_usage().unwrap(), after);
+        assert_eq!(database.session(&key).unwrap().title.as_str(), "Synthetic");
     }
 }

@@ -116,3 +116,78 @@ async fn cancellation_between_batches_preserves_progress_and_releases_admission(
         Err(AppError::InvalidConfig(_))
     ));
 }
+
+#[tokio::test(start_paused = true)]
+async fn reclamation_yields_between_transactions_and_resumes_after_cancellation() {
+    let fixture = Fixture::new();
+    let service = fixture.service();
+    let key = fixture.expired(&service);
+    // Synthetic retained payload outlives its session; cleanup may not evict either.
+    let sql = rusqlite::Connection::open(&fixture.0.path).unwrap();
+    sql.execute(
+        "INSERT INTO replies(reply_id, telegram_update_id, telegram_chat_id,
+         telegram_message_id, reply_to_bot_message_id, session_key, text_or_caption,
+         created_at, expires_at) VALUES('kept', 1, -101, 10, 5, ?1, 'kept', 0, ?2)",
+        (&key, 50 * 86_400_000_i64),
+    )
+    .unwrap();
+    // Expand then release an old payload without using elapsed time or network effects.
+    sql.execute(
+        "UPDATE replies SET text_or_caption = CAST(zeroblob(524288) AS TEXT)",
+        [],
+    )
+    .unwrap();
+    sql.execute("UPDATE replies SET text_or_caption = 'kept'", [])
+        .unwrap();
+    drop(sql);
+    let initial = service.database.lock().unwrap().disk_usage().unwrap();
+    assert!(initial.free_pages > 64);
+    let (shutdown, receive) = watch::channel(false);
+    let mut running = Box::pin(service.run(receive.clone()));
+    // Logical sweep commits, then yields before any physical reclamation.
+    assert!(poll!(running.as_mut()).is_pending());
+    assert_eq!(
+        service.database.lock().unwrap().disk_usage().unwrap(),
+        initial
+    );
+    assert!(poll!(running.as_mut()).is_pending());
+    let partial = service.database.lock().unwrap().disk_usage().unwrap();
+    assert_eq!(initial.free_pages - partial.free_pages, 32);
+    drop(running);
+    assert_eq!(
+        service.database.lock().unwrap().disk_usage().unwrap(),
+        partial
+    );
+    let mut resumed = Box::pin(service.run(receive));
+    for _ in 0..initial.free_pages {
+        assert!(poll!(resumed.as_mut()).is_pending());
+        if service
+            .database
+            .lock()
+            .unwrap()
+            .disk_usage()
+            .unwrap()
+            .free_pages
+            == 0
+        {
+            break;
+        }
+    }
+    {
+        let database = service.database.lock().unwrap();
+        let final_usage = database.disk_usage().unwrap();
+        assert_eq!(final_usage.free_pages, 0);
+        assert!(final_usage.database_bytes < partial.database_bytes);
+        assert_eq!(
+            database
+                .inbox_snapshot(&key, None, 1, 40 * 86_400_000)
+                .unwrap()
+                .replies[0]
+                .text_or_caption
+                .as_deref(),
+            Some("kept")
+        );
+    }
+    shutdown.send(true).unwrap();
+    resumed.await.unwrap();
+}

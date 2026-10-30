@@ -21,8 +21,8 @@ bounded asks use the common claim path without disabling events. Confirmed proce
 one shared, capped typing scheduler in the library.
 Durable notice-attempt arbitration and one bounded factual-notice dispatcher are available
 in the library, including service-Reply loop suppression across restart and uncertain sends.
-Indexed bounded retention cleanup and a startup/daily library scheduler are available;
-production wiring and physical disk reclamation remain later work.
+Indexed bounded retention cleanup, incremental disk reclamation and a startup/daily library
+scheduler are available; production wiring remains later work.
 
 The library now provides centralized validated TOML settings and typed, redacted startup
 errors in `config`/`error`, with protected Unix secret resolution under `config::secrets`.
@@ -323,9 +323,10 @@ inboxes, question matching, notice eligibility and each record's expiry.
 Connections use DELETE rollback journals, FULL synchronization, a 100 ms busy timeout, a
 512 KiB suggested page cache, eight cached statements, disabled mmap and in-memory temporary
 work. `max_page_count` limits main-file growth to the configured budget rounded down to pages;
-an already oversized database is rejected without eviction. Transient rollback journals and
-temporary query memory still require bounded service transactions and physical-use accounting
-in the later cleanup/runtime steps. No synchronous database guard may cross an await.
+an already oversized database is rejected without eviction. The cap covers the main file,
+including reusable pages, rather than the whole filesystem allocation. Rollback journals
+require additional transient headroom; see [disk maintenance](#physical-disk-maintenance).
+No synchronous database guard may cross an await.
 
 rusqlite 0.32.1 embeds SQLite 3.46.0 through libsqlite3-sys 0.30.1; `bundled` also enables
 `modern_sqlite` and pregenerated bindings. Cached published sources match checksum-verified
@@ -360,8 +361,49 @@ restart safely scans durable state again. No record has its own timer.
 `CleanupService::with_typing` attaches the same scheduler as inbox/outbound services and
 releases deleted replies' remembered caps after commit, under the shared database guard.
 Rollback preserves both durable replies and RAM activity/caps.
-The binary remains a scaffold; daemon startup supervision and physical reclamation belong to
-later planned steps.
+After deletion, the scheduler snapshots the free-list count and yields before each separate
+reclamation transaction. This finite initial page budget prevents concurrent churn from
+extending the sweep indefinitely. Remaining free pages can be reused by ordinary writes and
+are reconsidered next sweep. The binary remains a scaffold; daemon startup supervision is pending.
+
+## Physical disk maintenance
+
+`Database::reclaim_batch` drains every result row from `PRAGMA incremental_vacuum(32)` inside
+one immediate transaction, then commits. Each SQLite step removes at most one free-list page;
+pointer-map boundary pages may also disappear. The locked SQLite 3.46.0 source confirms the
+step limit and row-per-step behavior: executing only the first result would reclaim one page.
+There is no full `VACUUM`, second database copy, unbounded reclamation transaction or per-record
+timer. This does not compact partially occupied pages, so file size need not equal live payload
+size. A failed maintenance transaction leaves valid records recoverable, and cannot undo
+earlier logical cleanup, inbox notifications or typing-cap release. Cancellation between
+transactions preserves committed reductions; restart discovers remaining work from SQLite.
+
+`Database::disk_usage` reports main-file and DELETE-journal lengths, allocated bytes derived
+from Unix 512-byte block counts, page size, reusable free-list pages and the effective whole-page main
+cap. The main file remains pinned by its validated descriptor; journal inspection uses the
+pinned private directory, rejects symlinks/special/unprotected files and treats only absence
+as zero. It never scans arbitrary directories or includes local paths in diagnostics.
+`temp_store=MEMORY` keeps query work and statement subjournals off disk; no attached databases
+or persistent upload copies exist. Temporary disk usage is therefore zero for these operations,
+while temporary query/subjournal **memory** remains additional to the suggested page cache.
+
+The main-file cap defaults to 64 MiB (configurable from 1 MiB to 1 GiB, rounded down to pages).
+It is not a total-disk quota: allow extra space for the rollback journal's original modified
+pages, per-page records and sector-aligned headers. A large expiry batch may journal much of
+the database even though it deletes at most 100 rows per table. FULL synchronization, DELETE
+journaling and `journal_size_limit=0` remain intact; completed transactions remove their
+journal, while interrupted ones may leave a protected hot journal needed for recovery.
+Bounded reclamation also needs journal headroom and can fail on an exhausted filesystem;
+never delete a hot journal or evict valid replies to make it succeed. Restore space and reopen
+or retry maintenance. SQLite page-cap failures map to `STORAGE_CAPACITY`; other filesystem/I/O
+failures retain safe storage errors. Physical-filesystem ENOSPC/crash fault injection remains
+an operational limitation of the synthetic tests.
+
+Usage is a snapshot rather than peak telemetry or reserved disk space, and excludes filesystem
+metadata, snapshots, logs and user-owned outbound sources. Filesystem allocation rounding can
+exceed file lengths. The private directory and same-user single-process ownership remain trust
+requirements; concurrent external writers/replacement invalidate accounting assumptions.
+Daemon wiring and measured runtime/peak disk behavior remain pending.
 
 ## Session and route persistence
 
@@ -743,7 +785,7 @@ network/protocol behavior and cancellation. Shared state contains handles, not d
 Routes expire 30 days after their original message, sessions after last activity and unacked
 replies 30 days after receipt by default. Active session traffic does not extend old routes.
 Library cleanup preserves still-valid replies and referential integrity in bounded batches.
-Physical disk reclamation remains pending; deletion alone need not shrink the database file.
+Bounded incremental reclamation follows cleanup; deletion alone need not shrink the file.
 Capacity pressure cannot silently evict valid replies.
 Telegram keeps unconsumed updates for at most 24 hours; the bridge cannot reconstruct a longer
 offline gap from conversation history.

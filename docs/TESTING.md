@@ -198,11 +198,27 @@ queries exclude expired routes/replies/receipts before deletion and preserve the
 the default daily interval, exclusive scheduling, shutdown and cancellation between batches.
 Fixtures are private, randomized and TMPDIR-aware. These cases address logical retention in
 specification §§10, 16 and 19; execution awaits the dedicated complete trusted FINALIZE suite.
-Physical reclamation and production startup wiring remain separate planned acceptance work.
+Production startup wiring remains separate planned acceptance work.
 `services::outbound::tests::typing` also combines actual mocked Telegram HTTP, processing and
 cleanup with a single inbox slot: rollback preserves typing refreshes, and committed retention
 deletion frees the expired cap so a fresh reply can start typing. Controlled time separates
 typing expiry from retention; execution remains pending the complete trusted FINALIZE suite.
+
+`tests/maintenance.rs` checks real file-length/allocated-block reduction in bounded incremental
+steps, restart after partial reclamation and preservation of valid processing identity,
+first-start time, routes, cursor and acknowledgment receipts. A SQLite main-page-cap failure
+rolls back admission without losing a live reply; expiry/reclamation subsequently restores
+capacity. Integrity and foreign-key checks accompany recovery. Repository unit tests inspect
+an actual active rollback journal, compare descriptor-derived lengths/allocations, verify
+removal on rollback and reject unsafe sidecars. They preserve FULL synchronization, DELETE
+journaling, incremental auto-vacuum and in-memory temporary work. A held SQLite read lock
+with zero busy timeout forces reclamation's commit to fail after page moves; rollback keeps
+file size, free-list accounting and valid rows intact before a successful retry/reopen.
+Scheduler tests explicitly poll futures to prove yielding, cancellation/restart and preservation of retained payloads
+during physical maintenance, without timing sleeps. Fixtures are private, randomized and
+TMPDIR-aware. Execution awaits the dedicated complete trusted FINALIZE suite; these cases
+do not claim real filesystem ENOSPC, power-loss simulation or measured peak disk usage.
+See [physical limits](ARCHITECTURE.md#physical-disk-maintenance).
 
 `tests/notices.rs` covers exact receipt/grace and retention boundaries, ordered bounded batches,
 claims without first start, confirmed long work/inactivity, direct completion and notice-first

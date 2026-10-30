@@ -1,4 +1,4 @@
-//! One startup/periodic expiry sweep, yielding between short committed batches.
+//! One startup/periodic expiry and reclamation sweep, yielding between short transactions.
 
 use std::{
     sync::{Arc, Mutex},
@@ -88,6 +88,26 @@ impl CleanupService {
                     break;
                 }
                 tokio::task::yield_now().await;
+            }
+            // Snapshot a finite work budget. Concurrent churn cannot extend this sweep;
+            // leftover free pages are reusable immediately and reconsidered next time.
+            let mut remaining = self
+                .database
+                .lock()
+                .map_err(|_| AppError::StorageFailure)?
+                .disk_usage()?
+                .free_pages;
+            while remaining > 0 {
+                tokio::task::yield_now().await;
+                let usage = self
+                    .database
+                    .lock()
+                    .map_err(|_| AppError::StorageFailure)?
+                    .reclaim_batch()?;
+                remaining = remaining.saturating_sub(crate::repositories::RECLAIM_PAGES);
+                if usage.free_pages == 0 {
+                    break;
+                }
             }
             tokio::time::sleep(self.interval).await;
         }

@@ -97,6 +97,14 @@ Acknowledgment atomically removes payloads and that proof
 and retains a minimal receipt for `storage.reply_ttl_days` from completion. Receipts consume
 the shared receipt/metadata budgets; capacity failure leaves the reply recoverable. Repeating
 an acknowledgment with the same valid token consumes no new capacity or retention time.
-Physical journal accounting and disk reclamation remain later work; bounded logical cleanup
-is available in the library, with production wiring pending.
+The main-file cap defaults to 64 MiB and is rounded down to whole SQLite pages; it includes
+reusable pages and excludes the transient DELETE rollback journal. Provision journal headroom
+in addition to that cap: expiry of large payloads can journal much of the database, plus record
+and header overhead. `journal_size_limit=0` does not cap an active transaction's journal.
+Query work and statement subjournals stay in memory; incremental reclamation creates no full
+database copy or other temporary disk file. The startup/daily library scheduler reclaims at
+most 32 free-list pages per transaction, yielding between commits under a fixed sweep budget.
+No new configuration setting is required. See
+[disk maintenance](ARCHITECTURE.md#physical-disk-maintenance) for usage accounting, recovery,
+filesystem bounds and limitations. Production wiring remains pending.
 See [architecture](ARCHITECTURE.md#session-and-route-persistence).
