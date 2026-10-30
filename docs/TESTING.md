@@ -198,8 +198,22 @@ success message ID, disabled categories and custom grace. Injected late insert/c
 prove batch/ingress rollback and safe errors; shared receipt/metadata pressure and outstanding
 send reservations preserve replies and unresolved input. Fixtures are private, randomized and
 TMPDIR-aware, with explicit timestamps/barriers and no network calls. These cases address
-the durable notice criteria in §§8, 16 and 19; dispatch/loop suppression land separately.
+the durable notice criteria in §§8, 16 and 19; dispatcher coverage is described below.
 Execution remains pending the dedicated complete trusted FINALIZE suite.
+
+`services::notices::tests` adds actual mocked HTTP delivery for both factual notice categories,
+successful composite-ID persistence without ordinary routes/activity changes, definitive
+rejection, ambiguous responses and failed success bookkeeping. Restart cases prove no replay
+and silent service-target Replies using either retained IDs or bot-authored reserved wording.
+They preserve ordinary routing even with matching wording, including Replies arriving before
+an in-flight route commits, and distinguish human/other bot text and cross-chat ID collisions.
+Complete 1,000/1,001-scalar boundaries include unusually large title graphemes, without
+truncation or overlength network effects. Confirmed long work/inactivity, completion, disabled
+categories and unauthorized/unrelated input remain silent. Explicit response gates and
+controlled time check exclusive scheduling, one outstanding attempt, cancellation, lease
+release and restart with a still-pending second notice. Fixtures are private, randomized and
+TMPDIR-aware. These cases address notice dispatch/loop criteria in §§8, 16 and 19; execution
+remains pending the complete trusted FINALIZE suite, with no live Telegram claim.
 
 `tests/inbox.rs` covers read-only pagination, tied receipt ordering, attachment payloads,
 session/composite-question isolation, simultaneous SQLite claim consumers, restart/lease

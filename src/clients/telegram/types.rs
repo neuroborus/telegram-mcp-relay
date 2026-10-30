@@ -20,10 +20,12 @@ pub struct SentMessage {
     pub chat: Chat,
 }
 
-/// Only the referenced ID is needed; never recursively deserialize quoted messages.
+/// Minimal target metadata for routing and service-loop suppression; never recurse.
 #[derive(Deserialize)]
 pub struct ReplyTarget {
     pub message_id: i64,
+    pub from: Option<User>,
+    pub text: Option<String>,
 }
 
 #[derive(Deserialize, Serialize)]

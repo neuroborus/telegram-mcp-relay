@@ -19,7 +19,8 @@ outbound tools, read-only inbox resources and inbox/processing/acknowledgment to
 available. Modern resource subscriptions deliver bounded post-commit inbox invalidations;
 bounded asks use the common claim path without disabling events. Confirmed processing now drives
 one shared, capped typing scheduler in the library.
-Durable notice-attempt arbitration is available; Telegram notice dispatch remains pending.
+Durable notice-attempt arbitration and one bounded factual-notice dispatcher are available
+in the library, including service-Reply loop suppression across restart and uncertain sends.
 
 The library now provides centralized validated TOML settings and typed, redacted startup
 errors in `config`/`error`, with protected Unix secret resolution under `config::secrets`.
@@ -506,8 +507,8 @@ variable metadata accounting including send reservations. Unroutable disposition
 receipt count budget and reply TTL. The fixed ignored marker is bookkeeping like the singleton
 cursor: it consumes no receipt or variable metadata admission and remains under the physical
 database cap. Compacting it removes no reply, receipt or notice obligation; older ignored input
-may be ignored again without retaining contents or generating effects. Cleanup, downloads
-and Telegram notice dispatch remain later work.
+may be ignored again without retaining contents or generating effects. Cleanup and downloads
+remain later work.
 
 ## Durable notice arbitration
 
@@ -530,7 +531,32 @@ Notice attempts share the receipt count and metadata budgets with acknowledgment
 unroutable dispositions, including outstanding send reservations. Any batch admission/SQL
 failure rolls back every decision without removing replies or advancing ingress. Attempt
 expiry stays anchored to the source reply/disposition expiry; attempts have no payload or
-reply/session foreign key. Cleanup and actual notice scheduling/delivery are later steps.
+reply/session foreign key. Cleanup remains later work.
+
+`services::notices::NoticeService` holds one scheduler lease per shared database handle.
+One global one-second sweep admits at most one eligible attempt, with one bounded HTTP send
+at a time and no per-reply tasks/timers. Startup recovers eligibility from SQLite. The current
+chat allowlist and complete final Unicode limits are checked before sending. Known sessions
+use their normalized title and factual unconfirmed-processing wording; unknown routes use
+the concise instruction to Reply to a newer agent message. Invalid final lengths consume the
+attempt without sending, splitting or truncating. Disabled categories remain untouched.
+
+Success records only the composite notice message ID on the existing attempt, never an
+ordinary route or session activity. Rejection, ambiguous delivery, cancellation and failed
+success bookkeeping cannot authorize replay. Rate-limit delays postpone other notice attempts
+without retrying the consumed one. Shutdown, loss of the supervisor or dropping the run future
+cancels the current request and releases admission. Production composition remains later work.
+
+Ingress silently commits Replies to retained composite notice IDs as ignored. If the success
+ID was lost, bot-authored quoted text matching the reserved service wording (including an old
+normalized title) also suppresses a loop across restart or attempt cleanup. Ordinary live
+routes take precedence, and the wording fallback waits for already-pending ordinary sends to
+settle. The fallback deliberately treats matching bot text without a live route as service
+text; human-authored matches and other unknown bot messages remain unroutable. The saved
+official Bot API reference above confirms optional `Message.from`/`text` in the original
+`reply_to_message`; parsing retains only these shallow fields and never nested Replies.
+No service-Reply contents are persisted or published to inbox subscribers. Routine activity,
+confirmed long work, wait/typing expiry and reconnects introduce no notice trigger.
 
 ## Inbox snapshots and claims
 

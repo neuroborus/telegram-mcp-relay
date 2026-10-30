@@ -8,6 +8,7 @@ pub mod ask;
 pub mod files;
 pub mod inbox;
 pub mod ingress;
+pub mod notices;
 pub mod outbound;
 pub mod polling;
 pub mod typing;

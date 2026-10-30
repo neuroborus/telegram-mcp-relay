@@ -15,6 +15,24 @@ const FALLBACK_TITLE: &str = "Agent Session";
 const TEXT_UTF16_LIMIT: usize = 4_096;
 const CAPTION_UTF16_LIMIT: usize = 1_024;
 
+pub(crate) const UNCONFIRMED_NOTICE: &str =
+    "Reply saved, but the agent has not confirmed processing it yet.";
+pub(crate) const UNROUTABLE_NOTICE: &str = "Could not identify the target session for this Reply. Please reply to a newer message from that agent.";
+
+/// Reserved service wording, including an optional normalized title. Ingress uses this
+/// only for bot-authored targets without an ordinary route, when a send ID was lost.
+pub(crate) fn is_service_notice(text: &str) -> bool {
+    if text == UNROUTABLE_NOTICE || text == UNCONFIRMED_NOTICE {
+        return true;
+    }
+    let Some((header, body)) = text.split_once('\n') else {
+        return false;
+    };
+    let title = header.strip_prefix('[').and_then(|s| s.strip_suffix(']'));
+    body == UNCONFIRMED_NOTICE
+        && title.is_some_and(|title| SessionTitle::new(title).as_str() == title)
+}
+
 /// A single-line display label, never a session identity or routing key.
 #[derive(Clone, PartialEq, Eq)]
 pub struct SessionTitle(String);

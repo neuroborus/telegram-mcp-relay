@@ -37,7 +37,8 @@ Independent session/route/reply TTLs default to 30 days (1–3,650); cleanup to 
 Library notice arbitration uses `delivery.processing_start_grace_seconds` (default 60) from
 durable receipt and honors `notifications.notify_unconfirmed_processing` and
 `notifications.notify_unroutable` (both default true). Disabled categories consume no attempts.
-Dispatch and production scheduler wiring remain pending.
+The library dispatcher sweeps once per second, sends one admitted attempt at a time and
+rechecks the current chat allowlist. Production scheduler wiring remains pending.
 
 `telegram_ask` honors `delivery.wait_fallback_enabled` (default true) and
 `delivery.wait_timeout_seconds` (default 600), starting its deadline after send bookkeeping.

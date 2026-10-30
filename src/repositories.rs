@@ -45,6 +45,7 @@ pub struct Database {
     reserved_routes: Arc<registry::ReservedRoutes>,
     pending_routes: Vec<Weak<()>>,
     pub(crate) poll_admission: Arc<Semaphore>,
+    pub(crate) notice_admission: Arc<Semaphore>,
     pub(crate) inbox_notifications: InboxNotifications,
 }
 
@@ -105,6 +106,7 @@ impl Database {
             reserved_routes: Arc::default(),
             pending_routes: Vec::new(),
             poll_admission: Arc::new(Semaphore::new(1)),
+            notice_admission: Arc::new(Semaphore::new(1)),
             inbox_notifications,
         })
     }

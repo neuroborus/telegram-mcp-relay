@@ -7,6 +7,7 @@ use serde::Serialize;
 use crate::{
     clients::telegram::{Attachment, Update},
     config::Config,
+    domain::outbound::is_service_notice,
     error::AppError,
     repositories::{Database, IncomingReply, IngestOutcome, PendingRoutes},
 };
@@ -96,10 +97,22 @@ impl IngressService {
         let known_route = database
             .route(message.chat.id, target.message_id, received_at)?
             .is_some();
+        // Known success IDs work without quoted content.
+        if !known_route && database.is_notice_message(message.chat.id, target.message_id)? {
+            return database.ingest_update(update.update_id, None, received_at);
+        }
         // Only sends already admitted when this input was observed could have created
         // its target. Newer sends must not prolong this update's deferral.
         if !known_route && pending.is_pending() {
             return Err(AppError::RoutePending);
+        }
+        // Reserved bot wording covers a lost response or failed success bookkeeping.
+        // Wait for pending ordinary routes first: an agent may use the same wording.
+        if !known_route
+            && target.from.as_ref().is_some_and(|user| user.is_bot)
+            && target.text.as_deref().is_some_and(is_service_notice)
+        {
+            return database.ingest_update(update.update_id, None, received_at);
         }
         let text = known_route
             .then(|| message.text.as_deref().or(message.caption.as_deref()))

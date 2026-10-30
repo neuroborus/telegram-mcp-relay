@@ -63,6 +63,43 @@ impl fmt::Debug for NoticeKind {
 }
 
 impl Database {
+    pub(crate) fn is_notice_message(
+        &self,
+        chat_id: i64,
+        message_id: i64,
+    ) -> Result<bool, AppError> {
+        Ok(self.connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM notice_attempts
+             WHERE telegram_chat_id = ?1 AND notice_message_id = ?2)",
+            (chat_id, message_id),
+            |r| r.get(0),
+        )?)
+    }
+
+    /// Fixed-width success metadata uses the already admitted attempt, never a route.
+    /// Failure leaves the durable attempt consumed and cannot authorize another send.
+    pub(crate) fn record_notice_message(
+        &mut self,
+        attempt: &NoticeAttempt,
+        message_id: i64,
+    ) -> Result<(), AppError> {
+        let changed = self.connection.execute(
+            "UPDATE notice_attempts SET notice_message_id = ?4
+             WHERE telegram_update_id = ?1 AND telegram_chat_id = ?2 AND trigger_message_id = ?3
+                AND (notice_message_id IS NULL OR notice_message_id = ?4)",
+            (
+                attempt.telegram_update_id,
+                attempt.telegram_chat_id,
+                attempt.trigger_message_id,
+                message_id,
+            ),
+        )?;
+        if changed != 1 {
+            return Err(AppError::StorageFailure);
+        }
+        Ok(())
+    }
+
     /// Arbitrate with first processing start under the same SQLite write lock.
     /// The first committed decision wins; a later start cannot undo an admitted attempt.
     /// Eligibility uses original receipt/expiry, independent of claims and typing/waits.
