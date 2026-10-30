@@ -7,7 +7,7 @@ Tokio's current-thread runtime and initializes structured `tracing` diagnostics 
 The library logs the scaffold status and returns without opening sockets or creating files.
 The library provides explicit SQLite initialization and session/route operations, but the
 binary does not open it.
-The library provides a bounded Telegram HTTP client and a text-delivery service with durable
+The library provides a bounded Telegram HTTP client and text/document delivery with durable
 reply routes. No MCP transport or production relay wiring exists yet. The accepted HTTP
 adapter's synthetic tests passed in Runner's complete workspace test suite,
 as described below.
@@ -19,7 +19,7 @@ production startup composition is a later step. See [configuration](CONFIGURATIO
 
 Pure title normalization and outbound formatting now live in `domain::outbound`, with typed
 length errors in `error`. These functions perform no network or database effects. Text delivery
-uses them before admission and sends; document delivery remains pending.
+and document delivery use them before admission and sends.
 
 The complete dependency resolution lives in `Cargo.lock`. The release profile enables thin
 LTO, one codegen unit and stripping.
@@ -40,7 +40,7 @@ Telegram requests or MCP interoperability tests have been performed.
 | Dependency | Selected version | Direct features (defaults disabled) | Purpose |
 | --- | --- | --- | --- |
 | [rmcp](https://docs.rs/crate/rmcp/3.8.0/features) | 3.8.0 | `server`, `transport-streamable-http-server` | Official MCP server, schema support and shared HTTP transport foundation |
-| [Tokio](https://docs.rs/crate/tokio/1.54.1/features) | 1.54.1 | `macros`, `rt`, `sync`, `time` | Current-thread entry point, bounded send admission and client deadlines/backoff |
+| [Tokio](https://docs.rs/crate/tokio/1.54.1/features) | 1.54.1 | `fs`, `io-util`, `macros`, `rt`, `sync`, `time` | Current-thread entry point, bounded file reads/admission and client deadlines/backoff |
 | [tracing](https://docs.rs/crate/tracing/0.1.44/features) | 0.1.44 | `std` | Structured diagnostic events |
 | [tracing-subscriber](https://docs.rs/crate/tracing-subscriber/0.3.23/features) | 0.3.23 | `fmt`, `std` | Fallible stderr diagnostic initialization with an INFO ceiling |
 | [serde](https://docs.rs/crate/serde/1.0.229/features) | 1.0.229 | `derive`, `std` | Typed settings deserialization; already in the SDK graph |
@@ -49,10 +49,11 @@ Telegram requests or MCP interoperability tests have been performed.
 | [getrandom](https://docs.rs/crate/getrandom/0.4.3/features) | 0.4.3 | none | OS randomness for bearer-file creation; already in the SDK graph |
 | [unicode-segmentation](https://docs.rs/crate/unicode-segmentation/1.13.3/features) | 1.13.3 | none | Unicode extended grapheme boundaries for title truncation, without runtime dependencies |
 | [rusqlite](https://docs.rs/crate/rusqlite/0.32.1/features) | 0.32.1 | `bundled` | Embedded SQLite with fixed source/bindings, strict tables and JSON validation |
-| [reqwest](https://docs.rs/crate/reqwest/0.13.5/features) | 0.13.5 | `json`, `rustls` | Reusable direct Telegram HTTPS client without default features |
+| [reqwest](https://docs.rs/crate/reqwest/0.13.5/features) | 0.13.5 | `json`, `multipart`, `rustls`, `stream` | Reusable direct Telegram HTTPS client with streamed multipart uploads, without default features |
 | [serde_json](https://docs.rs/crate/serde_json/1.0.154/features) | 1.0.154 | `std` | Bounded Bot API envelope decoding; already locked through rmcp |
+| [futures-util](https://docs.rs/crate/futures-util/0.3.34/features) | 0.3.34 | `std` | Lazy fallible file-chunk stream; already in the locked SDK graph |
 
-Dev-only Tokio `net`, `io-util` and `test-util` support synthetic HTTP peers and
+Dev-only Tokio `net` and `test-util` support synthetic HTTP peers and
 controlled deadlines. Direct `sync` use supplies owned send-admission permits; it was already
 enabled in the locked SDK graph and adds no packages or lockfile changes.
 The reqwest archive checksum matches published registry metadata;
@@ -61,6 +62,13 @@ its inspected client, chunked-response and retry sources match the archive. Its 
 default charset, HTTP/2, proxy discovery and compression features are unnecessary. Source
 inspection confirms `Response::chunk`, `ClientBuilder::retry`, `retry::never`, `https_only`,
 timeouts and redirect/proxy controls. No MCP client feature is added.
+
+Document delivery adds reqwest `multipart`/`stream` and Tokio filesystem/I/O support.
+The same checksum-verified reqwest archive confirms `Part::stream_with_length`,
+`Body::wrap_stream` and streaming multipart construction. The additional MIME and WASM-stream
+lock entries come from that archive's upstream lockfile, preserving existing pinned versions.
+Their locally provisioned archives match the committed lockfile checksums. This is source/API
+inspection; compilation and required-check evidence remain pending FINALIZE.
 
 Offline lock generation resolved the HTTP/TLS/platform dependency closure without changing
 previously locked versions. The manifest and lock additions accompany the adapter to preserve
@@ -219,8 +227,8 @@ the latter contains only actual/limit byte counts. Debug output redacts file/roo
 of at most 128 bytes. It copies no file content and performs no Telegram or SQLite operation.
 Replacing the source pathname cannot change the opened inode. In-place writes, truncation,
 hard links and mounted content remain within the trusted-local-file model; this is not an
-immutable content snapshot. The later uploader must bound reads to the opening size, use
-this handle directly and handle truncation. Streaming/document delivery remains pending.
+immutable content snapshot. The uploader below bounds reads to the opening size, uses this
+handle directly and handles truncation.
 
 The saved official [Bot API](https://core.telegram.org/bots/api#senddocument) reference fetched
 on 2026-10-29 was rechecked against its recorded SHA-256 during file-boundary implementation.
@@ -228,30 +236,55 @@ Both `sendDocument` and multipart file-sending guidance document a 50 MB cloud c
 Live DNS was unavailable for a fresh fetch; no live upload or new platform-limit experiment
 is claimed. Decimal MB is the conservative interpretation used by configuration and opening.
 
+## Document delivery
+
+`OutboundService::send_file` consumes a `ValidatedFile` from the confined opener and formats
+the complete plain caption with the current session title before admission. Both the final
+1,000-scalar and 1,024-UTF-16-unit limits apply; an empty description leaves only `[Title]`.
+Text and documents share send admission, metadata reservations, detached task ownership and
+the successful-send transaction. A confirmed document commits a composite `Document` route
+and activity atomically; no caption, file contents or source path is stored.
+
+The private client uploader sends multipart `chat_id`, `caption` and `document` fields from
+the original descriptor with its sanitized filename and opening size. It neither reopens a
+path nor copies a file. Lazy reads and Tokio's file buffer are each capped at 64 KiB; total
+reads stop at the opening size even after growth. Early EOF fails the body instead of
+finishing a partial upload. Pathname replacement leaves the original inode selected; in-place
+writes remain observable, so this is not a content snapshot. No whole-file allocation occurs.
+
+One attempt has a finite 600-second deadline covering upload and bounded response decoding,
+with the existing five-second connect limit. Consistent 4xx rejection, ambiguous delivery and
+post-send bookkeeping failure retain the text service's distinct errors. Read failure,
+truncation or timeout during an attempted upload is conservatively uncertain; none authorizes
+automatic replay or a fabricated route. Caller cancellation leaves admitted work running to
+bookkeeping completion. Daemon shutdown draining remains a later step. New tests await FINALIZE;
+no live upload or runtime memory measurement is claimed.
+
 ## Telegram HTTP client
 
 `clients::telegram::TelegramClient` owns one reusable reqwest/rustls pool; clones share it.
 The production constructor fixes `https://api.telegram.org`, disables proxy discovery,
 redirects and reqwest retries, and retains no transport errors or Telegram descriptions.
 Only crate tests can construct a mock endpoint; TOML has no API override. No production
-startup path contacts Telegram yet. The text-delivery service owns title formatting,
-destination authorization, capacity reservations and durable routes for text sends.
+startup path contacts Telegram yet. The delivery service owns title formatting,
+destination authorization, capacity reservations and durable routes for text/document sends.
 
-The adapter provides `getUpdates`, `getWebhookInfo`, plain `sendMessage` and typing
-`sendChatAction`. Document streaming lands with its file boundary later. Updates retain
+The adapter provides `getUpdates`, `getWebhookInfo`, plain `sendMessage`, streamed
+`sendDocument` and typing `sendChatAction`. Updates retain
 only message/reply IDs, sender/chat, text/caption and document/photo metadata; quoted messages
 are not recursively decoded. DTO and client Debug output is redacted. Outbound text passes
 the existing final scalar/native validator before I/O. No route or cursor changes occur here.
 
 Connection establishment has a five-second limit. Each attempt covers headers and the whole
-response body within 15 seconds, or configured poll seconds plus ten for `getUpdates`.
+response body within 15 seconds, configured poll seconds plus ten for `getUpdates`, or
+600 seconds for documents including upload.
 Advertised and actual body sizes are capped by `limits.telegram_response_bytes` before JSON
 decoding. Reads and idempotent chat actions allow three attempts with exponential 250/500 ms
 backoff plus less than that interval of jitter. Telegram `retry_after` takes precedence;
 delays above 30 seconds are returned to the caller without shortening or sleeping. There
 are at most two retry sleeps, so each invocation remains finite. Cancellation drops the call.
 
-Message sends are attempted once. A consistent API rejection with a 4xx code is definitive;
+Message/document sends are attempted once. A consistent API rejection with a 4xx code is definitive;
 transport loss, timeout, malformed/oversized results, server errors or inconsistent message
 identity yield `TELEGRAM_DELIVERY_UNCERTAIN`. Callers must not automatically resend. Safe
 errors keep only classifications, numeric codes and retry delays. Webhook conflicts (409)

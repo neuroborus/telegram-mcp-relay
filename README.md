@@ -17,8 +17,9 @@ the binary does not open storage yet.
 Persistent [session registration and message routes](docs/ARCHITECTURE.md#session-and-route-persistence)
 support saved-handle/external-ID resume and independent route expiry through the library.
 The library adds a bounded [Bot API client](docs/ARCHITECTURE.md#telegram-http-client) and
-[text delivery](docs/ARCHITECTURE.md#text-delivery) with cancellation-safe durable reply routes.
-Document delivery and production startup composition remain later steps.
+[text delivery](docs/ARCHITECTURE.md#text-delivery) and
+[streamed document delivery](docs/ARCHITECTURE.md#document-delivery) with cancellation-safe
+durable reply routes. Production startup composition remains a later step.
 The specification calls the product **Telegram MCP Bridge**; this repository and binary are
 named **telegram-mcp-relay**.
 

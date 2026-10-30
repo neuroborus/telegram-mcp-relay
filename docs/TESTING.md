@@ -96,8 +96,8 @@ Unit tests in `domain::outbound::tests` cover whitespace/control normalization, 
 multiline bodies and shared plain headers. They exercise final 1,000/1,001-scalar boundaries
 for ASCII, Cyrillic, combining marks and supplementary symbols, native 1,024/1,025-UTF-16-unit
 captions including the title, unusually large title graphemes and redacted structured errors.
-Text/question/notice formatting and caption validation are pure. The text service now adds
-zero-send/zero-route assertions; question and document service integration remains pending.
+Text/question/notice formatting and caption validation are pure. Text/document services add
+zero-send/zero-route assertions; question service integration remains pending.
 
 Storage tests in `tests/storage.rs` cover private initialization/reopen, persisted records and
 cursor, foreign/future schema rejection without mutation, composite routes, distinct replies,
@@ -127,6 +127,18 @@ caller cancellation while a send remains admitted; competing sends stay bounded 
 detached task finishes durable bookkeeping. Fixtures honor TMPDIR and use private randomized
 directories. These new tests are pending the complete trusted FINALIZE suite; implementation
 and source review do not attest their execution.
+
+`services::outbound::tests::documents` adds actual multipart HTTP/SQLite scenarios: complete
+caption scalar/native rejection without effects, exact 1,000-scalar/1,024-UTF-16-unit captions,
+title-only captions, binary/empty and multichunk documents, growth and replacement after
+validated opening, restart-visible document routes, shared storage/task pressure, definitive rate-limit/rejection,
+lost/malformed/mismatched responses, post-send rollback, truncation, deadline and cancellation.
+The tests check no replay, no invented routes, released permits/reservations and no outbound
+bytes/captions in SQLite. Explicit response gates and clock advancement avoid timing sleeps.
+`clients::telegram::upload::tests` consumes a sparse near-cloud-limit file incrementally,
+checking bounded lazy chunks, changes after the first read, growth exclusion, early EOF,
+read errors and empty snapshots without whole-file buffers. These tests await the complete trusted FINALIZE
+suite; no implementation-turn execution or resource measurement is claimed.
 
 `services::files::tests` covers descriptor-confined regular/empty/nested files, multiple
 roots, exact configured/cloud decimal-byte boundaries, traversal and prefix collisions,

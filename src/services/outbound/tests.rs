@@ -10,7 +10,10 @@ use tokio::{
     task::JoinHandle,
 };
 
-use crate::{config::Storage, repositories::Session};
+use crate::{config::Storage, repositories::Session, services::files::OutboundFiles};
+
+#[path = "documents.rs"]
+mod documents;
 
 enum Response {
     Json(u16, Value),
@@ -50,6 +53,7 @@ impl Fixture {
         config.telegram.allowed_chat_ids = vec![-101];
         config.limits.background_tasks = 1;
         config.limits.routes = 2;
+        config.files.allowed_roots = vec![directory.clone()];
         Self { directory, config }
     }
 
@@ -70,6 +74,15 @@ impl Fixture {
             .register_session(None, None, " 界\n ", 50_000)
             .unwrap()
     }
+
+    fn file(&self, body: &[u8]) -> ValidatedFile {
+        let path = self.directory.join("report.bin");
+        fs::write(&path, body).unwrap();
+        OutboundFiles::new(&self.config.files)
+            .unwrap()
+            .open(&path)
+            .unwrap()
+    }
 }
 
 impl Drop for Fixture {
@@ -80,9 +93,39 @@ impl Drop for Fixture {
 
 struct Mock {
     client: TelegramClient,
-    requests: Arc<Mutex<Vec<Value>>>,
+    requests: Arc<Mutex<Vec<Request>>>,
     seen: mpsc::Receiver<()>,
     task: JoinHandle<()>,
+}
+
+struct Request {
+    method: String,
+    content_type: String,
+    body: Vec<u8>,
+}
+
+impl Request {
+    fn part(&self, name: &str) -> (&[u8], &[u8]) {
+        let boundary = self
+            .content_type
+            .strip_prefix("multipart/form-data; boundary=")
+            .unwrap();
+        let marker = format!("name=\"{name}\"");
+        let start = self
+            .body
+            .windows(marker.len())
+            .position(|b| b == marker.as_bytes())
+            .unwrap();
+        let part = &self.body[start..];
+        let header_end = part.windows(4).position(|b| b == b"\r\n\r\n").unwrap();
+        let body = &part[header_end + 4..];
+        let delimiter = format!("\r\n--{boundary}");
+        let end = body
+            .windows(delimiter.len())
+            .position(|b| b == delimiter.as_bytes())
+            .unwrap();
+        (&part[..header_end], &body[..end])
+    }
 }
 
 impl Mock {
@@ -103,12 +146,29 @@ impl Mock {
                 let mut request = Vec::new();
                 let payload = loop {
                     let mut chunk = [0; 1_024];
-                    let read = socket.read(&mut chunk).await.unwrap();
-                    assert!(read > 0 && request.len() + read <= 16_384);
+                    let Ok(read) = socket.read(&mut chunk).await else {
+                        break None;
+                    };
+                    if read == 0 {
+                        break None;
+                    }
+                    assert!(request.len() + read <= 256 * 1_024);
                     request.extend_from_slice(&chunk[..read]);
                     if let Some(end) = request.windows(4).position(|bytes| bytes == b"\r\n\r\n") {
                         let header = std::str::from_utf8(&request[..end]).unwrap();
-                        assert!(header.starts_with("POST /botSynthetic/sendMessage HTTP/1.1\r\n"));
+                        assert!(header.starts_with("POST "));
+                        let method = header
+                            .lines()
+                            .next()
+                            .unwrap()
+                            .split_whitespace()
+                            .nth(1)
+                            .unwrap()
+                            .to_owned();
+                        assert!(
+                            ["/botSynthetic/sendMessage", "/botSynthetic/sendDocument"]
+                                .contains(&method.as_str())
+                        );
                         let length: usize = header
                             .lines()
                             .find_map(|line| {
@@ -118,9 +178,24 @@ impl Mock {
                             })
                             .unwrap();
                         if request.len() == end + 4 + length {
-                            break serde_json::from_slice(&request[end + 4..]).unwrap();
+                            let content_type = header
+                                .lines()
+                                .find_map(|line| {
+                                    let (key, value) = line.split_once(':')?;
+                                    key.eq_ignore_ascii_case("content-type")
+                                        .then(|| value.trim().to_owned())
+                                })
+                                .unwrap();
+                            break Some(Request {
+                                method,
+                                content_type,
+                                body: request[end + 4..].to_vec(),
+                            });
                         }
                     }
+                };
+                let Some(payload) = payload else {
+                    continue;
                 };
                 {
                     let mut requests = recorded.lock().unwrap();
@@ -221,9 +296,10 @@ async fn validates_before_effects_and_persists_exact_formatted_boundaries_across
             .unwrap();
         assert_eq!(result.message_id, id);
         let requests = mock.requests.lock().unwrap();
+        assert_eq!(requests.last().unwrap().method, "/botSynthetic/sendMessage");
         assert_eq!(
-            requests.last().unwrap(),
-            &json!({"chat_id":-101,"text":format!("[界]\n{body}")})
+            serde_json::from_slice::<Value>(&requests.last().unwrap().body).unwrap(),
+            json!({"chat_id":-101,"text":format!("[界]\n{body}")})
         );
     }
     assert_eq!(mock.count(), 2);

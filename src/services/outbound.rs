@@ -10,10 +10,17 @@ use tokio::sync::Semaphore;
 use crate::{
     clients::telegram::{SentMessage, TelegramClient},
     config::Config,
-    domain::outbound::format_text,
+    domain::outbound::{format_caption, format_text},
     error::{AppError, TelegramError},
     repositories::{Database, RouteKind, RouteReservation},
 };
+
+use super::files::ValidatedFile;
+
+enum Delivery {
+    Text(String),
+    Document(String, ValidatedFile),
+}
 
 /// Clones share send admission and the application's single database/client.
 /// Caller cancellation detaches admitted work; process shutdown must drain it separately.
@@ -57,22 +64,46 @@ impl OutboundService {
     /// Validate the session and complete plain text before reserving capacity or sending.
     /// Success means Telegram accepted the message AND its reply route committed.
     pub async fn send_text(&self, session_key: &str, body: &str) -> Result<SentMessage, AppError> {
-        let (text, reservation, permit) = {
+        self.send(session_key, body, None).await
+    }
+
+    /// Consume the original confined handle; no caller path is reopened or persisted.
+    /// Both caption limits include the session title and are checked before any upload.
+    pub async fn send_file(
+        &self,
+        session_key: &str,
+        file: ValidatedFile,
+        caption: &str,
+    ) -> Result<SentMessage, AppError> {
+        self.send(session_key, caption, Some(file)).await
+    }
+
+    async fn send(
+        &self,
+        session_key: &str,
+        body: &str,
+        file: Option<ValidatedFile>,
+    ) -> Result<SentMessage, AppError> {
+        let (delivery, reservation, permit) = {
             let mut database = self.database.lock().map_err(|_| AppError::StorageFailure)?;
             let session = database.session(session_key)?;
-            let text = format_text(&session.title, body)?;
+            let delivery = if let Some(file) = file {
+                Delivery::Document(format_caption(&session.title, body)?, file)
+            } else {
+                Delivery::Text(format_text(&session.title, body)?)
+            };
             let permit = Arc::clone(&self.admission)
                 .try_acquire_owned()
                 .map_err(|_| AppError::SendCapacity)?;
             let reservation = database.reserve_route(session_key)?;
-            (text, reservation, permit)
+            (delivery, reservation, permit)
         };
         // No await separates admission from transfer to the owned task. Dropping the join
         // handle cannot abort the send or the synchronous post-send transaction.
         let service = self.clone();
         tokio::spawn(async move {
             let _permit = permit;
-            let result = service.send_reserved(text, reservation).await;
+            let result = service.send_reserved(delivery, reservation).await;
             if let Err(error) = &result {
                 // Detached callers must not hide uncertainty; log only a safe static code.
                 tracing::warn!(code = error.code(), "Admitted Telegram send failed");
@@ -85,11 +116,25 @@ impl OutboundService {
 
     async fn send_reserved(
         &self,
-        text: String,
+        delivery: Delivery,
         reservation: RouteReservation,
     ) -> Result<SentMessage, AppError> {
-        let sent = self.telegram.send_message(self.chat_id, &text).await?;
-        self.record_success(reservation, &sent, RouteKind::Text)?;
+        let (sent, kind) = match delivery {
+            Delivery::Text(text) => (
+                self.telegram.send_message(self.chat_id, &text).await?,
+                RouteKind::Text,
+            ),
+            Delivery::Document(caption, file) => {
+                let (file, filename, size) = file.into_parts();
+                (
+                    self.telegram
+                        .send_document(self.chat_id, caption, file, filename, size)
+                        .await?,
+                    RouteKind::Document,
+                )
+            }
+        };
+        self.record_success(reservation, &sent, kind)?;
         Ok(sent)
     }
 

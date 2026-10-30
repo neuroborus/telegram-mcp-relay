@@ -13,6 +13,7 @@ use crate::{
 };
 
 mod types;
+mod upload;
 pub use types::*;
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
@@ -137,9 +138,7 @@ impl TelegramClient {
                 REQUEST_TIMEOUT,
             )
             .await?;
-        if sent.message_id <= 0 || sent.date < 0 || sent.chat.id != chat_id {
-            return Err(TelegramError::DeliveryUncertain.into());
-        }
+        validate_sent(&sent, chat_id)?;
         Ok(sent)
     }
 
@@ -175,12 +174,7 @@ impl TelegramClient {
                 Err(error) => error,
             };
             if !safe_to_retry {
-                return Err(match error {
-                    TelegramError::Rejected {
-                        code: 400..=499, ..
-                    } => error,
-                    _ => TelegramError::DeliveryUncertain,
-                });
+                return Err(send_error(error));
             }
             let Some(delay) = retry_delay(&error, attempt, jitter()) else {
                 return Err(error);
@@ -199,13 +193,19 @@ impl TelegramClient {
         method: &str,
         payload: &impl Serialize,
     ) -> Result<T, TelegramError> {
-        let mut response = self
-            .http
-            .post(format!("{}{method}", self.endpoint))
-            .json(payload)
-            .send()
-            .await
-            .map_err(|_| TelegramError::Transport)?;
+        self.execute(
+            self.http
+                .post(format!("{}{method}", self.endpoint))
+                .json(payload),
+        )
+        .await
+    }
+
+    async fn execute<T: DeserializeOwned>(
+        &self,
+        request: reqwest::RequestBuilder,
+    ) -> Result<T, TelegramError> {
+        let mut response = request.send().await.map_err(|_| TelegramError::Transport)?;
         let status = response.status();
         if response
             .content_length()
@@ -234,6 +234,22 @@ impl TelegramClient {
             return;
         }
         tokio::time::sleep(delay).await;
+    }
+}
+
+fn validate_sent(sent: &SentMessage, chat_id: i64) -> Result<(), TelegramError> {
+    if sent.message_id <= 0 || sent.date < 0 || sent.chat.id != chat_id {
+        return Err(TelegramError::DeliveryUncertain);
+    }
+    Ok(())
+}
+
+fn send_error(error: TelegramError) -> TelegramError {
+    match error {
+        TelegramError::Rejected {
+            code: 400..=499, ..
+        } => error,
+        _ => TelegramError::DeliveryUncertain,
     }
 }
 
