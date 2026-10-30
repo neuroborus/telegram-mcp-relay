@@ -191,6 +191,9 @@ impl Database {
             });
         }
         transaction.commit()?;
+        if !claimed.is_empty() {
+            self.inbox_notifications.publish(session_key);
+        }
         Ok(claimed)
     }
 }

@@ -8,9 +8,10 @@ This checkout contains the project specification, repository conventions, Agent 
 workflow and an initial Rust application scaffold. The binary initializes structured
 diagnostics on a current-thread Tokio runtime, logs its scaffold status and exits. The MCP
 endpoint is available through the [library](docs/ARCHITECTURE.md#protected-mcp-transport);
-typed [registration and outbound tools](docs/ARCHITECTURE.md#mcp-registration-and-outbound-tools)
-and [durable inbox resources and reply tools](docs/ARCHITECTURE.md#mcp-inbox-resources-and-reply-tools)
-are available in the library; subscriptions, asks, typing and runnable relay setup remain pending.
+typed [registration and outbound tools](docs/ARCHITECTURE.md#mcp-registration-and-outbound-tools),
+[durable inbox resources and reply tools](docs/ARCHITECTURE.md#mcp-inbox-resources-and-reply-tools)
+and [modern resource subscriptions](docs/ARCHITECTURE.md#mcp-resource-subscriptions)
+are available in the library; asks, typing and runnable relay setup remain pending.
 The library also implements validated [configuration and protected secrets](docs/CONFIGURATION.md);
 the binary does not load configuration yet.
 Pure [outbound formatting rules](docs/ARCHITECTURE.md#outbound-formatting) normalize session
@@ -25,8 +26,7 @@ The library adds a bounded [Bot API client](docs/ARCHITECTURE.md#telegram-http-c
 durable reply routes. Production startup composition remains a later step.
 Library [reply ingestion](docs/ARCHITECTURE.md#reply-ingestion) commits authorized replies and
 the update cursor atomically. A [single restart-safe poller](docs/ARCHITECTURE.md#telegram-long-polling)
-drives ingestion with cancellation and bounded backoff; production wiring and MCP notification
-delivery remain pending.
+drives ingestion with cancellation and bounded backoff; production wiring remains pending.
 The specification calls the product **Telegram MCP Bridge**; this repository and binary are
 named **telegram-mcp-relay**.
 

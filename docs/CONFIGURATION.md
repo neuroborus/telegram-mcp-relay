@@ -48,6 +48,10 @@ later components enforce actual usage without early eviction. The library MCP en
 `limits.request_bytes` and `limits.concurrent_requests`, expected Host/Origin and optional bearer
 authentication; see [transport policy](ARCHITECTURE.md#protected-mcp-transport). Native clients
 may omit Origin. A shared bearer assumes trusted local clients, not per-agent security isolation.
+Library resource subscriptions enforce `limits.subscriptions` (default 64) for both active
+listeners and URI entries per request, and `limits.subscription_queue` (default 16) per listener.
+Overflow or five seconds of SDK sink backpressure closes the affected stream; reconnect and
+read the durable inbox. See [subscription behavior](ARCHITECTURE.md#mcp-resource-subscriptions).
 
 SQLite initialization requires an existing owned private parent directory (normally 0700)
 and trusted ancestors. It creates only the database, with mode 0600; existing files and sidecars

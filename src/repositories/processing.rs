@@ -51,7 +51,8 @@ impl Database {
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         ensure_session(&transaction, session_key)?;
         let mut owned = owned_reply(&transaction, session_key, reply_id, claim_token, now)?;
-        if active && owned.status.processing_started_at.is_none() {
+        let started = active && owned.status.processing_started_at.is_none();
+        if started {
             transaction.execute(
                 "UPDATE replies SET state = 'processing', processing_started_at = ?4,
                  claim_expires_at = NULL
@@ -62,6 +63,9 @@ impl Database {
         }
         // Inactivity stops typing only; durable ownership and first start never reset.
         transaction.commit()?;
+        if started {
+            self.inbox_notifications.publish(session_key);
+        }
         Ok(owned.status)
     }
 
@@ -127,6 +131,7 @@ impl Database {
             return Err(AppError::InvalidClaim);
         }
         transaction.commit()?;
+        self.inbox_notifications.publish(session_key);
         Ok(ReconciledProcessing {
             claim_token: token,
             status: owned.status,
@@ -183,6 +188,7 @@ impl Database {
             (session_key, reply_id, claim_token),
         )?;
         transaction.commit()?;
+        self.inbox_notifications.publish(session_key);
         Ok(())
     }
 }

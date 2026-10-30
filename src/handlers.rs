@@ -11,9 +11,9 @@ use rmcp::{
         CacheScope, CallToolRequestParams, CallToolResponse, CallToolResult, Implementation,
         ListResourceTemplatesResult, ListResourcesResult, ListToolsResult, PaginatedRequestParams,
         ProtocolVersion, ReadResourceRequestParams, ReadResourceResponse, ResourceTemplate,
-        ServerCapabilities, ServerConfig, Tool,
+        ServerCapabilities, ServerConfig, SubscriptionFilter, Tool,
     },
-    service::RequestContext,
+    service::{RequestContext, SubscriptionContext},
 };
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
@@ -26,11 +26,12 @@ use crate::{
         RegisterRequest, RegisterResult, SendFileRequest, SendRequest, SendResult,
     },
     error::{AppError, TelegramError},
-    repositories::Database,
+    repositories::{Database, InboxNotifications},
     services::{files::OutboundFiles, inbox::InboxService, outbound::OutboundService, unix_millis},
 };
 
 mod inbox;
+mod subscriptions;
 
 /// Agent sessions live in SQLite, independently of HTTP connections or SDK handlers.
 pub struct McpHandler {
@@ -38,6 +39,7 @@ pub struct McpHandler {
     outbound: OutboundService,
     files: OutboundFiles,
     inbox: InboxService,
+    notifications: InboxNotifications,
 }
 
 impl McpHandler {
@@ -47,11 +49,17 @@ impl McpHandler {
         telegram: TelegramClient,
         config: &Config,
     ) -> Result<Self, AppError> {
+        let notifications = database
+            .lock()
+            .map_err(|_| AppError::StorageFailure)?
+            .inbox_notifications
+            .clone();
         Ok(Self {
             outbound: OutboundService::new(database.clone(), telegram, config)?,
             files: OutboundFiles::new(&config.files)?,
             inbox: InboxService::new(&config.delivery)?,
             database,
+            notifications,
         })
     }
 
@@ -103,6 +111,7 @@ impl ServerHandler for McpHandler {
             ServerCapabilities::builder()
                 .enable_tools()
                 .enable_resources()
+                .enable_resources_subscribe()
                 .build(),
         )
         .with_server_info(Implementation::new(
@@ -113,6 +122,17 @@ impl ServerHandler for McpHandler {
 
     fn supported_protocol_versions(&self) -> Cow<'static, [ProtocolVersion]> {
         Cow::Borrowed(&[ProtocolVersion::V_2026_07_28])
+    }
+
+    fn accepted_subscription_filter(
+        &self,
+        requested: &SubscriptionFilter,
+    ) -> Option<SubscriptionFilter> {
+        Some(self.accept_inboxes(requested))
+    }
+
+    async fn listen(&self, context: SubscriptionContext) -> Result<(), ErrorData> {
+        self.listen_inboxes(context).await
     }
 
     async fn list_resources(

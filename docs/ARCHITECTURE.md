@@ -12,12 +12,12 @@ reply routes. A protected library MCP transport is available; production relay w
 pending. The accepted HTTP adapter's synthetic tests passed in Runner's complete workspace test suite,
 as described below.
 Library reply ingestion authorizes input and commits replies/dispositions with the cursor.
-A cancellable single-consumer long poller now drives it; production startup and MCP
-notification delivery remain later work.
+A cancellable single-consumer long poller now drives it; production startup remains later work.
 Bounded library inbox snapshots, pre-processing claims, durable processing-start,
 explicit reconciliation and acknowledgment operations are available. MCP registration and
 outbound tools, read-only inbox resources and inbox/processing/acknowledgment tools are
-available. Subscriptions, asks and typing remain later work.
+available. Modern resource subscriptions deliver bounded post-commit inbox invalidations;
+asks and typing remain later work.
 
 The library now provides centralized validated TOML settings and typed, redacted startup
 errors in `config`/`error`, with protected Unix secret resolution under `config::secrets`.
@@ -103,7 +103,7 @@ The rmcp source defines `ProtocolVersion::V_2026_07_28`, `server/discover` and
 subscription interests; `SubscriptionSink::send` enforces the accepted resource URI filter.
 Modern `StreamableHttpService` dispatch creates a handler for each request, so later
 application state must be shared through its factory. The protected transport below uses this
-lifecycle; relay subscriptions remain pending. No external client interoperability is claimed.
+lifecycle and the subscription API below. No external client interoperability is claimed.
 
 ## Protected MCP transport
 
@@ -116,7 +116,7 @@ requests require matching `Mcp-Method` and `MCP-Protocol-Version` headers and `_
 protocolVersion plus clientCapabilities entries. Tool calls also require `Mcp-Name` to match
 `params.name`; the SDK rejects missing or mismatched headers before handler dispatch.
 Legacy initialize sessions are unsupported.
-Discovery advertises tools and read-only resources. Application subscriptions remain pending.
+Discovery advertises tools and resources with `subscribe=true`.
 
 Host must be the configured numeric authority or `localhost`, including its port. Present
 Origin must use HTTP with either authority; missing Origin supports native clients. Duplicate
@@ -198,8 +198,45 @@ request ID and prior token. Registration alone never rotates ownership.
 `telegram_ack({session_key, reply_id, claim_token})` removes the successfully handled payload
 through the existing bounded receipt transaction and returns `reply_id`/`acknowledged=true`.
 Identical valid-token retries succeed while the receipt remains valid; stale or wrong-session
-claims return `CLAIM_INVALID`. New MCP interaction tests await FINALIZE; notifications,
-waiting, typing and named-client interoperability are not established by these resources.
+claims return `CLAIM_INVALID`. New MCP interaction tests await FINALIZE; waiting,
+typing and named-client interoperability are not established by these resources.
+
+## MCP resource subscriptions
+
+The library implements MCP 2026-07-28 `subscriptions/listen` through locked rmcp 3.8.0.
+Supply `params.notifications.resourceSubscriptions` with concrete canonical inbox URIs
+returned by registration, plus the usual required request metadata and matching `Mcp-Method`.
+The SDK acknowledges the accepted filter with `notifications/subscriptions/acknowledged`;
+`SubscriptionSink::notify_resource_updated` emits `notifications/resources/updated` and attaches
+`params._meta["io.modelcontextprotocol/subscriptionId"]` matching the listen request ID.
+This is a POST SSE stream; closing it cancels that request, without changing durable replies.
+
+Only known session keys authorize interests, using the same saved-handle trust model as reads.
+Unknown/malformed URIs, templates, query pages and unsupported notification categories are
+omitted from the accepted filter. Empty acceptance completes immediately. Requests exceeding
+`limits.subscriptions` URI entries (including duplicates) accept no interests. Duplicate
+accepted URIs share one delivery interest. Resource listings remain stable and private.
+Legacy subscription methods and older protocol revisions are unsupported.
+
+`repositories::notifications` holds at most `limits.subscriptions` listeners (default 64),
+each with at most that many inbox keys and `limits.subscription_queue` pending signals
+(default 16). Successful reply, claim, first processing-start, reconciliation and acknowledgment
+transactions publish after commit; rejected/rolled-back operations, redelivery and idempotent
+retries do not. Signals contain only a session key, never reply payloads or tokens. Dispatch
+uses nonblocking bounded queues and coalesces already queued changes for the same inbox.
+A full queue closes only that listener. Each SDK sink send also has a five-second backpressure
+deadline. Cancellation, disconnect, overflow and sink
+failure release interests/admission. SDK transport queues and HTTP response admission supply
+additional independent bounds; no per-session task or idle inbox polling is introduced.
+
+The SDK acknowledges before entering the application listener. The listener arms its queue,
+then sends one initial invalidation per accepted inbox to cover commits during that setup gap.
+Clients read SQLite-backed resources or claim through `telegram_inbox`, including after
+reconnect/restart; signals are neither persistent nor replayed and never claim or acknowledge.
+There is no guarantee that a host wakes an idle LLM. Actual HTTP protocol tests are defined in
+[testing](TESTING.md); their execution remains pending FINALIZE. No named client or live
+Telegram interoperability is claimed. Production daemon composition and ask/event races
+remain later work.
 
 ## Outbound formatting
 
@@ -430,7 +467,7 @@ updates compact into a single ignored marker; authorized unknown/expired routes 
 an unroutable disposition with the triggering chat/message IDs. No full update is retained.
 The repository resolves composite routes and commits a distinct pending reply, receipt-based
 expiry, monotonic session activity and cursor together. Redelivery produces no new reply.
-Only a successful commit returns `IngestOutcome::ReplyStored` for later change signaling.
+Only a successful commit returns `IngestOutcome::ReplyStored` and publishes an inbox signal.
 Exact retained update IDs, composite message identities and acknowledgment receipts suppress
 duplicates across restart; an unseen lower ID can start a new Telegram sequence. Redelivering
 a retained update leaves the current cursor unchanged, including after a sequence reset.
@@ -443,7 +480,7 @@ receipt count budget and reply TTL. The fixed ignored marker is bookkeeping like
 cursor: it consumes no receipt or variable metadata admission and remains under the physical
 database cap. Compacting it removes no reply, receipt or notice obligation; older ignored input
 may be ignored again without retaining contents or generating effects. Cleanup, downloads,
-notices and notification delivery remain later work.
+notices remain later work.
 
 ## Inbox snapshots and claims
 
@@ -512,7 +549,8 @@ and ignored input do not wait. Completion or failure releases the reservation be
 ingress, which rechecks routing under the same database guard used for admission and persistence.
 The wakeup is armed before checking, and no database guard crosses an await. New committed
 replies emit coalesced in-memory watch revisions; consumers must read SQLite after a wakeup or
-restart. These are internal signals, not implemented MCP subscriptions.
+restart. These internal watch signals remain separate from the shared database's bounded
+post-commit subscription interests; neither path competes for or consumes replies.
 
 After the client's finite read retries, transient failures use quiet exponential backoff with
 jitter (one to 30 seconds locally); `retry_after` can extend that delay and is never shortened.

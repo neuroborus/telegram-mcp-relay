@@ -30,6 +30,8 @@ mod inbox;
 pub use inbox::{ClaimedReply, InboxCursor, InboxPage, InboxReply, ReplyState, ReplyTarget};
 mod processing;
 pub use processing::{ProcessingStatus, ReconciledProcessing};
+mod notifications;
+pub(crate) use notifications::{InboxNotifications, InboxSubscription};
 
 const SCHEMA_VERSION: i64 = 4;
 const APPLICATION_ID: i64 = 0x544d4352; // TMCR
@@ -41,6 +43,7 @@ pub struct Database {
     reserved_routes: Arc<registry::ReservedRoutes>,
     pending_routes: Vec<Weak<()>>,
     pub(crate) poll_admission: Arc<Semaphore>,
+    pub(crate) inbox_notifications: InboxNotifications,
 }
 
 impl Database {
@@ -48,6 +51,7 @@ impl Database {
     /// Ancestor directories must be trusted; existing permissions are never repaired.
     pub fn open(settings: &Storage, limits: &Limits) -> Result<Self, AppError> {
         let registry = registry::RegistryPolicy::new(settings, limits)?;
+        let inbox_notifications = InboxNotifications::new(limits)?;
         if !(1_048_576..=1_073_741_824).contains(&settings.max_database_bytes) {
             return Err(AppError::InvalidConfig("storage.max_database_bytes"));
         }
@@ -99,6 +103,7 @@ impl Database {
             reserved_routes: Arc::default(),
             pending_routes: Vec::new(),
             poll_admission: Arc::new(Semaphore::new(1)),
+            inbox_notifications,
         })
     }
 

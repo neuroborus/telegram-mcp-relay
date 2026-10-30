@@ -175,6 +175,9 @@ impl Database {
             [update_id],
         )?;
         transaction.commit()?;
+        if let IngestOutcome::ReplyStored { session_key, .. } = &outcome {
+            self.inbox_notifications.publish(session_key);
+        }
         Ok(outcome)
     }
 }

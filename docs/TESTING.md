@@ -73,7 +73,7 @@ Test-only SDK handlers check shared
 handler state across requests, safe correlation extensions, calls beyond 600 seconds, SSE
 admission, disconnect release and transport shutdown using explicit gates/controlled time.
 Fixtures are private, randomized and TMPDIR-aware. Execution remains pending FINALIZE;
-these transport tests do not establish application subscriptions or named client compatibility.
+these transport probes do not establish named client compatibility.
 
 `routes::tests::tools` exercises the real shared handler through separate modern MCP HTTP
 requests and a separate synthetic Bot API. It covers typed input/output discovery, stable
@@ -99,6 +99,21 @@ Invalid URIs, limits, listing cursors and tool arguments return safe errors with
 Fixtures honor TMPDIR and use private randomized directories; no live Telegram calls are made.
 Execution remains pending FINALIZE. These cases cover the read/claim/recovery portion of
 specification §§6.3, 16 and 19; subscription/ask interactions remain later acceptance work.
+
+`routes::tests::subscriptions` defines actual MCP 2026-07-28 POST SSE interactions through
+locked rmcp 3.8.0 and the production handler. It covers accepted URI filters, omitted unknown,
+malformed/template/paged URIs and unsupported categories, duplicate interests, empty/excessive
+filters, SDK acknowledgment/update metadata, same-title fan-out and SQLite-backed reads.
+An injected cursor failure proves rollback silence; duplicate, ignored, unauthorized and
+unroutable ingress stays silent. Claims, processing start and completion invalidate snapshots;
+stale tokens and idempotent retries do not. Explicit gates cover a commit after acknowledgment
+but before listener setup, listener admission, disconnect retirement, queue overflow and
+recovery of offline commits through a fresh handler/database. Pure queue tests independently
+prove coalescing, slow-listener isolation, uninterested-session silence, drop-based admission
+release and budget validation. Fixtures are private and TMPDIR-aware; no live Telegram calls are made.
+These tests address subscription/reconnect and bounded slow-client criteria in §§6.1, 16 and 19;
+their execution remains pending the complete trusted FINALIZE suite. Ask/event races and
+named-client interoperability remain later acceptance work.
 
 Use the specification's complete section 16 matrix and [test-authoring](../.agents/skills/test-authoring/SKILL.md).
 Pure domain tests cover grapheme title normalization, final scalar text limits and native

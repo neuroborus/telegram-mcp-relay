@@ -22,6 +22,8 @@ use crate::repositories::Database;
 
 #[path = "inbox.rs"]
 mod inbox;
+#[path = "subscriptions.rs"]
+mod subscriptions;
 #[path = "tools.rs"]
 mod tools;
 
@@ -192,7 +194,7 @@ async fn discovery_is_modern_stateless_and_accepts_native_and_same_origin_client
         assert_eq!(body["result"]["ttlMs"], 0);
         assert_eq!(
             body["result"]["capabilities"],
-            json!({"tools":{},"resources":{}})
+            json!({"tools":{},"resources":{"subscribe":true}})
         );
     }
     // The transport retires its connections without waiting for client keepalive.

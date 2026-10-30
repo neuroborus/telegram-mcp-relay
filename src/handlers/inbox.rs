@@ -197,6 +197,14 @@ fn parse_uri(uri: &str) -> Result<(&str, Option<InboxCursor>, u32), ErrorData> {
     Ok((key, after, limit.unwrap_or_else(inbox_limit)))
 }
 
+/// Subscriptions identify the complete inbox, never a query page or URI pattern.
+pub(super) fn subscription_key(uri: &str) -> Result<&str, ErrorData> {
+    if uri.contains('?') {
+        return Err(ErrorData::invalid_params("Invalid inbox URI", None));
+    }
+    parse_uri(uri).map(|(key, _, _)| key)
+}
+
 fn resource_error(error: AppError) -> ErrorData {
     match error {
         AppError::SessionNotFound => ErrorData::resource_not_found("Inbox unavailable", None),

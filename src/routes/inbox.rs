@@ -8,7 +8,7 @@ use crate::{
 use tools::failure;
 
 impl Http {
-    async fn snapshot(&self, uri: &str) -> Value {
+    pub(super) async fn snapshot(&self, uri: &str) -> Value {
         let result = self.rpc("resources/read", json!({"uri":uri})).await;
         assert!(result.get("error").is_none(), "{result}");
         let result = &result["result"];
