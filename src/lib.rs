@@ -7,6 +7,7 @@
 pub mod clients;
 pub mod config;
 pub mod domain;
+pub mod dto;
 pub mod error;
 pub mod handlers;
 pub mod repositories;

@@ -20,6 +20,9 @@ use tokio::{
 
 use crate::repositories::Database;
 
+#[path = "tools.rs"]
+mod tools;
+
 const VERSION: &str = "2026-07-28";
 const TOKEN: &str = "synthetic-bearer-token-0123456789012345";
 
@@ -50,11 +53,23 @@ impl Fixture {
         let mut config = Config::default();
         config.storage.path = directory.join("relay.sqlite");
         config.limits.concurrent_requests = 2;
-        let state = Arc::new(McpHandler {
-            database: Arc::new(std::sync::Mutex::new(
-                Database::open(&config.storage, &config.limits).unwrap(),
-            )),
-        });
+        config.telegram.chat_id = -101;
+        config.telegram.allowed_chat_ids = vec![-101];
+        config.files.allowed_roots = vec![directory.clone()];
+        let state = Arc::new(
+            McpHandler::new(
+                Arc::new(std::sync::Mutex::new(
+                    Database::open(&config.storage, &config.limits).unwrap(),
+                )),
+                crate::clients::telegram::TelegramClient::for_test(
+                    &config,
+                    "http://127.0.0.1:1/botSynthetic/".into(),
+                )
+                .unwrap(),
+                &config,
+            )
+            .unwrap(),
+        );
         Self {
             directory,
             config,
@@ -111,12 +126,18 @@ impl Http {
     }
 
     fn post(&self, value: Value) -> reqwest::RequestBuilder {
-        self.client
+        let mut request = self
+            .client
             .post(format!("http://{}/mcp", self.address))
             .header(header::ACCEPT, "application/json, text/event-stream")
             .header("mcp-protocol-version", VERSION)
-            .header("mcp-method", value["method"].as_str().unwrap())
-            .json(&value)
+            .header("mcp-method", value["method"].as_str().unwrap());
+        if value["method"] == "tools/call"
+            && let Some(name) = value["params"]["name"].as_str()
+        {
+            request = request.header("mcp-name", name);
+        }
+        request.json(&value)
     }
 
     async fn finish(&mut self) {
@@ -161,7 +182,7 @@ async fn discovery_is_modern_stateless_and_accepts_native_and_same_origin_client
         assert_eq!(body["result"]["supportedVersions"], json!([VERSION]));
         assert_eq!(body["result"]["cacheScope"], "private");
         assert_eq!(body["result"]["ttlMs"], 0);
-        assert_eq!(body["result"]["capabilities"], json!({}));
+        assert_eq!(body["result"]["capabilities"], json!({"tools":{}}));
     }
     // The transport retires its connections without waiting for client keepalive.
     http.finish().await;

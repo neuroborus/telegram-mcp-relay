@@ -10,7 +10,7 @@ pub mod ingress;
 pub mod outbound;
 pub mod polling;
 
-fn unix_millis() -> Result<i64, AppError> {
+pub(crate) fn unix_millis() -> Result<i64, AppError> {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .ok()

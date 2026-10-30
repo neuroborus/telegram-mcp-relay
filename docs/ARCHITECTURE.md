@@ -15,8 +15,8 @@ Library reply ingestion authorizes input and commits replies/dispositions with t
 A cancellable single-consumer long poller now drives it; production startup and MCP
 notification delivery remain later work.
 Bounded library inbox snapshots, pre-processing claims, durable processing-start,
-explicit reconciliation and acknowledgment operations are available. MCP tools and typing
-remain later work.
+explicit reconciliation and acknowledgment operations are available. MCP registration and
+outbound tools are available; inbox/processing tools and typing remain later work.
 
 The library now provides centralized validated TOML settings and typed, redacted startup
 errors in `config`/`error`, with protected Unix secret resolution under `config::secrets`.
@@ -112,9 +112,10 @@ The SDK owns parsing, negotiation, dispatch and SSE. Each factory call clones on
 The checksum-verified locked rmcp 3.8.0 sources confirm `server/discover`, HTTP request parts
 in context extensions and modern stateless negotiation. Only MCP 2026-07-28 is advertised:
 requests require matching `Mcp-Method` and `MCP-Protocol-Version` headers and `_meta`
-protocolVersion plus clientCapabilities entries. Legacy initialize sessions are unsupported.
-Tools, inbox resources and application subscriptions land separately; discovery currently
-advertises no capabilities.
+protocolVersion plus clientCapabilities entries. Tool calls also require `Mcp-Name` to match
+`params.name`; the SDK rejects missing or mismatched headers before handler dispatch.
+Legacy initialize sessions are unsupported.
+Discovery advertises tools; inbox resources and application subscriptions land separately.
 
 Host must be the configured numeric authority or `localhost`, including its port. Present
 Origin must use HTTP with either authority; missing Origin supports native clients. Duplicate
@@ -132,6 +133,35 @@ static; JSON-RPC failures retain codes, IDs and structured negotiation data with
 Binary diagnostics suppress rmcp targets, whose upstream logs can contain raw metadata;
 library embedders must retain this filter. New synthetic HTTP tests await FINALIZE; no named
 client compatibility, live Telegram or production startup is claimed.
+
+## MCP registration and outbound tools
+
+`McpHandler::new` shares one SQLite handle, outbound service and pinned file-root opener
+across per-request SDK handlers. `telegram_register` accepts a required title and optional
+`external_session_id`/saved `session_key`, using the existing transactional registration path.
+It returns `session_key`, normalized `title` and stable `inbox_uri`; the URI's resource
+implementation remains pending. Missing both identities creates a fresh session. Supplying
+both requires an existing match. Renaming affects future sends only, and equal titles never
+merge identities. Registration does not change resource listings or processing ownership.
+
+`telegram_send` accepts `session_key`/`text`; `telegram_send_file` accepts `session_key`, an
+absolute approved local `path` and an optional `caption` (empty by default). The handlers
+delegate to confined opening and existing delivery services without retries or body/file
+persistence. Success returns `telegram_chat_id` and `outbound_message_id` only after the
+composite reply route commits. Empty captions retain the session header. Formatting, native
+caption bounds, send admission and cancellation-safe bookkeeping remain service-owned.
+
+The locked rmcp 3.8.0 `Tool` input/output schema builders use typed Serde DTOs and the SDK's
+already-enabled schemars support; no new crate/features are needed. `tools/list` is stable,
+unpaginated, private and immediately stale (`ttlMs=0`); supplied cursors are invalid.
+Unknown tools and malformed/missing/extra argument fields return safe JSON-RPC invalid-params
+errors. Application failures return `isError=true` with structured `code`, safe `message`
+and `details`, mirrored in text content. Length errors retain exact counts/guidance; file-size
+errors retain byte limits/counts; Telegram rejections retain numeric code/retry delay.
+Uncertain delivery and confirmed-send bookkeeping failure remain distinct and explicitly
+forbid automatic resending. Supplied paths, keys, bodies and upstream descriptions are never
+included in errors. Synthetic MCP-to-mocked-Telegram tests await FINALIZE; no external client
+interoperability or runnable daemon is claimed.
 
 ## Outbound formatting
 

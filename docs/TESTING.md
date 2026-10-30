@@ -75,6 +75,20 @@ admission, disconnect release and transport shutdown using explicit gates/contro
 Fixtures are private, randomized and TMPDIR-aware. Execution remains pending FINALIZE;
 these transport tests do not establish application subscriptions or named client compatibility.
 
+`routes::tests::tools` exercises the real shared handler through separate modern MCP HTTP
+requests and a separate synthetic Bot API. It covers typed input/output discovery, stable
+tool listings, normalized registration, external-ID/saved-handle resume through a new handler,
+same-title isolation, text at the final scalar boundary and document captions at the native
+boundary (including the default title-only caption). Successful sends return committed
+composite text/document routes visible through a reopened database. Semantic validation
+failures leave Telegram requests, routes and session activity unchanged. Malformed/unknown
+arguments/tools remain JSON-RPC errors; application failures are structured tool errors with
+redacted counts/guidance. Tool-call fixtures supply the required matching `Mcp-Name`; missing
+and mismatched values retain the SDK header-error code/request ID without effects or input echo.
+Rejection, uncertain delivery and post-send persistence failure remain distinct, without replay
+or invented routes. Fixtures are private, randomized and TMPDIR-aware;
+execution remains pending the dedicated trusted FINALIZE suite.
+
 Use the specification's complete section 16 matrix and [test-authoring](../.agents/skills/test-authoring/SKILL.md).
 Pure domain tests cover grapheme title normalization, final scalar text limits and native
 caption limits. Integration tests cover the interactions that pure tests cannot prove:
@@ -168,7 +182,7 @@ restart continuity. Explicit timestamps cover session activity and independent r
 Count/UTF-8 metadata limits include in-flight reservations and expired retained rows; rejected
 renames leave activity unchanged. Tests also cover cancellation release, route conflicts,
 transaction rollback after a route insert, invalid inputs and redacted diagnostics. These are
-repository operations; MCP send integration remains later work.
+repository operations; focused MCP registration/send integration is in `routes::tests::tools`.
 
 `services::outbound::tests` exercises the actual HTTP client and SQLite together: unknown
 sessions, invalid destinations, exact formatted 1,000/1,001-scalar ASCII/astral boundaries,

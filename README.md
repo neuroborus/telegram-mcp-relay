@@ -8,7 +8,8 @@ This checkout contains the project specification, repository conventions, Agent 
 workflow and an initial Rust application scaffold. The binary initializes structured
 diagnostics on a current-thread Tokio runtime, logs its scaffold status and exits. The MCP
 endpoint is available through the [library](docs/ARCHITECTURE.md#protected-mcp-transport);
-application tools and runnable relay setup remain pending.
+typed [registration and outbound tools](docs/ARCHITECTURE.md#mcp-registration-and-outbound-tools)
+are available in the library; inbox tools and runnable relay setup remain pending.
 The library also implements validated [configuration and protected secrets](docs/CONFIGURATION.md);
 the binary does not load configuration yet.
 Pure [outbound formatting rules](docs/ARCHITECTURE.md#outbound-formatting) normalize session
