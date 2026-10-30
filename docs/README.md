@@ -9,6 +9,8 @@ Keep implementation status explicit; requirements and intended structure are not
 | [Conventions](CONVENTIONS.md) | File ownership, Rust and HTTP conventions | Layout, naming or dependency policy changes |
 | [Architecture](ARCHITECTURE.md) | Intended boundaries and current implementation status | A component or protocol capability is implemented or changes |
 | [Configuration](CONFIGURATION.md) | Settings, bounds and protected secret sources | Startup configuration or secret handling changes |
+| [Setup](SETUP.md) | Locked builds, Telegram setup, local secrets, MCP clients and optional user service | Installation or client requirements change |
+| [Agent operating policy](AGENT_POLICY.md) | Copyable section 14 policy and durable reply recovery instructions | Installed-agent interaction guidance changes |
 | [Testing](TESTING.md) | Required gates, test ownership and acceptance evidence | A check or verification boundary changes |
 | [Development](DEVELOPMENT.md) | Runner setup, task/plan/execution lifecycle and Git boundaries | Operator workflow or runner configuration changes |
 

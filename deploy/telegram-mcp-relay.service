@@ -1,0 +1,33 @@
+[Unit]
+Description=Telegram MCP Relay (shared loopback endpoint)
+
+[Service]
+Type=exec
+ExecStart=%h/.local/bin/telegram-mcp-relay %h/.config/telegram-mcp-relay/config.toml
+EnvironmentFile=%h/.config/telegram-mcp-relay/relay.env
+WorkingDirectory=%h
+UMask=0077
+Restart=on-failure
+RestartSec=5s
+# Allow a 600-second upload and subsequent SQLite bookkeeping to drain.
+TimeoutStopSec=660s
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateUsers=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.local/state/telegram-mcp-relay
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=default.target

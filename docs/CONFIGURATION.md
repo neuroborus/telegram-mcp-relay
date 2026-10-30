@@ -1,5 +1,9 @@
 # Configuration and Secrets
 
+For initial installation, Telegram IDs/webhook checks, private directory preparation and
+optional systemd examples, follow [setup](SETUP.md). Install the
+[agent operating policy](AGENT_POLICY.md) in consuming projects.
+
 The library provides `Config::load`, side-effect-free `Config::parse` and explicit
 `Config::load_secrets`, with no network I/O in these operations. The binary takes exactly one
 TOML path: `telegram-mcp-relay /absolute/path/to/config.toml`. Startup validates settings and

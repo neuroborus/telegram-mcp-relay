@@ -18,22 +18,36 @@ valid replies and recovery identities. See [architecture](docs/ARCHITECTURE.md) 
 guarantees and protocol limitations.
 
 SIGINT and SIGTERM trigger graceful shutdown, draining admitted sends and retiring service work.
-Setup guidance, full acceptance interactions and resource measurements remain planned work;
-this composition does not establish complete MVP acceptance or live Telegram interoperability.
+See the [setup guide](docs/SETUP.md) and [copyable agent policy](docs/AGENT_POLICY.md).
+Resource measurements and release acceptance remain pending; the implementation and synthetic
+HTTP tests do not establish complete MVP acceptance or live Telegram interoperability.
 The specification calls the product **Telegram MCP Bridge**; this repository and binary are
 named **telegram-mcp-relay**.
 
-The manifest requires Rust 1.89 or newer. Build using its complete dependency lock:
+For Linux (kernel 5.6+ for confined file opening), install Rust 1.89 or newer and a native
+C build toolchain for bundled SQLite. Build using the committed dependency lock:
 
 ```bash
 cargo build --locked --release --bin telegram-mcp-relay
 ```
 
-Run `target/release/telegram-mcp-relay /absolute/path/to/config.toml` with an explicitly prepared
-configuration, protected secrets and existing private storage/export directories. The
-[synthetic example](config/relay.example.toml) needs local IDs and paths before use. Startup
-failures return a safe error code and nonzero exit status. No directories, services or webhook
-resets are installed automatically. The binary registers shutdown signals before starting services
+Follow [setup](docs/SETUP.md) to create a BotFather bot, verify webhook state, select explicit
+chat/user IDs and export roots, and prepare private storage and secrets from the
+[synthetic configuration](config/relay.example.toml). Then run one shared daemon:
+
+```bash
+target/release/telegram-mcp-relay "$HOME/.config/telegram-mcp-relay/config.toml"
+```
+
+Connect capable clients to `http://127.0.0.1:8765/mcp` using Streamable HTTP and the configured
+bearer header. Current support is MCP **2026-07-28**, including `subscriptions/listen`;
+older initialize-based clients are unsupported. Named-client interoperability remains
+unverified; see [client requirements](docs/SETUP.md#connect-mcp-clients).
+Optional [systemd user-service and environment examples](docs/SETUP.md#optional-systemd-user-service)
+are provided for operator review.
+
+Startup failures return a safe error code and nonzero exit status. No directories, services or
+webhook resets are installed automatically. The binary registers shutdown signals before starting services
 and awaits accepted send bookkeeping before exit. Library hosts supply cancellation and await
 `run_until`; the library installs no process-wide signal handlers. SIGKILL, crashes and external
 forced-stop deadlines can still interrupt bookkeeping; see
@@ -41,7 +55,9 @@ forced-stop deadlines can still interrupt bookkeeping; see
 
 The MVP uses one native process, loopback Streamable HTTP, Telegram long polling and SQLite.
 Outgoing text and captions have a strict 1,000 Unicode scalar limit including the session
-header; longer reports travel as files. Notifications cannot guarantee that an idle agent
+header; longer reports travel as files. Local paths refer to the daemon's filesystem beneath
+approved roots. Incoming attachment metadata is supported; attachment downloading is deferred.
+The shared bearer assumes trusted local clients. Notifications cannot guarantee that an idle agent
 host starts a new turn. Unconsumed Telegram updates last at most 24 hours, independently of
 the bridge's default 30-day local retention.
 

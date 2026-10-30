@@ -857,7 +857,11 @@ Bind loopback by default; validate Host/Origin against DNS rebinding and support
 bearer token. Require explicit Telegram allowlists and file roots, redact secrets and treat
 incoming text/files as untrusted data. Opaque session keys and claim tokens reduce accidental
 cross-session consumption; a shared local bearer token is not strong isolation between
-mutually hostile local clients. Document that trust assumption in installed-user guidance.
+mutually hostile local clients. [Setup](SETUP.md) documents this trust assumption, protected
+installation paths, webhook-safe migration and current client requirements; the
+[agent policy](AGENT_POLICY.md) includes the complete copyable specification policy and
+explicit processing-recovery guidance. Runtime measurements and host unit verification
+remain separate pending operational evidence.
 
 ## Protocol compatibility gate
 
