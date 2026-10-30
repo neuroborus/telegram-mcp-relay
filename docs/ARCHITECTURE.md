@@ -199,6 +199,35 @@ resending. Failures from detached work log only a static error code. Successful 
 requires a committed route; reservations and task permits release on completion/failure.
 New service tests await execution in the dedicated Runner FINALIZE gate.
 
+## Confined outbound files
+
+`services::files::OutboundFiles` opens up to 64 approved roots once and pins their directory
+descriptors. Linux `openat2` with `BENEATH`, `NO_SYMLINKS` and `NO_MAGICLINKS` confines each
+lookup in the kernel, including during directory replacement. Root opening also rejects
+symlinks in every ancestor. Linux 5.6+ is required; unsupported or denied resolution fails
+closed without a canonicalize/open fallback. All symlinks are rejected, including internal
+ones. A root pathname replacement cannot redirect the pinned authority to a new directory.
+
+Caller paths must be absolute, without parent traversal, and component-prefix matched to an
+approved root. Read-only, nonblocking opening avoids FIFO hangs; metadata from the returned
+descriptor must identify a regular file with read permission bits. OS permissions apply.
+The inclusive opening-size ceiling is the lower configured decimal-MB limit, never above
+50,000,000 bytes. `FILE_UNAVAILABLE` and `FILE_TOO_LARGE` retain no paths or OS error strings;
+the latter contains only actual/limit byte counts. Debug output redacts file/root metadata.
+
+`ValidatedFile` carries that original descriptor, opening size and a sanitized ASCII basename
+of at most 128 bytes. It copies no file content and performs no Telegram or SQLite operation.
+Replacing the source pathname cannot change the opened inode. In-place writes, truncation,
+hard links and mounted content remain within the trusted-local-file model; this is not an
+immutable content snapshot. The later uploader must bound reads to the opening size, use
+this handle directly and handle truncation. Streaming/document delivery remains pending.
+
+The saved official [Bot API](https://core.telegram.org/bots/api#senddocument) reference fetched
+on 2026-10-29 was rechecked against its recorded SHA-256 during file-boundary implementation.
+Both `sendDocument` and multipart file-sending guidance document a 50 MB cloud ceiling.
+Live DNS was unavailable for a fresh fetch; no live upload or new platform-limit experiment
+is claimed. Decimal MB is the conservative interpretation used by configuration and opening.
+
 ## Telegram HTTP client
 
 `clients::telegram::TelegramClient` owns one reusable reqwest/rustls pool; clones share it.

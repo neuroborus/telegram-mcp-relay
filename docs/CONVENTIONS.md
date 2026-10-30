@@ -17,7 +17,7 @@ and lockfile. Root workspace checks do not cover it; see [testing](TESTING.md).
 | `src/dto/` | MCP/HTTP boundary request and response types |
 | `src/handlers/`, `src/routes/` | Thin tool/resource/HTTP entry points and route wiring |
 | `src/domain/` | Session/title/text rules, reply state and retention invariants |
-| `src/services.rs`, `src/services/` | Text delivery orchestration; later registration, ingestion and claims |
+| `src/services.rs`, `src/services/` | Text delivery orchestration and confined outbound file handles; later registration, ingestion and claims |
 | `src/repositories.rs`, `src/repositories/` | SQLite initialization/migrations, transactions and queries |
 | `src/clients/` | Direct Telegram HTTP client and transport DTOs |
 | `tests/`, `tests/fixtures/` | Cross-module/MCP/mock-Telegram tests and sanitized inputs |

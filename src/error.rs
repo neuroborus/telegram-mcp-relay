@@ -63,6 +63,8 @@ pub enum AppError {
     EmptyText,
     TextTooLong(TextTooLong),
     InvalidRequest(&'static str),
+    FileUnavailable,
+    FileTooLarge { limit_bytes: u64, actual_bytes: u64 },
     SessionNotFound,
     SessionIdentityConflict,
     RouteConflict,
@@ -87,6 +89,8 @@ impl AppError {
             Self::EmptyText => "TEXT_EMPTY",
             Self::TextTooLong(_) => "TEXT_TOO_LONG",
             Self::InvalidRequest(_) => "REQUEST_INVALID",
+            Self::FileUnavailable => "FILE_UNAVAILABLE",
+            Self::FileTooLarge { .. } => "FILE_TOO_LARGE",
             Self::SessionNotFound => "SESSION_NOT_FOUND",
             Self::SessionIdentityConflict => "SESSION_IDENTITY_CONFLICT",
             Self::RouteConflict => "ROUTE_CONFLICT",
@@ -116,6 +120,19 @@ impl fmt::Display for AppError {
             }
             Self::EmptyText => write!(f, "{}: outgoing text must not be empty", self.code()),
             Self::InvalidRequest(field) => write!(f, "{}: invalid {field}", self.code()),
+            Self::FileUnavailable => write!(
+                f,
+                "{}: expected a readable regular file beneath an approved root without symlinks or traversal",
+                self.code()
+            ),
+            Self::FileTooLarge {
+                limit_bytes,
+                actual_bytes,
+            } => write!(
+                f,
+                "{}: file has {actual_bytes} bytes (limit {limit_bytes})",
+                self.code()
+            ),
             Self::SessionNotFound => write!(f, "{}: unknown session handle", self.code()),
             Self::SessionIdentityConflict => {
                 write!(f, "{}: session identities disagree", self.code())

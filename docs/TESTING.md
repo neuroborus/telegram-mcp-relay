@@ -128,6 +128,16 @@ detached task finishes durable bookkeeping. Fixtures honor TMPDIR and use privat
 directories. These new tests are pending the complete trusted FINALIZE suite; implementation
 and source review do not attest their execution.
 
+`services::files::tests` covers descriptor-confined regular/empty/nested files, multiple
+roots, exact configured/cloud decimal-byte boundaries, traversal and prefix collisions,
+missing/unreadable files, directories, FIFOs, Unix sockets and root/ancestor/leaf symlinks.
+It checks root and leaf replacement after opening and concurrent atomic swaps between
+regular paths and escaping symlinks: accepted handles always read the approved file.
+Filename cases include controls, header punctuation, Unicode, non-UTF-8 and long basenames;
+errors and Debug output stay path-free. Fixtures are exclusive, private, randomized and
+TMPDIR-aware; size tests use sparse files, without allocating near-limit buffers. These tests
+await the dedicated complete trusted FINALIZE suite; no execution is claimed here.
+
 Unit tests in `clients::telegram::tests` use a synthetic loopback HTTP peer with explicit
 disconnects, malformed/oversized and chunked bodies, redirects, webhook conflicts, rate limits
 and server errors. They cover request JSON, typed reply/attachment metadata, pre-I/O outbound
