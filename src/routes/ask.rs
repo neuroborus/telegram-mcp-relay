@@ -121,6 +121,85 @@ fn sent(id: i64) -> Value {
     json!({"ok":true,"result":{"message_id":id,"date":unix_millis().unwrap()/1000,"chat":{"id":-101}}})
 }
 
+#[tokio::test]
+async fn shutdown_before_wait_recheck_preserves_late_reply_without_claiming_or_acknowledging() {
+    let fixture = Fixture::new();
+    let mut mock = Mock::new(&fixture.config).await;
+    let (database, _) = mock.shared(&fixture);
+    let session = mock.session(&database);
+    let asks = mock.asks(&fixture, database.clone());
+    let asked = asks.ask(&session.session_key, "Question");
+    tokio::pin!(asked);
+    assert!(futures_util::poll!(&mut asked).is_pending());
+    mock.accept(&database, 7).await;
+    // Shutdown can race the first wait recheck after the admitted send commits.
+    database.lock().unwrap().inbox_notifications.close();
+    let ingress = IngressService::new(&fixture.config).unwrap();
+    ingest(&ingress, &database, 11, 7).unwrap();
+    assert!(matches!(
+        asked.await,
+        Err(AppError::AskWaitFailed {
+            telegram_chat_id: -101,
+            outbound_message_id: 7
+        })
+    ));
+    let db = database.lock().unwrap();
+    let replies = db
+        .inbox_snapshot(&session.session_key, None, 10, unix_millis().unwrap())
+        .unwrap();
+    assert_eq!(replies.replies.len(), 1);
+    assert_eq!(replies.replies[0].state, ReplyState::Pending);
+    assert_eq!(replies.replies[0].processing_started_at, None);
+    assert!(mock.requests.try_recv().is_err());
+}
+
+#[tokio::test]
+async fn handler_shutdown_drains_an_active_ask_and_resource_listener() {
+    let mut fixture = Fixture::new();
+    fixture.config.limits.concurrent_requests = 4;
+    let mut mock = Mock::new(&fixture.config).await;
+    let (database, state) = mock.shared(&fixture);
+    let http = fixture.serve(state.clone(), None).await;
+    let session = http.register(json!({"title":"Shutdown"})).await;
+    let key = session["session_key"].as_str().unwrap();
+    let uri = session["inbox_uri"].as_str().unwrap();
+    let filter = json!({"resourceSubscriptions":[uri]});
+    let mut events = http.listen(filter.clone(), filter).await;
+    events.updated(uri).await; // Listener setup completed before shutdown.
+    let asked = http.start_ask(key, "Question");
+    mock.accept(&database, 7).await;
+    state.stop();
+    tokio::time::timeout(Duration::from_secs(2), state.drain())
+        .await
+        .unwrap()
+        .unwrap();
+    failure(&asked.await.unwrap(), "ASK_WAIT_FAILED");
+    // Keep HTTP/SSE clients connected throughout draining; they cannot extend its lifetime.
+    drop(events);
+    let rejected = http
+        .rpc(
+            "tools/call",
+            json!({"name":"telegram_send",
+        "arguments":{"session_key":key,"text":"Late send"}}),
+        )
+        .await;
+    assert_eq!(rejected["error"]["code"], -32603);
+    ingest(
+        &IngressService::new(&fixture.config).unwrap(),
+        &database,
+        11,
+        7,
+    )
+    .unwrap();
+    let db = database.lock().unwrap();
+    let snapshot = db
+        .inbox_snapshot(key, None, 10, unix_millis().unwrap())
+        .unwrap();
+    assert_eq!(snapshot.replies.len(), 1);
+    assert_eq!(snapshot.replies[0].state, ReplyState::Pending);
+    assert!(mock.requests.try_recv().is_err());
+}
+
 impl Http {
     fn start_ask(&self, key: &str, text: &str) -> JoinHandle<Value> {
         let mut body = message("tools/call");

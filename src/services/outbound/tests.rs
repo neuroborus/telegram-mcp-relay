@@ -17,6 +17,87 @@ mod documents;
 #[path = "typing.rs"]
 mod typing;
 
+#[tokio::test]
+async fn closing_drains_admitted_documents_and_releases_capacity_after_every_outcome() {
+    for (body, fail_persistence) in [
+        (sent(7), false),
+        (json!({"ok":false,"error_code":400}), false),
+        (json!({"ok":true,"result":{}}), false),
+        (sent(7), true),
+    ] {
+        let fixture = Fixture::new();
+        let database = fixture.open();
+        let session = fixture.register(&database);
+        if fail_persistence {
+            fixture.sql().execute_batch("CREATE TRIGGER fail_route BEFORE INSERT ON message_routes BEGIN SELECT RAISE(ABORT, 'synthetic failure'); END").unwrap();
+        }
+        let success = body == sent(7) && !fail_persistence;
+        let (release, held) = oneshot::channel();
+        let mut mock = Mock::new(&fixture.config, vec![Response::Held(held, body)]).await;
+        let service = mock.service(&fixture, &database);
+        let sender = service.clone();
+        let key = session.session_key.clone();
+        let file = fixture.file(b"synthetic upload");
+        let caller = tokio::spawn(async move { sender.send_file(&key, file, "Report").await });
+        mock.seen.recv().await.unwrap();
+        caller.abort();
+        assert!(caller.await.unwrap_err().is_cancelled());
+        assert_eq!(service.admission.available_permits(), 0);
+        service.close();
+        let drain = service.drain();
+        tokio::pin!(drain);
+        assert!(futures_util::poll!(&mut drain).is_pending());
+        assert_eq!(
+            service.send_text(&session.session_key, "late").await.err(),
+            Some(AppError::SendCapacity)
+        );
+        release.send(()).unwrap();
+        drain.await.unwrap();
+        assert_eq!(service.admission.available_permits(), 1);
+        assert_eq!(mock.count(), 1);
+        assert_eq!(
+            database
+                .lock()
+                .unwrap()
+                .route(-101, 7, 200_000)
+                .unwrap()
+                .is_some(),
+            success
+        );
+        // Failure released the route reservation as well as send/task admission.
+        let mut db = database.lock().unwrap();
+        let _first = db.reserve_route(&session.session_key).unwrap();
+        if !success {
+            let _second = db.reserve_route(&session.session_key).unwrap();
+        }
+    }
+}
+
+#[tokio::test]
+async fn admitted_task_panic_is_observed_even_without_a_caller() {
+    let fixture = Fixture::new();
+    let database = fixture.open();
+    let session = fixture.register(&database);
+    let (release, held) = oneshot::channel();
+    let mut mock = Mock::new(&fixture.config, vec![Response::Held(held, sent(7))]).await;
+    let mut service = mock.service(&fixture, &database);
+    service.now = || panic!("synthetic bookkeeping panic");
+    let sender = service.clone();
+    let key = session.session_key.clone();
+    let caller = tokio::spawn(async move { sender.send_text(&key, "Result").await });
+    mock.seen.recv().await.unwrap();
+    caller.abort();
+    assert!(caller.await.unwrap_err().is_cancelled());
+    service.close();
+    release.send(()).unwrap();
+    service.failed().await;
+    assert_eq!(service.drain().await, Err(AppError::ServiceStopped));
+    assert_eq!(service.admission.available_permits(), 1);
+    let db = database.lock().unwrap();
+    assert_eq!(db.session(&session.session_key).unwrap(), session);
+    assert!(db.route(-101, 7, 200_000).unwrap().is_none());
+}
+
 enum Response {
     Json(u16, Value),
     Held(oneshot::Receiver<()>, Value),

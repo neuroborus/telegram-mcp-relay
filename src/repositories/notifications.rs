@@ -13,6 +13,7 @@ pub(crate) struct InboxNotifications {
     pub(crate) limit: usize,
     queue: usize,
     waiter_limit: usize,
+    closed: CancellationToken,
 }
 
 struct Interest {
@@ -46,6 +47,7 @@ impl InboxNotifications {
             limit: limits.subscriptions as usize,
             queue: limits.subscription_queue as usize,
             waiter_limit: limits.waiters as usize,
+            closed: CancellationToken::new(),
         })
     }
 
@@ -67,6 +69,9 @@ impl InboxNotifications {
             .interests
             .lock()
             .map_err(|_| AppError::McpUnavailable)?;
+        if self.closed.is_cancelled() {
+            return Err(AppError::McpUnavailable);
+        }
         let limit = if waiter {
             self.waiter_limit
         } else {
@@ -94,6 +99,17 @@ impl InboxNotifications {
             owner: self.clone(),
             sender,
         })
+    }
+
+    /// Close admission and retire every interest; durable inbox state is untouched.
+    pub(crate) fn close(&self) {
+        // Serialize closure with interest registration to fence late arrivals.
+        if let Ok(mut interests) = self.interests.lock() {
+            self.closed.cancel();
+            for interest in interests.drain(..) {
+                interest.stopped.cancel();
+            }
+        }
     }
 
     /// Call only after commit. A slow listener never delays or fails a storage operation.
@@ -152,6 +168,25 @@ impl Drop for InboxSubscription {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn close_retires_waiters_and_listeners_and_fences_new_interests() {
+        let hub = InboxNotifications::new(&Limits::default()).unwrap();
+        let mut listener = hub.subscribe(vec!["a".into()]).unwrap();
+        let mut waiter = hub.waiter("a".into()).unwrap();
+        hub.publish("a");
+        hub.close();
+        listener.stopped.cancelled().await;
+        waiter.stopped.cancelled().await;
+        assert!(hub.interests.lock().unwrap().is_empty());
+        assert!(hub.subscribe(vec!["a".into()]).is_err());
+        assert!(hub.waiter("a".into()).is_err());
+        assert_eq!(listener.recv().await.as_deref(), Some("a"));
+        assert_eq!(waiter.recv().await.as_deref(), Some("a"));
+        assert!(listener.try_recv().is_err());
+        assert!(waiter.try_recv().is_err());
+        hub.close(); // Repeated shutdown is harmless, including after subscription drops.
+    }
 
     #[test]
     fn overflow_is_per_listener_and_drop_releases_admission() {

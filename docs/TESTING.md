@@ -66,6 +66,14 @@ See [development](DEVELOPMENT.md#read-only-cargo-validation) for provisioning an
 
 ## Behavioral acceptance
 
+Binary tests in `src/main.rs` launch isolated test subprocesses using the binary's shutdown
+signal registration. They send actual SIGINT and SIGTERM after a readiness gate, hold synthetic
+work until an explicit parent release, and check that a repeated signal permits completion
+before process exit. These tests cover signal delivery and continued execution during draining;
+the composition tests below cover actual send/route persistence with mocked Telegram.
+Signal-test execution remains pending the dedicated trusted FINALIZE suite; no signal test
+installs handlers in the parent test process or uses live Telegram.
+
 `app::tests` exercises the real daemon composition through modern MCP HTTP and a separate
 mocked Telegram service. It checks completion of a multi-batch startup cleanup before polling,
 shared registration/send/route/ingress/claim/processing/typing/ack state and durable reopen,
@@ -74,8 +82,24 @@ Configuration/secret/bind failures start no services; a controlled SQLite write 
 startup cleanup fail before MCP serving or Telegram effects. Fixtures retain bound listeners
 without port-reuse races and use private randomized TMPDIR-aware directories and explicit
 HTTP response gates. `services::typing::tests` also verifies that worker abortion wakes
-supervision without an idle timer. Execution remains pending the dedicated trusted FINALIZE
-suite; graceful accepted-work draining and full acceptance interactions remain later steps.
+supervision without an idle timer. Shutdown cases hold a disconnected send across explicit
+shutdown or terminal poll failure, then verify its route commits before return, ingress/cursor
+survives reopening, and no reply is acknowledged or service notice generated.
+
+`services::outbound::tests` holds admitted document responses across admission closure, proving
+the drain waits for success, rejection, uncertainty and failed persistence, with released task/
+send/route capacity and no replay. A synthetic post-send panic with a disconnected caller must
+wake supervision and fail the drain. `services::typing::tests` closes a stalled worker and
+awaits its retirement without advancing the controlled clock, then proves it cannot restart.
+Notification tests close populated waiter/listener admission and retire existing interests.
+`routes::tests::ask` closes interests before the initial wait recheck and proves a late reply
+remains pending instead of being claimed after shutdown. A real HTTP ask and resource listener
+retire while clients remain connected, and closed tool admission rejects later sends.
+Existing transport shutdown and poller lease/cancellation cases cover stalled clients and
+uncommitted input without repeating them.
+These cases address shutdown and bounded-resource recovery in specification §§3, 6, 11, 16 and 19.
+Execution remains pending the dedicated trusted FINALIZE suite; full acceptance interactions
+remain later steps.
 
 `routes::tests` exercises real loopback HTTP discovery, native/same-origin clients, bearer auth,
 hostile/duplicate headers, paths, missing/mismatched `Mcp-Method`, required version/capability

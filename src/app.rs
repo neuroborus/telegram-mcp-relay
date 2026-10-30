@@ -27,12 +27,13 @@ use crate::{
 };
 
 /// Load validated settings/secrets and run until a supervised service fails.
+/// No process-wide handlers are installed; the binary uses `run_until` with OS signals.
 pub async fn run(config_path: &Path) -> Result<(), AppError> {
     run_until(config_path, std::future::pending()).await
 }
 
 /// The embedding host supplies cancellation without installing global signal handlers.
-/// This stops service loops; it does not yet drain detached outbound bookkeeping.
+/// Await this future after signaling shutdown to drain admitted outbound bookkeeping.
 pub async fn run_until(
     config_path: &Path,
     shutdown: impl Future<Output = ()>,
@@ -48,6 +49,7 @@ pub async fn run_until(
 }
 
 struct Application {
+    handler: Arc<McpHandler>,
     endpoint: McpEndpoint,
     polling: PollingService,
     notices: NoticeService,
@@ -70,8 +72,9 @@ impl Application {
         let polling = PollingService::new(database.clone(), telegram.clone(), config)?;
         let notices = NoticeService::new(database, telegram, config)?;
         let stop = CancellationToken::new();
-        let endpoint = McpEndpoint::new(config, auth, handler, stop.clone())?;
+        let endpoint = McpEndpoint::new(config, auth, handler.clone(), stop.clone())?;
         Ok(Self {
+            handler,
             endpoint,
             polling,
             notices,
@@ -87,6 +90,7 @@ impl Application {
         shutdown: impl Future<Output = ()>,
     ) -> Result<(), AppError> {
         let Self {
+            handler,
             endpoint,
             polling,
             notices,
@@ -96,6 +100,7 @@ impl Application {
         } = self;
         // Drop/cancellation unwinds the SDK and every owned service task too.
         let _cancel = stop.clone().drop_guard();
+        let _admission = StopAdmission(handler.clone());
         let (stopping, receive) = watch::channel(false);
         let (ready, startup) = oneshot::channel();
         let mut workers = JoinSet::new();
@@ -117,13 +122,15 @@ impl Application {
             workers.spawn(async move { ("notices", notices.run(receive).await) });
             workers.spawn(async move { ("mcp", endpoint.serve(listener).await) });
             let typing_stop = stop.clone();
+            let observe_handler = handler.clone();
             workers.spawn(async move {
                 (
-                    "typing",
+                    "delivery",
                     tokio::select! {
                         biased;
                         _ = typing_stop.cancelled() => Ok(()),
                         _ = typing.failed() => Err(AppError::ServiceStopped),
+                        _ = observe_handler.outbound_failed() => Err(AppError::ServiceStopped),
                     },
                 )
             });
@@ -135,6 +142,9 @@ impl Application {
             }
         }
         .await;
+        // Fence new effects before cancelling transport/long-lived callers. Already
+        // executing ingress transactions are synchronous and finish before yielding.
+        handler.stop();
         stop.cancel();
         stopping.send_replace(true);
         let mut result = result;
@@ -148,7 +158,20 @@ impl Application {
                 result = failure;
             }
         }
+        let drained = handler.drain().await;
+        if result.is_ok() {
+            result = drained;
+        }
         result
+    }
+}
+
+// Dropping run_until still closes admission; graceful draining requires awaiting it.
+struct StopAdmission(Arc<McpHandler>);
+
+impl Drop for StopAdmission {
+    fn drop(&mut self) {
+        self.0.stop();
     }
 }
 

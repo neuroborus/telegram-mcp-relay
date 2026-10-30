@@ -105,6 +105,9 @@ impl AskService {
         let deadline = Instant::now() + timeout;
         let stopped = subscription.stopped.clone();
         loop {
+            if stopped.is_cancelled() {
+                return Err(AppError::McpUnavailable);
+            }
             if Instant::now() >= deadline {
                 return Ok(None);
             }

@@ -27,6 +27,35 @@ fn start(service: &TypingService, session: &str, reply: &str, chat: i64, first: 
     );
 }
 
+#[tokio::test(start_paused = true)]
+async fn shutdown_retires_a_stalled_worker_and_prevents_restart_without_an_idle_timer() {
+    let service = service(&config());
+    start(&service, "a", "1", -101, 0, 0);
+    let (started, mut active) = watch::channel(false);
+    let driver = run(
+        Arc::downgrade(&service.state),
+        service.changed.subscribe(),
+        move |_| {
+            started.send_replace(true);
+            std::future::pending()
+        },
+        service.refresh,
+    );
+    service.state.lock().unwrap().worker = Some(tokio::spawn(async move {
+        driver.await.unwrap();
+    }));
+    active.changed().await.unwrap();
+    let instant = Instant::now();
+    service.close();
+    service.drain().await.unwrap();
+    start(&service, "a", "1", -101, 0, 0);
+    let state = service.state.lock().unwrap();
+    assert!(!state.running);
+    assert!(state.replies.is_empty());
+    assert!(state.in_flight.is_empty());
+    assert_eq!(Instant::now(), instant);
+}
+
 #[tokio::test]
 async fn worker_abort_wakes_supervision_without_an_idle_timer() {
     let service = service(&config());

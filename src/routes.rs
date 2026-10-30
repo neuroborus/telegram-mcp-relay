@@ -172,9 +172,10 @@ impl<S: ServerHandler> McpEndpoint<S> {
                         let connection = builder.serve_connection(TokioIo::new(socket), service);
                         tokio::pin!(connection);
                         tokio::select! {
-                            _ = &mut connection => (),
+                            biased;
                             // Do not wait on a client stalled in a partial body or SSE.
                             _ = shutdown.cancelled() => (),
+                            _ = &mut connection => (),
                         }
                     });
                 }
@@ -235,9 +236,10 @@ impl<S: ServerHandler> McpEndpoint<S> {
         request.headers_mut().remove("x-request-id");
         request.extensions_mut().insert(correlation.clone());
         let response = tokio::select! {
+            biased;
+            _ = self.inner.shutdown.cancelled() => return rejection(StatusCode::SERVICE_UNAVAILABLE),
             response = self.inner.sdk.handle(request)
                 .instrument(tracing::info_span!("mcp_request", request_id = correlation.as_str())) => response,
-            _ = self.inner.shutdown.cancelled() => return rejection(StatusCode::SERVICE_UNAVAILABLE),
         };
         let mut response = safe_response(response, self.inner.request_bytes).await;
         tracing::debug!(

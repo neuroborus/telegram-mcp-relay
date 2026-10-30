@@ -111,7 +111,19 @@ database copy or other temporary disk file. The startup/daily library scheduler 
 most 32 free-list pages per transaction, yielding between commits under a fixed sweep budget.
 No new configuration setting is required. See
 [disk maintenance](ARCHITECTURE.md#physical-disk-maintenance) for usage accounting, recovery,
-filesystem bounds and limitations. OS signal handling and graceful draining of accepted sends
-remain the next shutdown step; termination currently has the same bookkeeping limitations as
-process loss. Embedders can stop service loops through `app::run_until`.
+filesystem bounds and limitations.
 See [architecture](ARCHITECTURE.md#session-and-route-persistence).
+
+The binary registers SIGINT and SIGTERM before service startup; either signal stops admission
+and drains accepted sends and route bookkeeping before exit. Registration failure logs
+`SHUTDOWN_SIGNAL_UNAVAILABLE` and exits unsuccessfully before starting services. No shutdown
+setting is required.
+Allow the existing network deadlines (15 seconds for text, 600 seconds for uploads), followed
+by SQLite bookkeeping, to finish before any external forced-stop deadline. Repeated SIGINT or
+SIGTERM does not abort the drain. SIGKILL, crashes and forced termination can still interrupt
+bookkeeping after a send is accepted; do not automatically resend an uncertain message.
+
+The library installs no process-wide handlers. Embedders supply cancellation and await
+`app::run_until` to drain accepted work; dropping its future does not await detached sends.
+`app::run` waits for a supervised service failure. See
+[runtime and ownership](ARCHITECTURE.md#runtime-and-ownership) for shutdown ordering and limits.

@@ -17,6 +17,7 @@ use rmcp::{
 };
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
+use tokio_util::{sync::CancellationToken, task::TaskTracker};
 
 use crate::{
     clients::telegram::TelegramClient,
@@ -45,6 +46,8 @@ pub struct McpHandler {
     files: OutboundFiles,
     inbox: InboxService,
     notifications: InboxNotifications,
+    stopped: CancellationToken,
+    requests: TaskTracker,
 }
 
 impl McpHandler {
@@ -68,11 +71,32 @@ impl McpHandler {
             inbox,
             database,
             notifications,
+            stopped: CancellationToken::new(),
+            requests: TaskTracker::new(),
         })
     }
 
     pub(crate) fn typing(&self) -> TypingService {
         self.outbound.typing()
+    }
+
+    pub(crate) fn stop(&self) {
+        self.stopped.cancel();
+        self.requests.close();
+        self.outbound.close();
+        self.notifications.close();
+        self.typing().close();
+    }
+
+    pub(crate) async fn drain(&self) -> Result<(), AppError> {
+        self.requests.wait().await;
+        let outbound = self.outbound.drain().await;
+        let typing = self.typing().drain().await;
+        outbound.and(typing)
+    }
+
+    pub(crate) async fn outbound_failed(&self) {
+        self.outbound.failed().await;
     }
 
     fn register(&self, request: RegisterRequest) -> Result<RegisterResult, AppError> {
@@ -169,6 +193,10 @@ impl ServerHandler for McpHandler {
     }
 
     async fn listen(&self, context: SubscriptionContext) -> Result<(), ErrorData> {
+        let _request = self.requests.token();
+        if self.stopped.is_cancelled() {
+            return Ok(());
+        }
         self.listen_inboxes(context).await
     }
 
@@ -227,6 +255,10 @@ impl ServerHandler for McpHandler {
         request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
+        let _request = self.requests.token();
+        if self.stopped.is_cancelled() {
+            return Err(ErrorData::internal_error("Relay stopping", None));
+        }
         let result = match request.name.as_ref() {
             "telegram_register" => tool_result(self.register(arguments(&request)?)),
             "telegram_send" => tool_result(self.send(arguments(&request)?).await),

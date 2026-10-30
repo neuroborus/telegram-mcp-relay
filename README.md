@@ -17,7 +17,7 @@ consuming durable replies. Bounded periodic cleanup and incremental disk reclama
 valid replies and recovery identities. See [architecture](docs/ARCHITECTURE.md) for implemented
 guarantees and protocol limitations.
 
-Graceful accepted-send draining and OS signal integration remain the next shutdown step.
+SIGINT and SIGTERM trigger graceful shutdown, draining admitted sends and retiring service work.
 Setup guidance, full acceptance interactions and resource measurements remain planned work;
 this composition does not establish complete MVP acceptance or live Telegram interoperability.
 The specification calls the product **Telegram MCP Bridge**; this repository and binary are
@@ -33,8 +33,11 @@ Run `target/release/telegram-mcp-relay /absolute/path/to/config.toml` with an ex
 configuration, protected secrets and existing private storage/export directories. The
 [synthetic example](config/relay.example.toml) needs local IDs and paths before use. Startup
 failures return a safe error code and nonzero exit status. No directories, services or webhook
-resets are installed automatically. Default process termination can interrupt send bookkeeping;
-library hosts can cancel service loops through `run_until`.
+resets are installed automatically. The binary registers shutdown signals before starting services
+and awaits accepted send bookkeeping before exit. Library hosts supply cancellation and await
+`run_until`; the library installs no process-wide signal handlers. SIGKILL, crashes and external
+forced-stop deadlines can still interrupt bookkeeping; see
+[shutdown ownership](docs/ARCHITECTURE.md#runtime-and-ownership).
 
 The MVP uses one native process, loopback Streamable HTTP, Telegram long polling and SQLite.
 Outgoing text and captions have a strict 1,000 Unicode scalar limit including the session

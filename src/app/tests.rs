@@ -73,11 +73,13 @@ impl Fixture {
 
     fn start(&mut self, client: TelegramClient) -> Running {
         let app = Application::new(&self.config, client, None).unwrap();
+        let retired = app.stop.clone();
         let listener = self.listener.take().unwrap();
         let stop = CancellationToken::new();
         let running = tokio::spawn(app.serve(listener, stop.clone().cancelled_owned()));
         Running {
             stop,
+            retired,
             task: running,
         }
     }
@@ -85,7 +87,84 @@ impl Fixture {
 
 struct Running {
     stop: CancellationToken,
+    retired: CancellationToken,
     task: JoinHandle<Result<(), AppError>>,
+}
+
+#[tokio::test]
+async fn shutdown_and_service_failure_drain_disconnected_sends_and_preserve_ingress() {
+    for service_failure in [false, true] {
+        let mut fixture = Fixture::new().await;
+        fixture.config.limits.background_tasks = 1;
+        let now = unix_millis().unwrap();
+        let key = {
+            let mut db = fixture.database();
+            let key = db
+                .register_session(None, None, "Drain", now)
+                .unwrap()
+                .session_key;
+            let reservation = db.reserve_route(&key).unwrap();
+            db.persist_route(reservation, -101, 5, RouteKind::Text, now, now)
+                .unwrap();
+            key
+        };
+        let mut mock = Mock::new(&fixture.config).await;
+        let address = fixture.config.server.listen;
+        let mut running = fixture.start(mock.client.clone());
+        mock.next("getWebhookInfo")
+            .await
+            .respond(json!({"ok":true,"result":{"url":"","pending_update_count":0}}));
+        mock.next("getUpdates")
+            .await
+            .respond(json!({"ok":true,"result":[{
+            "update_id":10,"message":{"message_id":15,"date":1,"chat":{"id":-101},
+            "from":{"id":7,"is_bot":false},"reply_to_message":{"message_id":5},
+            "text":"Recover after shutdown"}}]}));
+        let poll = mock.next("getUpdates").await;
+        assert_eq!(poll.payload["offset"], 11); // Accepted ingress committed before shutdown.
+        let send_key = key.clone();
+        let caller = tokio::spawn(async move {
+            tool(
+                address,
+                "telegram_send",
+                json!({"session_key":send_key,"text":"Result"}),
+            )
+            .await
+        });
+        let send = mock.next("sendMessage").await;
+        caller.abort();
+        assert!(caller.await.unwrap_err().is_cancelled());
+        if service_failure {
+            poll.respond(json!({"ok":false,"error_code":401}));
+        } else {
+            running.stop.cancel();
+            drop(poll);
+        }
+        running.retired.cancelled().await; // Supervisor has fenced admission and stopped peers.
+        assert!(!running.task.is_finished());
+        send.respond(json!({"ok":true,"result":{
+            "message_id":6,"date":now/1000,"chat":{"id":-101}}}));
+        let result = (&mut running.task).await.unwrap();
+        if service_failure {
+            assert_eq!(
+                result,
+                Err(AppError::Telegram(crate::error::TelegramError::Rejected {
+                    code: 401,
+                    retry_after_seconds: None
+                }))
+            );
+        } else {
+            result.unwrap();
+        }
+        assert!(tokio::net::TcpStream::connect(address).await.is_err());
+        let db = fixture.database();
+        assert_eq!(db.update_cursor().unwrap(), Some(10));
+        assert_eq!(db.route(-101, 6, now).unwrap().unwrap().session_key, key);
+        let inbox = db.inbox_snapshot(&key, None, 10, now).unwrap();
+        assert_eq!(inbox.replies.len(), 1);
+        assert_eq!(fixture.count("acknowledgment_receipts"), 0);
+        assert_eq!(fixture.count("notice_attempts"), 0);
+    }
 }
 
 impl Drop for Running {

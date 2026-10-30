@@ -8,7 +8,7 @@ use std::{
 };
 
 use futures_util::{StreamExt, stream::FuturesUnordered};
-use tokio::{sync::watch, task::AbortHandle, time::Instant};
+use tokio::{sync::watch, task::JoinHandle, time::Instant};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
@@ -54,7 +54,8 @@ struct State {
     // Keep cooldowns through stop/start races. None means an unrepresentable retry_after.
     next_attempt: HashMap<i64, Option<Instant>>,
     running: bool,
-    worker: Option<AbortHandle>,
+    closed: bool,
+    worker: Option<JoinHandle<()>>,
 }
 
 impl Drop for State {
@@ -119,6 +120,32 @@ impl TypingService {
         }
     }
 
+    pub(crate) fn close(&self) {
+        if let Ok(mut state) = self.state.lock() {
+            state.closed = true;
+            state.replies.clear();
+            state.next_attempt.clear();
+            self.changed.send_replace(());
+        }
+    }
+
+    /// Wake the lazy worker, cancel outstanding actions and await its retirement.
+    pub(crate) async fn drain(&self) -> Result<(), AppError> {
+        let worker = self
+            .state
+            .lock()
+            .map_err(|_| AppError::ServiceStopped)?
+            .worker
+            .take();
+        if let Some(worker) = worker {
+            worker.await.map_err(|_| AppError::ServiceStopped)?;
+        }
+        if *self.failed.borrow() {
+            return Err(AppError::ServiceStopped);
+        }
+        Ok(())
+    }
+
     /// Called synchronously after the fenced durable transition, under its database guard.
     pub(crate) fn start(&self, session: &str, reply: &str, status: &ProcessingStatus, now: i64) {
         let Some(first) = status.processing_started_at else {
@@ -133,6 +160,9 @@ impl TypingService {
         let Ok(mut state) = self.state.lock() else {
             return;
         };
+        if state.closed {
+            return;
+        }
         let instant = Instant::now();
         let deadline = instant + Duration::from_millis(remaining.max(0) as u64);
         let active = if let Some(lease) = state.replies.get_mut(reply) {
@@ -175,14 +205,11 @@ impl TypingService {
                 },
                 self.refresh,
             );
-            state.worker = Some(
-                tokio::spawn(async move {
-                    if driver.await.is_ok() {
-                        outcome.complete();
-                    }
-                })
-                .abort_handle(),
-            );
+            state.worker = Some(tokio::spawn(async move {
+                if driver.await.is_ok() {
+                    outcome.complete();
+                }
+            }));
         }
         self.changed.send_replace(());
     }

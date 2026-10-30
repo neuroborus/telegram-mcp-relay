@@ -6,8 +6,8 @@ The binary now loads one TOML path and runs the shared library composition on To
 current-thread runtime, with structured `tracing` diagnostics on stderr. It wires protected
 SQLite, the bounded Telegram client, text/document delivery, the shared protected MCP endpoint,
 one reply poller, typing, notices and retention/reclamation. Startup and supervision are
-described under [runtime and ownership](#runtime-and-ownership); graceful accepted-send
-draining and process signal handling remain separate planned work.
+described under [runtime and ownership](#runtime-and-ownership), including graceful accepted-send
+draining after SIGINT/SIGTERM in the binary or host cancellation through the embedding API.
 The accepted HTTP adapter's synthetic tests passed in Runner's complete workspace test suite,
 as described below. New composition tests await FINALIZE.
 Reply ingestion authorizes input and commits replies/dispositions with the cursor.
@@ -51,7 +51,7 @@ Telegram requests or MCP interoperability tests have been performed.
 | Dependency | Selected version | Direct features (defaults disabled) | Purpose |
 | --- | --- | --- | --- |
 | [rmcp](https://docs.rs/crate/rmcp/3.8.0/features) | 3.8.0 | `server`, `transport-streamable-http-server` | Official MCP server, schema support and shared HTTP transport foundation |
-| [Tokio](https://docs.rs/crate/tokio/1.54.1/features) | 1.54.1 | `fs`, `io-util`, `macros`, `net`, `rt`, `sync`, `time` | Current-thread runtime, loopback listener, bounded I/O/admission and deadlines |
+| [Tokio](https://docs.rs/crate/tokio/1.54.1/features) | 1.54.1 | `fs`, `io-util`, `macros`, `net`, `rt`, `signal`, `sync`, `time` | Current-thread runtime, loopback listener, bounded I/O/admission, deadlines and Unix shutdown signals |
 | [tracing](https://docs.rs/crate/tracing/0.1.44/features) | 0.1.44 | `std` | Structured diagnostic events |
 | [tracing-subscriber](https://docs.rs/crate/tracing-subscriber/0.3.23/features) | 0.3.23 | `fmt`, `std` | Fallible stderr diagnostic initialization with an INFO ceiling |
 | [serde](https://docs.rs/crate/serde/1.0.229/features) | 1.0.229 | `derive`, `std` | Typed settings deserialization; already in the SDK graph |
@@ -68,6 +68,14 @@ Telegram requests or MCP interoperability tests have been performed.
 Dev-only Tokio `test-util` supports controlled deadlines. Direct `sync` use supplies owned
 send-admission permits; it was already
 enabled in the locked SDK graph and adds no packages or lockfile changes.
+
+Tokio's `signal` feature adds the locked transitive `signal-hook-registry` 1.4.8, reusing
+existing `errno` and `libc` dependencies. Its version and checksum come from the cached Tokio
+1.54.1 upstream lockfile. The cached Tokio source confirms synchronous registration through
+`signal(SignalKind)` and asynchronous receipt through `Signal::recv`; handlers remain installed
+after listeners drop. Only the binary registers them. Signal regression execution remains
+pending FINALIZE; no new runtime evidence is claimed here.
+
 The reqwest archive checksum matches published registry metadata;
 its inspected client, chunked-response and retry sources match the archive. Its `json` and
 `rustls` features enable JSON, rustls with AWS-LC and platform certificate verification;
@@ -129,8 +137,8 @@ requires exactly one matching Authorization header before SDK dispatch. Request 
 bounded incrementally by the SDK, including chunked bodies. Admission lasts through response
 completion/drop, including SSE; saturation returns 503. Connections are limited to twice request
 admission, with 32 headers, 16 KiB header/buffer bounds and a ten-second header deadline. There
-is no global call timeout. Cancellation closes connections and pending body reads; complete
-daemon drain ordering remains later work.
+is no global call timeout. Shutdown closes admission, connections and pending body reads before
+draining accepted work; stalled clients cannot extend that drain.
 
 Correlation uses fresh random IDs, never client-supplied IDs. Authorization, proxy authorization,
 cookies and client correlation headers are removed before SDK dispatch. HTTP rejection text is
@@ -444,8 +452,10 @@ After admission, an owned Tokio task attempts the send once and commits its comp
 and session activity through `persist_route`. No database guard crosses an await. Telegram
 message dates are converted from seconds to repository milliseconds. Dropping/canceling the
 caller leaves this bounded task and reservation alive until the HTTP result and bookkeeping
-finish. This protects against caller cancellation, not process loss; supervised daemon
-shutdown/draining is a later step. No outbound body is written to SQLite.
+finish. A shared `TaskTracker` retires completed task storage immediately; daemon shutdown closes
+send admission and drains tracked work, including disconnected callers. Tracking is armed before
+permit acquisition so concurrent close cannot miss an admitted send. Crashes and forced process
+termination can still interrupt bookkeeping. No outbound body is written to SQLite.
 
 A consistent 4xx rejection remains definitive. A lost/invalid response remains
 `TELEGRAM_DELIVERY_UNCERTAIN`, with no fabricated route. A confirmed accepted send whose
@@ -505,8 +515,8 @@ with the existing five-second connect limit. Consistent 4xx rejection, ambiguous
 post-send bookkeeping failure retain the text service's distinct errors. Read failure,
 truncation or timeout during an attempted upload is conservatively uncertain; none authorizes
 automatic replay or a fabricated route. Caller cancellation leaves admitted work running to
-bookkeeping completion. Daemon shutdown draining remains a later step. New tests await FINALIZE;
-no live upload or runtime memory measurement is claimed.
+bookkeeping completion. Graceful daemon shutdown drains the same tracked work. New tests await
+FINALIZE; no live upload or runtime memory measurement is claimed.
 
 ## Telegram HTTP client
 
@@ -745,18 +755,22 @@ jitter (one to 30 seconds locally); `retry_after` can extend that delay and is n
 Storage pressure uses the same bounded local backoff. Shutdown, loss of the supervisor's watch
 sender or dropping the run future cancels HTTP and waits, releases the lease and preserves
 committed replies/cursor. The next consumer resumes from SQLite. Daemon supervision stops peer
-services on terminal poll failure; shutdown draining of admitted sends remains a later step.
+services on terminal poll failure, then drains already admitted sends before returning the failure.
 New poller tests await FINALIZE.
 
 ## Runtime and ownership
 
-`app::run` loads the supplied configuration path, resolves protected secrets, opens one SQLite
-connection, pins export roots and constructs all services before binding the loopback listener.
+The binary registers SIGINT and SIGTERM before starting services, then passes their shutdown
+future to `app::run_until` and awaits completion. Registration failure emits the safe static
+`SHUTDOWN_SIGNAL_UNAVAILABLE` code and exits before service startup. `app::run_until` loads the
+supplied configuration path, resolves protected secrets, opens one SQLite connection, pins
+export roots and constructs all services before binding the loopback listener.
 The same `Arc<Mutex<Database>>` reaches MCP handlers, outbound delivery, ingress, cleanup and
 notices. All Telegram adapters clone one reusable client. Post-commit subscription/wait
 signals remain database-owned; no extra relay or periodic inbox reader is needed.
 
-One fixed supervisor owns cleanup, polling, notices, MCP serving and a typing-failure observer.
+One fixed supervisor owns cleanup, polling, notices, MCP serving and an observer for typing
+and admitted-send failures.
 Cleanup retains its exclusive lease and completes startup deletion/reclamation before the
 other loops start. Each loop remains bounded by its existing admission policy; these fixed
 supervisors are additional to `limits.background_tasks` admitted sends. The typing scheduler
@@ -770,11 +784,31 @@ Construction/bind failure starts no worker; failed startup cleanup starts no ser
 Telegram activity. Initialization may leave a private database/token file; startup never
 deletes or repairs operator files to roll back an error.
 
-`app::run_until` accepts a host cancellation future, stops the loops and retires owned service
-tasks. Dropping it cancels the SDK and aborts its task set. Complete graceful draining of
-detached accepted sends and OS signal integration remain the next shutdown step. Until then,
-process termination can interrupt admitted bookkeeping, as can a crash. Composition tests use
-the same private constructor with a mocked client; production exposes no endpoint override.
+`app::run_until` accepts a host cancellation future. Shutdown first fences tool/send admission
+and closes bounded subscription/wait interests, then cancels MCP connections and service loops.
+Synchronous ingress transactions finish before yielding; unresolved updates remain unconfirmed
+and recover from the durable cursor. Handler/listener futures and every admitted send are tracked
+and drained, including sends whose callers disconnected. No short shutdown timeout aborts route
+bookkeeping: existing 15-second text and 600-second upload deadlines bound network attempts,
+followed by synchronous SQLite bookkeeping. Failure, uncertainty and failed bookkeeping never
+authorize replay or create a guessed route. Service errors survive draining; individual send
+failures retain their safe diagnostics. Detached send panics wake supervision and fail draining.
+
+Typing admission closes too: the lazy worker wakes, drops pending best-effort actions and is
+awaited without waiting for its refresh timer. Shutdown never acknowledges replies or resets
+processing identity, and sends no shutdown/timeout notice. Completed task results are not
+accumulated in a growing supervisor collection. Diagnostics retain static service/error codes;
+no additional log queue or per-agent task is introduced.
+
+Both library entry points remain free of process-wide signal handlers. `app::run` waits for a
+supervised service failure; embedding hosts that need graceful shutdown supply cancellation
+and await `app::run_until`. Dropping its future only fences admission, cancels the SDK and aborts
+the supervisor task set, without awaiting detached sends. In the binary, either SIGINT or SIGTERM
+starts the drain; repeated signals do not force an early exit. Allow pending uploads and their
+bookkeeping to finish before an external service-manager deadline. SIGKILL, process crashes and
+forced termination can bypass draining and interrupt bookkeeping after Telegram accepts a send;
+they do not justify automatically resending. Composition tests use the same private constructor
+with a mocked client; production exposes no endpoint override.
 
 One Rust binary serves concurrent MCP clients at a loopback Streamable HTTP endpoint and
 owns one Telegram long-poll consumer, one reusable HTTP client and one embedded SQLite store.
