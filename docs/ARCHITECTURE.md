@@ -16,7 +16,8 @@ A cancellable single-consumer long poller now drives it; production startup and 
 notification delivery remain later work.
 Bounded library inbox snapshots, pre-processing claims, durable processing-start,
 explicit reconciliation and acknowledgment operations are available. MCP registration and
-outbound tools are available; inbox/processing tools and typing remain later work.
+outbound tools, read-only inbox resources and inbox/processing/acknowledgment tools are
+available. Subscriptions, asks and typing remain later work.
 
 The library now provides centralized validated TOML settings and typed, redacted startup
 errors in `config`/`error`, with protected Unix secret resolution under `config::secrets`.
@@ -115,7 +116,7 @@ requests require matching `Mcp-Method` and `MCP-Protocol-Version` headers and `_
 protocolVersion plus clientCapabilities entries. Tool calls also require `Mcp-Name` to match
 `params.name`; the SDK rejects missing or mismatched headers before handler dispatch.
 Legacy initialize sessions are unsupported.
-Discovery advertises tools; inbox resources and application subscriptions land separately.
+Discovery advertises tools and read-only resources. Application subscriptions remain pending.
 
 Host must be the configured numeric authority or `localhost`, including its port. Present
 Origin must use HTTP with either authority; missing Origin supports native clients. Duplicate
@@ -139,8 +140,8 @@ client compatibility, live Telegram or production startup is claimed.
 `McpHandler::new` shares one SQLite handle, outbound service and pinned file-root opener
 across per-request SDK handlers. `telegram_register` accepts a required title and optional
 `external_session_id`/saved `session_key`, using the existing transactional registration path.
-It returns `session_key`, normalized `title` and stable `inbox_uri`; the URI's resource
-implementation remains pending. Missing both identities creates a fresh session. Supplying
+It returns `session_key`, normalized `title` and stable readable `inbox_uri`.
+Missing both identities creates a fresh session. Supplying
 both requires an existing match. Renaming affects future sends only, and equal titles never
 merge identities. Registration does not change resource listings or processing ownership.
 
@@ -162,6 +163,43 @@ Uncertain delivery and confirmed-send bookkeeping failure remain distinct and ex
 forbid automatic resending. Supplied paths, keys, bodies and upstream descriptions are never
 included in errors. Synthetic MCP-to-mocked-Telegram tests await FINALIZE; no external client
 interoperability or runnable daemon is claimed.
+
+## MCP inbox resources and reply tools
+
+`resources/templates/list` exposes the stable
+`telegram-bridge://sessions/{session_key}/inbox` template. `resources/list` stays empty,
+including after registration: it never enumerates session keys. Direct `resources/read`
+requires a generated session handle in that URI, independent of any connection registration.
+The shared local bearer token and session handles assume trusted local clients, as described
+under [security](#retention-and-security); they are not separate per-client identities.
+
+Snapshots contain JSON `replies` and nullable `next_uri`. Optional `?limit=1..100` defaults
+to 100; follow `next_uri` unchanged for keyset pagination in receipt-time/update-ID order.
+Each page also respects the configured reply payload budget. Continuations use
+`?limit=N&after=created_at,telegram_update_id`, scoped by the URI's session key. Pages reflect
+current durable state, not a frozen history. All delivery states, text/caption, attachment
+metadata and routing IDs are visible; tokens are never present. Timestamps are Unix
+milliseconds. Reads never claim, acknowledge or refresh session activity. Lists and reads
+are private and immediately stale (`ttlMs=0`). Malformed URIs/cursors and unknown sessions
+return safe protocol errors; rmcp maps missing resources to `-32602` for MCP 2026-07-28.
+The locked SDK also requires `Mcp-Name` to match `params.uri` on resource reads.
+
+`telegram_inbox({session_key, limit?})` uses the common ordered claim transaction and returns
+`replies` with fresh `claim_token` values. It claims only pending or lease-expired
+pre-processing replies and never completes them. Preserve each reply ID and current token.
+`telegram_processing({session_key, reply_id, claim_token, active})` records the first start
+when active, or preserves ownership when inactive; neither operation acknowledges a reply.
+Typing remains pending. For explicit processing recovery, omit `active` and instead supply
+`reconcile_request_id`: save a fresh random 1–64-byte request ID with the current token before
+dispatch. Exactly one action is required. The result returns the reply ID, current token and
+original first start. Save the rotated token; retry a lost response with the identical saved
+request ID and prior token. Registration alone never rotates ownership.
+
+`telegram_ack({session_key, reply_id, claim_token})` removes the successfully handled payload
+through the existing bounded receipt transaction and returns `reply_id`/`acknowledged=true`.
+Identical valid-token retries succeed while the receipt remains valid; stale or wrong-session
+claims return `CLAIM_INVALID`. New MCP interaction tests await FINALIZE; notifications,
+waiting, typing and named-client interoperability are not established by these resources.
 
 ## Outbound formatting
 

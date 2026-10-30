@@ -20,6 +20,8 @@ use tokio::{
 
 use crate::repositories::Database;
 
+#[path = "inbox.rs"]
+mod inbox;
 #[path = "tools.rs"]
 mod tools;
 
@@ -55,6 +57,7 @@ impl Fixture {
         config.limits.concurrent_requests = 2;
         config.telegram.chat_id = -101;
         config.telegram.allowed_chat_ids = vec![-101];
+        config.telegram.allowed_user_ids = vec![7];
         config.files.allowed_roots = vec![directory.clone()];
         let state = Arc::new(
             McpHandler::new(
@@ -137,6 +140,11 @@ impl Http {
         {
             request = request.header("mcp-name", name);
         }
+        if value["method"] == "resources/read"
+            && let Some(uri) = value["params"]["uri"].as_str()
+        {
+            request = request.header("mcp-name", uri);
+        }
         request.json(&value)
     }
 
@@ -182,7 +190,10 @@ async fn discovery_is_modern_stateless_and_accepts_native_and_same_origin_client
         assert_eq!(body["result"]["supportedVersions"], json!([VERSION]));
         assert_eq!(body["result"]["cacheScope"], "private");
         assert_eq!(body["result"]["ttlMs"], 0);
-        assert_eq!(body["result"]["capabilities"], json!({"tools":{}}));
+        assert_eq!(
+            body["result"]["capabilities"],
+            json!({"tools":{},"resources":{}})
+        );
     }
     // The transport retires its connections without waiting for client keepalive.
     http.finish().await;

@@ -1,4 +1,4 @@
-//! Thin typed MCP tools over shared durable registration and outbound services.
+//! Thin typed MCP tools and resources over shared durable services.
 
 use std::{
     borrow::Cow,
@@ -9,8 +9,9 @@ use rmcp::{
     ErrorData, RoleServer, ServerHandler,
     model::{
         CacheScope, CallToolRequestParams, CallToolResponse, CallToolResult, Implementation,
-        ListToolsResult, PaginatedRequestParams, ProtocolVersion, ServerCapabilities, ServerConfig,
-        Tool,
+        ListResourceTemplatesResult, ListResourcesResult, ListToolsResult, PaginatedRequestParams,
+        ProtocolVersion, ReadResourceRequestParams, ReadResourceResponse, ResourceTemplate,
+        ServerCapabilities, ServerConfig, Tool,
     },
     service::RequestContext,
 };
@@ -20,17 +21,23 @@ use serde_json::{Value, json};
 use crate::{
     clients::telegram::TelegramClient,
     config::Config,
-    dto::{RegisterRequest, RegisterResult, SendFileRequest, SendRequest, SendResult},
+    dto::{
+        AckRequest, AckResult, InboxRequest, InboxResult, ProcessingRequest, ProcessingResult,
+        RegisterRequest, RegisterResult, SendFileRequest, SendRequest, SendResult,
+    },
     error::{AppError, TelegramError},
     repositories::Database,
-    services::{files::OutboundFiles, outbound::OutboundService, unix_millis},
+    services::{files::OutboundFiles, inbox::InboxService, outbound::OutboundService, unix_millis},
 };
+
+mod inbox;
 
 /// Agent sessions live in SQLite, independently of HTTP connections or SDK handlers.
 pub struct McpHandler {
     database: Arc<Mutex<Database>>,
     outbound: OutboundService,
     files: OutboundFiles,
+    inbox: InboxService,
 }
 
 impl McpHandler {
@@ -43,6 +50,7 @@ impl McpHandler {
         Ok(Self {
             outbound: OutboundService::new(database.clone(), telegram, config)?,
             files: OutboundFiles::new(&config.files)?,
+            inbox: InboxService::new(&config.delivery)?,
             database,
         })
     }
@@ -91,13 +99,53 @@ impl McpHandler {
 
 impl ServerHandler for McpHandler {
     fn get_info(&self) -> ServerConfig {
-        ServerConfig::new(ServerCapabilities::builder().enable_tools().build()).with_server_info(
-            Implementation::new("telegram-mcp-relay", env!("CARGO_PKG_VERSION")),
+        ServerConfig::new(
+            ServerCapabilities::builder()
+                .enable_tools()
+                .enable_resources()
+                .build(),
         )
+        .with_server_info(Implementation::new(
+            "telegram-mcp-relay",
+            env!("CARGO_PKG_VERSION"),
+        ))
     }
 
     fn supported_protocol_versions(&self) -> Cow<'static, [ProtocolVersion]> {
         Cow::Borrowed(&[ProtocolVersion::V_2026_07_28])
+    }
+
+    async fn list_resources(
+        &self,
+        request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListResourcesResult, ErrorData> {
+        inbox::validate_listing(request)?;
+        // Never enumerate session credentials or change listings on registration.
+        Ok(ListResourcesResult::with_all_items(Vec::new())
+            .with_ttl_ms(0)
+            .with_cache_scope(CacheScope::Private))
+    }
+
+    async fn list_resource_templates(
+        &self,
+        request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListResourceTemplatesResult, ErrorData> {
+        inbox::validate_listing(request)?;
+        Ok(ListResourceTemplatesResult::with_all_items(vec![
+            ResourceTemplate::new("telegram-bridge://sessions/{session_key}/inbox", "telegram_inbox")
+                .with_description("Read-only inbox; use your saved session key. Optional limit=1..100; follow next_uri for later pages. Reads never claim. Timestamps are Unix milliseconds.")
+                .with_mime_type("application/json"),
+        ]).with_ttl_ms(0).with_cache_scope(CacheScope::Private))
+    }
+
+    async fn read_resource(
+        &self,
+        request: ReadResourceRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ReadResourceResponse, ErrorData> {
+        self.read_inbox(&request.uri).map(Into::into)
     }
 
     async fn list_tools(
@@ -126,6 +174,9 @@ impl ServerHandler for McpHandler {
             "telegram_register" => tool_result(self.register(arguments(&request)?)),
             "telegram_send" => tool_result(self.send(arguments(&request)?).await),
             "telegram_send_file" => tool_result(self.send_file(arguments(&request)?).await),
+            "telegram_inbox" => tool_result(self.claim_inbox(arguments(&request)?)),
+            "telegram_processing" => tool_result(self.processing(arguments(&request)?)),
+            "telegram_ack" => tool_result(self.acknowledge(arguments(&request)?)),
             _ => return Err(ErrorData::invalid_params("Unknown tool", None)),
         };
         result.map(Into::into)
@@ -140,6 +191,12 @@ fn tools() -> Vec<Tool> {
             .with_input_schema::<SendRequest>().with_output_schema::<SendResult>(),
         Tool::new("telegram_send_file", "Stream an existing approved local file with a short session caption and durable reply route. Never automatically retry an uncertain send.", serde_json::Map::new())
             .with_input_schema::<SendFileRequest>().with_output_schema::<SendResult>(),
+        Tool::new("telegram_inbox", "Atomically claim eligible replies on startup, resume or notification; preserve reply IDs and tokens. Never poll periodically. Read resources for snapshots without claiming.", serde_json::Map::new())
+            .with_input_schema::<InboxRequest>().with_output_schema::<InboxResult>(),
+        Tool::new("telegram_processing", "Confirm processing start or inactivity with active; neither completes the reply. For explicit resume supply only reconcile_request_id and the saved token; retain the rotated token. Typing is not yet implemented.", serde_json::Map::new())
+            .with_input_schema::<ProcessingRequest>().with_output_schema::<ProcessingResult>(),
+        Tool::new("telegram_ack", "Acknowledge successful handling with the current session, reply ID and token. Identical valid-token retries are idempotent; stale tokens cannot complete work.", serde_json::Map::new())
+            .with_input_schema::<AckRequest>().with_output_schema::<AckResult>(),
     ]
 }
 

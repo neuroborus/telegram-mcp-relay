@@ -9,7 +9,8 @@ workflow and an initial Rust application scaffold. The binary initializes struct
 diagnostics on a current-thread Tokio runtime, logs its scaffold status and exits. The MCP
 endpoint is available through the [library](docs/ARCHITECTURE.md#protected-mcp-transport);
 typed [registration and outbound tools](docs/ARCHITECTURE.md#mcp-registration-and-outbound-tools)
-are available in the library; inbox tools and runnable relay setup remain pending.
+and [durable inbox resources and reply tools](docs/ARCHITECTURE.md#mcp-inbox-resources-and-reply-tools)
+are available in the library; subscriptions, asks, typing and runnable relay setup remain pending.
 The library also implements validated [configuration and protected secrets](docs/CONFIGURATION.md);
 the binary does not load configuration yet.
 Pure [outbound formatting rules](docs/ARCHITECTURE.md#outbound-formatting) normalize session

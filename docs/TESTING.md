@@ -89,6 +89,17 @@ Rejection, uncertain delivery and post-send persistence failure remain distinct,
 or invented routes. Fixtures are private, randomized and TMPDIR-aware;
 execution remains pending the dedicated trusted FINALIZE suite.
 
+`routes::tests::inbox` adds actual modern MCP requests for stable template/empty resource
+listings across registration, direct reads, tied-receipt pagination, session separation,
+attachment-only payloads and delivery-state snapshots without tokens, claims or activity
+changes. Concurrent inbox calls return distinct durable claims. Processing start/inactivity,
+explicit reconciliation, a lost reconciliation response across a fresh handler/database,
+stale/wrong-session fencing and idempotent per-reply completion use the shared transitions.
+Invalid URIs, limits, listing cursors and tool arguments return safe errors without claiming.
+Fixtures honor TMPDIR and use private randomized directories; no live Telegram calls are made.
+Execution remains pending FINALIZE. These cases cover the read/claim/recovery portion of
+specification §§6.3, 16 and 19; subscription/ask interactions remain later acceptance work.
+
 Use the specification's complete section 16 matrix and [test-authoring](../.agents/skills/test-authoring/SKILL.md).
 Pure domain tests cover grapheme title normalization, final scalar text limits and native
 caption limits. Integration tests cover the interactions that pure tests cannot prove:

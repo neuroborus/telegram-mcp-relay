@@ -89,7 +89,7 @@ impl Drop for Telegram {
 }
 
 impl Http {
-    async fn rpc(&self, method: &str, params: Value) -> Value {
+    pub(super) async fn rpc(&self, method: &str, params: Value) -> Value {
         let mut body = message(method);
         body["params"]
             .as_object_mut()
@@ -101,7 +101,7 @@ impl Http {
         body
     }
 
-    async fn tool(&self, name: &str, arguments: Value) -> Value {
+    pub(super) async fn tool(&self, name: &str, arguments: Value) -> Value {
         let body = self
             .rpc("tools/call", json!({"name":name,"arguments":arguments}))
             .await;
@@ -109,7 +109,7 @@ impl Http {
         body["result"].clone()
     }
 
-    async fn register(&self, arguments: Value) -> Value {
+    pub(super) async fn register(&self, arguments: Value) -> Value {
         let result = self.tool("telegram_register", arguments).await;
         assert_eq!(result["isError"], false);
         result["structuredContent"].clone()
@@ -123,7 +123,7 @@ fn sent(id: i64) -> (u16, Value) {
     )
 }
 
-fn failure(result: &Value, code: &str) {
+pub(super) fn failure(result: &Value, code: &str) {
     assert_eq!(result["isError"], true);
     assert_eq!(result["structuredContent"]["code"], code);
     let rendered: Value =
@@ -143,12 +143,22 @@ async fn tools_have_typed_schemas_and_registration_survives_separate_requests_an
             .iter()
             .map(|t| t["name"].as_str().unwrap())
             .collect::<Vec<_>>(),
-        ["telegram_register", "telegram_send", "telegram_send_file"]
+        [
+            "telegram_register",
+            "telegram_send",
+            "telegram_send_file",
+            "telegram_inbox",
+            "telegram_processing",
+            "telegram_ack"
+        ]
     );
     for (tool, required) in tools.iter().zip([
         json!(["title"]),
         json!(["session_key", "text"]),
         json!(["session_key", "path"]),
+        json!(["session_key"]),
+        json!(["session_key", "reply_id", "claim_token"]),
+        json!(["session_key", "reply_id", "claim_token"]),
     ]) {
         assert_eq!(tool["inputSchema"]["type"], "object");
         assert_eq!(tool["inputSchema"]["additionalProperties"], false);
