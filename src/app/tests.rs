@@ -25,6 +25,8 @@ use crate::{
     services::{ingress::IngressService, unix_millis},
 };
 
+mod conversations;
+
 struct Fixture {
     directory: PathBuf,
     config: Config,
@@ -182,11 +184,35 @@ impl Drop for Fixture {
 
 struct TelegramRequest {
     method: String,
+    content_type: String,
+    body: Vec<u8>,
     payload: Value,
     response: oneshot::Sender<Value>,
 }
 
 impl TelegramRequest {
+    fn part(&self, name: &str) -> &[u8] {
+        let boundary = self
+            .content_type
+            .strip_prefix("multipart/form-data; boundary=")
+            .unwrap();
+        let marker = format!("name=\"{name}\"");
+        let start = self
+            .body
+            .windows(marker.len())
+            .position(|bytes| bytes == marker.as_bytes())
+            .unwrap();
+        let part = &self.body[start..];
+        let header_end = part.windows(4).position(|b| b == b"\r\n\r\n").unwrap();
+        let body = &part[header_end + 4..];
+        let delimiter = format!("\r\n--{boundary}");
+        let end = body
+            .windows(delimiter.len())
+            .position(|bytes| bytes == delimiter.as_bytes())
+            .unwrap();
+        &body[..end]
+    }
+
     fn respond(self, value: Value) {
         self.response.send(value).unwrap();
     }
@@ -219,11 +245,18 @@ impl Mock {
                                 let send = send.clone();
                                 async move {
                                     let method = request.uri().path().rsplit('/').next().unwrap().to_owned();
+                                    let content_type = request.headers()[http::header::CONTENT_TYPE]
+                                        .to_str().unwrap().to_owned();
                                     let body = Limited::new(request.into_body(), 8_192)
                                         .collect().await.unwrap().to_bytes();
+                                    let payload = if method == "sendDocument" {
+                                        Value::Null
+                                    } else {
+                                        serde_json::from_slice(&body).unwrap()
+                                    };
                                     let (response, receive) = oneshot::channel();
-                                    send.send(TelegramRequest { method,
-                                        payload: serde_json::from_slice(&body).unwrap(), response }).await.unwrap();
+                                    send.send(TelegramRequest { method, content_type,
+                                        body: body.to_vec(), payload, response }).await.unwrap();
                                     let value = receive.await.unwrap_or(Value::Null);
                                     Ok::<_, std::convert::Infallible>(Response::new(
                                         Full::new(Bytes::from(value.to_string()))))
@@ -257,6 +290,25 @@ impl Drop for Mock {
 }
 
 async fn tool(address: SocketAddr, name: &str, arguments: Value) -> Value {
+    let result = rpc(
+        address,
+        "tools/call",
+        json!({"name":name,"arguments":arguments}),
+    )
+    .await;
+    assert_ne!(result["isError"], true, "{result}");
+    result["structuredContent"].clone()
+}
+
+async fn rpc(address: SocketAddr, method: &str, mut params: Value) -> Value {
+    params["_meta"] = json!({
+        "io.modelcontextprotocol/protocolVersion":"2026-07-28",
+        "io.modelcontextprotocol/clientCapabilities":{}});
+    let name = match method {
+        "tools/call" => params["name"].as_str().unwrap(),
+        "resources/read" => params["uri"].as_str().unwrap(),
+        _ => unreachable!("unsupported fixture method"),
+    };
     let response: Value = reqwest::Client::builder()
         .no_proxy()
         .build()
@@ -264,14 +316,9 @@ async fn tool(address: SocketAddr, name: &str, arguments: Value) -> Value {
         .post(format!("http://{address}/mcp"))
         .header("accept", "application/json, text/event-stream")
         .header("mcp-protocol-version", "2026-07-28")
-        .header("mcp-method", "tools/call")
+        .header("mcp-method", method)
         .header("mcp-name", name)
-        .json(
-            &json!({"jsonrpc":"2.0", "id":1, "method":"tools/call", "params":{
-            "name":name, "arguments":arguments, "_meta":{
-                "io.modelcontextprotocol/protocolVersion":"2026-07-28",
-                "io.modelcontextprotocol/clientCapabilities":{}}}}),
-        )
+        .json(&json!({"jsonrpc":"2.0", "id":1, "method":method, "params":params}))
         .send()
         .await
         .unwrap()
@@ -279,8 +326,8 @@ async fn tool(address: SocketAddr, name: &str, arguments: Value) -> Value {
         .await
         .unwrap();
     assert!(response.get("error").is_none(), "{response}");
-    assert_ne!(response["result"]["isError"], true, "{response}");
-    response["result"]["structuredContent"].clone()
+    assert_eq!(response["id"], 1);
+    response["result"].clone()
 }
 
 #[tokio::test]

@@ -86,6 +86,19 @@ supervision without an idle timer. Shutdown cases hold a disconnected send acros
 shutdown or terminal poll failure, then verify its route commits before return, ingress/cursor
 survives reopening, and no reply is acknowledged or service notice generated.
 
+`app::tests::conversations::three_sessions_route_interleaved_old_text_and_document_replies_after_rename`
+adds a complete daemon conversation with three independently registered, same-title sessions
+and overlapping sends whose HTTP responses are released in reverse request order. Later text and
+document sends include a normalized rename; interleaved Replies to the earlier texts/documents
+must retain their original session regardless of the latest activity or a misleading title in
+the Reply body. Multiple Replies have distinct stable IDs and receipt order. An attachment-only
+document and a captioned photo retain metadata through actual getUpdates, read-only MCP resource
+snapshots and concurrent per-session inbox claims. Reopened storage retains all six composite
+routes and seven unacknowledged Replies. After deleting the original outbound file, the fixture
+contains only SQLite, with no outbound bodies, captions, quoted original text, file bytes or
+local paths. The bounded mock accepts actual multipart uploads; response gates replace sleeps.
+Execution remains pending the complete trusted FINALIZE suite.
+
 `services::outbound::tests` holds admitted document responses across admission closure, proving
 the drain waits for success, rejection, uncertainty and failed persistence, with released task/
 send/route capacity and no replay. A synthetic post-send panic with a disconnected caller must
@@ -98,8 +111,8 @@ retire while clients remain connected, and closed tool admission rejects later s
 Existing transport shutdown and poller lease/cancellation cases cover stalled clients and
 uncommitted input without repeating them.
 These cases address shutdown and bounded-resource recovery in specification §§3, 6, 11, 16 and 19.
-Execution remains pending the dedicated trusted FINALIZE suite; full acceptance interactions
-remain later steps.
+Execution remains pending the dedicated trusted FINALIZE suite; full-composition subscription,
+ask and recovery acceptance interactions remain the next step.
 
 `routes::tests` exercises real loopback HTTP discovery, native/same-origin clients, bearer auth,
 hostile/duplicate headers, paths, missing/mismatched `Mcp-Method`, required version/capability
@@ -376,6 +389,25 @@ read-only trusted route, exercising all seven HTTP tests and the pure retry-poli
 without skips. Earlier Native attempts failed before HTTP requests at loopback `bind` with
 `Operation not permitted`. Live Telegram behavior remains untested. See
 [architecture](ARCHITECTURE.md#telegram-http-client).
+
+## Specification §§16/19 coverage map
+
+This maps observable contracts to source-defined proofs, not check receipts. Current changes
+await the complete trusted FINALIZE suite. Focused proofs remain in their owning suites;
+the conversation scenario adds their full-daemon interaction without repeating boundary cases.
+
+| Acceptance / traceability contract | Owning proof |
+| --- | --- |
+| Three concurrent sessions; same-title identity; normalized rename; old text/document Replies; multiple distinct ordered Replies (§§4.1–4.3, 16, 19) | [Daemon conversation](../src/app/tests/conversations.rs), `three_sessions_route_interleaved_old_text_and_document_replies_after_rename`; [registry tests](../tests/registry.rs) retain cross-chat message-ID collision and identity/restart proofs |
+| Attachment-only document and photo-caption metadata; resource reads and inbox claims preserve original-session routing (§§6, 9, 16, 19) | The daemon conversation above; [ingress](../tests/ingress.rs) and [MCP inbox](../src/routes/inbox.rs) retain authorization, rollback, pagination and fencing boundaries |
+| Title graphemes, final scalar/native caption limits, structured rejection without splitting/truncation or effects (§§4.2, 9, 16, 19) | [Outbound domain tests](../src/domain/outbound/tests.rs), [MCP tools](../src/routes/tools.rs) and [ask tests](../src/routes/ask.rs) |
+| Streamed, confined, Reply-routable files without retained outbound history/copies (§§9, 12, 16, 19) | Daemon conversation checks actual multipart contents, routes and persisted files; [file tests](../src/services/files/tests.rs), [document tests](../src/services/outbound/documents.rs) and [upload tests](../src/clients/telegram/upload.rs) retain path-race, mutation and bounded-read proofs |
+| Unknown/expired routes never reassigned; unauthorized input excluded; durable atomic cursor (§§4.3, 10–12, 16, 19) | [Ingress](../tests/ingress.rs), [retention](../tests/retention.rs) and [poller tests](../src/services/polling/tests.rs) |
+| Always-active events, optional bounded wait, shared reply/claim ownership, timeout/disconnect safety (§§5–6, 16, 19) | [Subscription tests](../src/routes/subscriptions.rs) and [ask tests](../src/routes/ask.rs); remaining full-composition race/recovery acceptance is the next step |
+| Durable claims, first processing start, reconciliation, acknowledgment and reconnect recovery (§§6, 10–11, 16, 19) | [Inbox storage tests](../tests/inbox.rs) and [MCP inbox tests](../src/routes/inbox.rs); daemon shutdown tests retain accepted ingress and detached-send proofs |
+| Confirmed capped typing, no idle refresh, factual once-only notices without loops (§§7–8, 16, 19) | [Typing tests](../src/services/typing/tests.rs), [notice storage tests](../tests/notices.rs) and [notice dispatch tests](../src/services/notices/tests.rs) |
+| Independent TTLs, bounded cleanup and physical reclamation without losing valid replies (§§10–11, 16, 19) | [Retention](../tests/retention.rs), [maintenance](../tests/maintenance.rs) and [cleanup scheduler tests](../src/services/cleanup/tests.rs) |
+| Protected single-process composition and local-only transport (§§1–3, 12, 16, 19) | [Application tests](../src/app/tests.rs) and [HTTP transport tests](../src/routes/tests.rs); measured resource targets and operational/client evidence remain pending |
 
 ## Measurements and check ownership
 
