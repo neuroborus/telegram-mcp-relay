@@ -74,3 +74,43 @@ silently replacing the execution route or weakening tests.
 
 No background-run status, clean Git tree or successful commit alone establishes full MVP
 acceptance. Check [testing](TESTING.md), actual runtime capabilities and operational evidence.
+
+## Read-only Cargo validation
+
+`tools/runner-check/` is a dependency-free, standalone Rust development crate for the
+Runner-trusted read-only checkout route. Its interface is exactly:
+
+```text
+runner-check MODE --toolchain-bin <absolute-bin> --registry-source <relative>
+```
+
+The six modes are `clippy-workspace`, `doc-workspace`, `test-workspace`, `clippy-helper`,
+`doc-helper` and `test-helper`. Each executes the corresponding complete check in
+[testing](TESTING.md), adding offline resolution and private target placement. Helper modes
+select the standalone manifest; `test-helper` never recurses or runs the product suite.
+The launcher replaces itself with Cargo so exit codes and signals propagate directly.
+
+The exact actual Cargo executable and toolchain bin path belong in ignored operational
+configuration. Child `RUSTC` and `RUSTDOC` select those actual binaries, and child `PATH` places
+that same toolchain before ordinary system utilities for Cargo/Clippy lookup. This configures
+the child inside the existing sandbox; it grants no new toolchain mount or Runner environment.
+Host HOME and inherited Cargo overrides are excluded from the child environment.
+
+Each invocation requires declared scratch and cache. The launcher creates exclusive private
+directories below them, places all target and temporary output in scratch and Cargo state in
+cache, then relies on Runner's process-tree retirement and storage cleanup after exec. It
+reads the selected committed lockfile and copies only its crates.io sparse-index entries,
+registry index configuration and matching archives from the supplied repository-relative
+registry root into its fresh `CARGO_HOME`. Archive SHA-256 values must match the lockfile;
+Cargo performs complete locked, offline dependency resolution. Missing/corrupt inputs fail
+without fetching. Links, special files and path escapes on input paths are rejected. Registry
+sources, credentials, Cargo configuration, global cache databases and unrelated ignored files
+are never copied. Project sources stay in the read-only checkout.
+
+Provision the approved repository-local index/archive cache only before run ownership or at
+a supported verified paused-idle setup boundary. Keep it immutable while owned. Preserve old
+configuration, task, plan and guidance files; select a fresh reviewed configuration before
+starting a run that needs different command declarations. Do not weaken isolation or treat
+synthetic capability probes as evidence that product assertions passed. Selected commands
+run only in FINALIZE through their frozen vectors, followed by independent confirmation and
+Runner-owned HANDOFF. Pending HTTP execution claims remain pending until genuine results.

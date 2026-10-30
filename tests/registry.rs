@@ -1,4 +1,4 @@
-use std::{fs, os::unix::fs::DirBuilderExt, path::PathBuf};
+use std::{fs, os::unix::fs::DirBuilderExt};
 
 use rusqlite::Connection;
 use telegram_mcp_relay::{
@@ -16,10 +16,10 @@ impl Fixture {
     fn new() -> Self {
         let mut random = [0; 8];
         getrandom::fill(&mut random).unwrap();
-        let directory = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("LOCAL_ARTIFACTS")
+        let directory = std::env::temp_dir()
+            .canonicalize()
+            .unwrap()
             .join(format!("registry-test-{:016x}", u64::from_ne_bytes(random)));
-        fs::create_dir_all(directory.parent().unwrap()).unwrap();
         fs::DirBuilder::new()
             .mode(0o700)
             .create(&directory)

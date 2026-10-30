@@ -3,6 +3,7 @@ LOCAL_ARTIFACTS/
 
 # Rust build output; Cargo.lock belongs in version control for this application
 /target/
+/tools/runner-check/target/
 **/*.rs.bk
 
 # Local configuration, credentials, runtime databases, and logs

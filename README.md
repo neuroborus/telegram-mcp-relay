@@ -7,15 +7,17 @@ session; a durable inbox supports subscriptions and an optional bounded wait.
 This checkout contains the project specification, repository conventions, Agent Runner
 workflow and an initial Rust application scaffold. The binary initializes structured
 diagnostics on a current-thread Tokio runtime, logs its scaffold status and exits. The MCP
-endpoint, Telegram client and runnable relay setup are not implemented yet.
+endpoint and runnable relay setup are not implemented yet.
 The library also implements validated [configuration and protected secrets](docs/CONFIGURATION.md);
 the binary does not load configuration yet.
 Pure [outbound formatting rules](docs/ARCHITECTURE.md#outbound-formatting) normalize session
-titles and enforce final text/caption limits; sending is not implemented yet.
+titles and enforce final text/caption limits; durable send orchestration is not implemented yet.
 The library also provides [private SQLite initialization](docs/ARCHITECTURE.md#sqlite-initialization);
 the binary does not open storage yet.
 Persistent [session registration and message routes](docs/ARCHITECTURE.md#session-and-route-persistence)
 support saved-handle/external-ID resume and independent route expiry through the library.
+The library adds a bounded [Bot API client](docs/ARCHITECTURE.md#telegram-http-client);
+durable sending and production startup composition remain later steps.
 The specification calls the product **Telegram MCP Bridge**; this repository and binary are
 named **telegram-mcp-relay**.
 

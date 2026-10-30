@@ -202,13 +202,10 @@ mod tests {
 
             let mut random = [0; 8];
             getrandom::fill(&mut random).unwrap();
-            let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("LOCAL_ARTIFACTS")
-                .join(format!(
-                    "migration-test-{:016x}",
-                    u64::from_ne_bytes(random)
-                ));
-            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            let path = std::env::temp_dir().canonicalize().unwrap().join(format!(
+                "migration-test-{:016x}",
+                u64::from_ne_bytes(random)
+            ));
             std::fs::DirBuilder::new()
                 .mode(0o700)
                 .create(&path)

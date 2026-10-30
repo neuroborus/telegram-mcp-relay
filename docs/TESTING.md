@@ -38,6 +38,32 @@ the lock is a deliberate implementation step, not an automatic repair performed 
 Run focused affected tests while developing as well; do not repeat broad gates after a clean
 result without a subsequent change or unresolved concern.
 
+The dependency-free `tools/runner-check/` crate is a separate workspace with its own lockfile.
+Changes to it require all four helper gates as well as the applicable root gates:
+
+```bash
+cargo fmt --manifest-path tools/runner-check/Cargo.toml --all -- --check
+cargo clippy --manifest-path tools/runner-check/Cargo.toml --locked --workspace --all-targets -- -D warnings
+RUSTDOCFLAGS="-D warnings" cargo doc --manifest-path tools/runner-check/Cargo.toml --locked --workspace --no-deps --document-private-items
+cargo test --manifest-path tools/runner-check/Cargo.toml --locked --workspace
+```
+
+The helper's tests are pure or use private temporary files. They cover the closed mode/flag
+mapping, explicit child toolchain/environment, preparation failure propagation, confinement,
+private directory cleanup, selective registry provisioning, missing/corrupt archives and
+SHA-256 vectors.
+They never invoke the launcher recursively, start Cargo checks or run product/socket tests.
+
+For the read-only Runner route, the six selected Cargo clippy/doc/test commands execute only
+through Runner's exact persisted vectors during FINALIZE. Each vector builds the standalone
+launcher in declared scratch and invokes its corresponding closed mode. The launcher runs
+the complete original check with `--offline` and private target output; doc modes retain
+`RUSTDOCFLAGS="-D warnings"`. Full root tests still execute the real HTTP assertions. Native
+repository, whitespace and formatting checks remain part of FINALIZE's agent portion.
+During implementation/review, use source inspection and appropriate no-run compilation;
+do not execute or attest the established check inventory or selected logical commands.
+See [development](DEVELOPMENT.md#read-only-cargo-validation) for provisioning and isolation.
+
 ## Behavioral acceptance
 
 Use the specification's complete section 16 matrix and [test-authoring](../.agents/skills/test-authoring/SKILL.md).
@@ -60,7 +86,10 @@ separate explicit user request and must disclose what client/API behavior it act
 
 Configuration tests cover defaults/examples, bounds, allowlists, home expansion, redaction,
 protected files/links/special files, bounded reads and non-overwriting bearer creation. They
-inject environment lookups and clean private synthetic fixtures under `LOCAL_ARTIFACTS/`.
+inject environment lookups and clean private synthetic fixtures under `std::env::temp_dir()`.
+Temporary fixtures must honor `TMPDIR`, use exclusive randomized mode-0700 directories and
+clean up on drop. Tests must not write into the source checkout, including ignored directories;
+the complete suite must also work from a read-only checkout.
 
 Unit tests in `domain::outbound::tests` cover whitespace/control normalization, blank fallback,
 50/51-grapheme titles (including combining marks, ZWJ emoji, flags and Hangul), unchanged
@@ -76,7 +105,7 @@ deduplication, valid claim shapes, notice-attempt uniqueness and restrictive for
 They verify that removing a route preserves replies and removing reply payloads preserves
 acknowledgment receipts. Unsafe permissions, links, FIFOs and sidecars fail before database use.
 Repository unit tests force mid-migration disk-full rollback and page-limit failure without
-loss of committed rows. Fixtures use private randomized directories under `LOCAL_ARTIFACTS/`.
+loss of committed rows. Fixtures use private randomized, TMPDIR-aware directories.
 Storage tests use the locked bundled SQLite build. Transactional ingestion, claim arbitration
 and cleanup tests land with their services; schema tests do not claim those behaviors.
 
@@ -87,6 +116,18 @@ Count/UTF-8 metadata limits include in-flight reservations and expired retained 
 renames leave activity unchanged. Tests also cover cancellation release, route conflicts,
 transaction rollback after a route insert, invalid inputs and redacted diagnostics. These are
 repository operations; Telegram/MCP send and Reply-ingestion integration remain later work.
+
+Unit tests in `clients::telegram::tests` use a synthetic loopback HTTP peer with explicit
+disconnects, malformed/oversized and chunked bodies, redirects, webhook conflicts, rate limits
+and server errors. They cover request JSON, typed reply/attachment metadata, pre-I/O outbound
+validation, redaction, bounded retries and no replay of ambiguous sends. A test-only retry
+recorder replaces sleep and asserts the actual chosen delays; a paused Tokio clock covers a
+response stalled after headers. Mock tasks are canceled on fixture drop. The complete,
+unfiltered `cargo test --locked --workspace` suite passed in Runner FINALIZE through the
+read-only trusted route, exercising all seven HTTP tests and the pure retry-policy test
+without skips. Earlier Native attempts failed before HTTP requests at loopback `bind` with
+`Operation not permitted`. Live Telegram behavior remains untested. See
+[architecture](ARCHITECTURE.md#telegram-http-client).
 
 ## Measurements and check ownership
 

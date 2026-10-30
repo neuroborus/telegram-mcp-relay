@@ -1,0 +1,10 @@
+[package]
+name = "runner-check"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+publish = false
+description = "Closed offline Cargo checks for a read-only Runner checkout"
+
+# This development helper must not join the application workspace.
+[workspace]

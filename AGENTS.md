@@ -54,9 +54,11 @@ use its staging-independent check division. An unrun required check remains pend
 | `src/main.rs`, `src/lib.rs` | Binary bootstrap and shared application entry point |
 | `src/config.rs`, `src/config/`, `src/error.rs` | Central settings, protected secrets, configuration tests and safe typed errors |
 | `src/domain.rs`, `src/domain/` | Pure title normalization, final outbound Unicode rules and their tests |
+| `src/clients.rs`, `src/clients/` | Bounded direct Telegram HTTP adapter, transport DTOs and synthetic HTTP tests |
 | `src/repositories.rs`, `src/repositories/` | Protected SQLite opening, versioned schema and short persistence transactions |
 | `tests/` | Cross-module storage/restart and later MCP/Telegram integration tests |
 | `config/` | Synthetic, nonsecret configuration examples |
+| `tools/runner-check/` | Standalone offline Cargo validation helper with pure/file-only tests |
 | `docs/product/TECHNICAL_SPECIFICATION.md` | Original product requirements and acceptance criteria |
 | `docs/` | Architecture, conventions, testing and development workflow |
 | `.agents/skills/` | Canonical repository skills |

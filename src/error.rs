@@ -2,6 +2,48 @@
 
 use std::fmt;
 
+/// Safe Bot API failures. Never retain reqwest errors, URLs or Telegram descriptions.
+#[derive(Debug, PartialEq, Eq)]
+pub enum TelegramError {
+    Transport,
+    Deadline,
+    ResponseTooLarge,
+    InvalidResponse,
+    Rejected {
+        code: u16,
+        retry_after_seconds: Option<u64>,
+    },
+    DeliveryUncertain,
+}
+
+impl TelegramError {
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::Transport => "TELEGRAM_UNAVAILABLE",
+            Self::Deadline => "TELEGRAM_TIMEOUT",
+            Self::ResponseTooLarge => "TELEGRAM_RESPONSE_TOO_LARGE",
+            Self::InvalidResponse => "TELEGRAM_RESPONSE_INVALID",
+            Self::Rejected { .. } => "TELEGRAM_REJECTED",
+            Self::DeliveryUncertain => "TELEGRAM_DELIVERY_UNCERTAIN",
+        }
+    }
+}
+
+impl fmt::Display for TelegramError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::DeliveryUncertain => write!(
+                f,
+                "{}: Telegram may have accepted the send; do not resend automatically",
+                self.code()
+            ),
+            _ => f.write_str(self.code()),
+        }
+    }
+}
+
+impl std::error::Error for TelegramError {}
+
 /// Outbound rejection details suitable for structured tool results; contains no input text.
 #[derive(Debug, PartialEq, Eq, serde::Serialize)]
 pub struct TextTooLong {
@@ -29,12 +71,14 @@ pub enum AppError {
     StorageFailure,
     StorageCapacity,
     UnsupportedSchema(i64),
+    Telegram(TelegramError),
 }
 
 impl AppError {
     /// Stable machine-readable classification, independent of the underlying private cause.
     pub fn code(&self) -> &'static str {
         match self {
+            Self::Telegram(error) => error.code(),
             Self::ConfigRead => "CONFIG_READ_FAILED",
             Self::InvalidConfig(_) => "CONFIG_INVALID",
             Self::SecretUnavailable(_) => "SECRET_UNAVAILABLE",
@@ -56,6 +100,7 @@ impl AppError {
 impl fmt::Display for AppError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Telegram(error) => fmt::Display::fmt(error, f),
             Self::ConfigRead => write!(f, "{}: cannot read bounded configuration", self.code()),
             Self::InvalidConfig(field) => write!(f, "{}: invalid {field}", self.code()),
             Self::SecretUnavailable(field) => {
@@ -100,6 +145,12 @@ impl fmt::Display for AppError {
 }
 
 impl std::error::Error for AppError {}
+
+impl From<TelegramError> for AppError {
+    fn from(error: TelegramError) -> Self {
+        Self::Telegram(error)
+    }
+}
 
 impl From<rusqlite::Error> for AppError {
     fn from(error: rusqlite::Error) -> Self {

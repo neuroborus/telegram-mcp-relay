@@ -103,10 +103,10 @@ impl Fixture {
     fn new() -> Self {
         let mut bytes = [0; 8];
         getrandom::fill(&mut bytes).unwrap();
-        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("LOCAL_ARTIFACTS")
+        let path = std::env::temp_dir()
+            .canonicalize()
+            .unwrap()
             .join(format!("config-test-{:016x}", u64::from_ne_bytes(bytes)));
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
         DirBuilder::new().mode(0o700).create(&path).unwrap();
         Self(path)
     }

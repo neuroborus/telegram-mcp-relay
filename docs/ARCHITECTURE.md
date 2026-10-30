@@ -7,7 +7,9 @@ Tokio's current-thread runtime and initializes structured `tracing` diagnostics 
 The library logs the scaffold status and returns without opening sockets or creating files.
 The library provides explicit SQLite initialization and session/route operations, but the
 binary does not open it.
-No Telegram client or MCP transport is implemented yet.
+The library provides a bounded Telegram HTTP client. No MCP transport or production relay
+wiring exists yet. Synthetic HTTP tests passed in Runner's complete workspace test suite,
+as described below.
 
 The library now provides centralized validated TOML settings and typed, redacted startup
 errors in `config`/`error`, with protected Unix secret resolution under `config::secrets`.
@@ -31,12 +33,13 @@ the actual tested SDK/protocol versions and any compatibility gaps here.
 
 The 2026-10-29 dependency review used cached published crates.io packages and registry metadata.
 Archive checksums matched the registry, and the inspected extracted sources matched those
-archives. No live upstream fetch or application protocol compatibility test was performed.
+archives. Telegram documentation was reviewed from a saved official API reference; no live
+Telegram requests or MCP interoperability tests have been performed.
 
 | Dependency | Selected version | Direct features (defaults disabled) | Purpose |
 | --- | --- | --- | --- |
 | [rmcp](https://docs.rs/crate/rmcp/3.8.0/features) | 3.8.0 | `server`, `transport-streamable-http-server` | Official MCP server, schema support and shared HTTP transport foundation |
-| [Tokio](https://docs.rs/crate/tokio/1.54.1/features) | 1.54.1 | `macros`, `rt` | Current-thread async binary entry point |
+| [Tokio](https://docs.rs/crate/tokio/1.54.1/features) | 1.54.1 | `macros`, `rt`, `time` | Current-thread async binary entry point and client deadlines/backoff |
 | [tracing](https://docs.rs/crate/tracing/0.1.44/features) | 0.1.44 | `std` | Structured diagnostic events |
 | [tracing-subscriber](https://docs.rs/crate/tracing-subscriber/0.3.23/features) | 0.3.23 | `fmt`, `std` | Fallible stderr diagnostic initialization with an INFO ceiling |
 | [serde](https://docs.rs/crate/serde/1.0.229/features) | 1.0.229 | `derive`, `std` | Typed settings deserialization; already in the SDK graph |
@@ -45,6 +48,20 @@ archives. No live upstream fetch or application protocol compatibility test was 
 | [getrandom](https://docs.rs/crate/getrandom/0.4.3/features) | 0.4.3 | none | OS randomness for bearer-file creation; already in the SDK graph |
 | [unicode-segmentation](https://docs.rs/crate/unicode-segmentation/1.13.3/features) | 1.13.3 | none | Unicode extended grapheme boundaries for title truncation, without runtime dependencies |
 | [rusqlite](https://docs.rs/crate/rusqlite/0.32.1/features) | 0.32.1 | `bundled` | Embedded SQLite with fixed source/bindings, strict tables and JSON validation |
+| [reqwest](https://docs.rs/crate/reqwest/0.13.5/features) | 0.13.5 | `json`, `rustls` | Reusable direct Telegram HTTPS client without default features |
+| [serde_json](https://docs.rs/crate/serde_json/1.0.154/features) | 1.0.154 | `std` | Bounded Bot API envelope decoding; already locked through rmcp |
+
+Dev-only Tokio `net`, `io-util`, `sync` and `test-util` support synthetic HTTP peers and
+controlled deadlines. The reqwest archive checksum matches published registry metadata;
+its inspected client, chunked-response and retry sources match the archive. Its `json` and
+`rustls` features enable JSON, rustls with AWS-LC and platform certificate verification;
+default charset, HTTP/2, proxy discovery and compression features are unnecessary. Source
+inspection confirms `Response::chunk`, `ClientBuilder::retry`, `retry::never`, `https_only`,
+timeouts and redirect/proxy controls. No MCP client feature is added.
+
+Offline lock generation resolved the HTTP/TLS/platform dependency closure without changing
+previously locked versions. The manifest and lock additions accompany the adapter to preserve
+locked builds.
 
 Configuration dependency versions/features were reviewed from cached published registry metadata.
 Live DNS and new crate archives were unavailable for API/compilation verification in that turn.
@@ -52,10 +69,9 @@ Live DNS and new crate archives were unavailable for API/compilation verificatio
 The title dependency's version, checksum, features and Rust 1.85 minimum were selected from
 cached published registry metadata. Its cached archive now matches the checksum in
 `Cargo.lock`; source inspection confirms `UnicodeSegmentation::grapheme_indices(true)`,
-the declared minimum and the absence of runtime dependencies. Initial live docs.rs and
-Telegram Bot API checks failed at DNS resolution; an upstream limits recheck remains pending.
-Native bounds below follow specification §9.3 with conservative UTF-16 counting; no live
-Telegram behavior has been tested.
+the declared minimum and the absence of runtime dependencies. Native bounds below match
+specification §9.3 and the saved official Telegram API reference, with conservative UTF-16
+counting. No live Telegram behavior has been tested.
 
 Feature unification also enables Tokio I/O utilities, synchronization and time, and tracing
 attributes through the SDK. It does not enable Tokio's multi-thread runtime or the SDK's
@@ -153,8 +169,58 @@ reservations in its budget. Retained expired rows still count until cleanup; pre
 evicts data. Logical session/route charges are 128 bytes per row plus UTF-8 identity/title
 bytes (route rows include the session key). SQLite pages have their separate physical cap.
 Reservations live only in RAM and do not guarantee post-send disk success: the sending service
-must report failed bookkeeping as uncertain. Actual sends, received-Reply activity updates,
+must report failed bookkeeping as uncertain. Durable sends, received-Reply activity updates,
 cross-component metadata accounting and physical maintenance remain later steps.
+
+## Telegram HTTP client
+
+`clients::telegram::TelegramClient` owns one reusable reqwest/rustls pool; clones share it.
+The production constructor fixes `https://api.telegram.org`, disables proxy discovery,
+redirects and reqwest retries, and retains no transport errors or Telegram descriptions.
+Only module tests can construct a mock endpoint; TOML has no API override. No production
+startup path contacts Telegram yet. Services will own title formatting, destination
+authorization, capacity reservations and durable routes in subsequent steps.
+
+The adapter provides `getUpdates`, `getWebhookInfo`, plain `sendMessage` and typing
+`sendChatAction`. Document streaming lands with its file boundary later. Updates retain
+only message/reply IDs, sender/chat, text/caption and document/photo metadata; quoted messages
+are not recursively decoded. DTO and client Debug output is redacted. Outbound text passes
+the existing final scalar/native validator before I/O. No route or cursor changes occur here.
+
+Connection establishment has a five-second limit. Each attempt covers headers and the whole
+response body within 15 seconds, or configured poll seconds plus ten for `getUpdates`.
+Advertised and actual body sizes are capped by `limits.telegram_response_bytes` before JSON
+decoding. Reads and idempotent chat actions allow three attempts with exponential 250/500 ms
+backoff plus less than that interval of jitter. Telegram `retry_after` takes precedence;
+delays above 30 seconds are returned to the caller without shortening or sleeping. There
+are at most two retry sleeps, so each invocation remains finite. Cancellation drops the call.
+
+Message sends are attempted once. A consistent API rejection with a 4xx code is definitive;
+transport loss, timeout, malformed/oversized results, server errors or inconsistent message
+identity yield `TELEGRAM_DELIVERY_UNCERTAIN`. Callers must not automatically resend. Safe
+errors keep only classifications, numeric codes and retry delays. Webhook conflicts (409)
+remain explicit errors; the adapter never deletes webhooks or drops pending updates.
+
+The official [Telegram Bot API](https://core.telegram.org/bots/api) snapshot fetched on
+2026-10-29 at 18:34 UTC was checked against its recorded SHA-256. It documents text 1–4,096
+characters, captions 0–1,024 after entity parsing, cloud document uploads up to 50 MB and
+optional downloads up to 20 MB. The bridge uses a conservative decimal-MB upload ceiling
+and UTF-16 caption count; this does not claim a live Unicode boundary experiment.
+
+The same reference confirms `getUpdates` batches of 1–100, positive long-poll timeouts,
+confirmation by a higher offset, destructive negative offsets (rejected here), and up to
+24 hours of update retention. Webhooks and long polling are mutually exclusive;
+`getWebhookInfo.url` is empty when unset. Switching requires an operator-authorized
+`deleteWebhook(drop_pending_updates=false)`, never an automatic reset. `retry_after` is a
+minimum number of seconds before repeating a rate-limited request; typing lasts at most
+five seconds and can clear on a new bot message. These are documented API contracts,
+not live bot observations.
+
+The complete, unfiltered `cargo test --locked --workspace` suite passed in Runner FINALIZE
+through the read-only trusted route, including the synthetic HTTP client tests. Earlier
+Native attempts failed at loopback `bind` with `Operation not permitted`; that limitation
+did not affect the successful Runner execution. No socket tests were skipped. Live Telegram
+behavior remains untested, and production configuration exposes no endpoint override.
 
 ## Runtime and ownership
 

@@ -17,10 +17,10 @@ impl Fixture {
     fn new() -> Self {
         let mut random = [0; 8];
         getrandom::fill(&mut random).unwrap();
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("LOCAL_ARTIFACTS")
+        let path = std::env::temp_dir()
+            .canonicalize()
+            .unwrap()
             .join(format!("storage-test-{:016x}", u64::from_ne_bytes(random)));
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
         DirBuilder::new().mode(0o700).create(&path).unwrap();
         Self(path)
     }

@@ -6,6 +6,8 @@ One application crate at the repository root provides the initial runtime scaffo
 complete `Cargo.lock`. Keep the lockfile with manifest changes and use locked builds/checks.
 Use `telegram-mcp-relay` for the package/binary and `telegram_mcp_relay` for its Rust library.
 Keep `main.rs` to bootstrap and shutdown; `lib.rs` exposes the shared application entry point.
+The dependency-free development helper at `tools/runner-check/` has its own explicit workspace
+and lockfile. Root workspace checks do not cover it; see [testing](TESTING.md).
 
 | Current or intended path | Responsibility |
 | --- | --- |
