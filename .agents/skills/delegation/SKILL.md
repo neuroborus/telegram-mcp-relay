@@ -21,6 +21,11 @@ one verified local commit at a time. Select `independent` explicitly. `polishing
 stages existing changes but never commits. Only a Runner-authorized Worker `COMMIT` turn may
 create execution commits; do not stage or edit while another run owns the workspace.
 
+After successful polishing reaches `DONE` and releases workspace ownership, use the user's
+standing permission to commit the unchanged, finalized and independently reviewed in-scope
+handoff locally without another approval question. Follow
+[git-workflow](../git-workflow/SKILL.md) and the Runner finalization handoff conditions.
+
 Keep ignored task artifacts confined under `LOCAL_ARTIFACTS/`, run state outside both checkout
 and task directory, and active inputs/configuration/guidance frozen. Resolve questions from
 repository evidence where possible. A genuine material product decision pauses dependent work;

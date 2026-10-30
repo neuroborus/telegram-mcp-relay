@@ -27,10 +27,11 @@ finalization entry point, while that reference defines the pipeline-specific div
 6. Complete the required independent review after the last content correction. For a requested
    subagent quality loop require a full final zero-finding pass, not only verification of old
    fixes. Any later content change invalidates that reviewed snapshot.
-7. Follow [git-workflow](../git-workflow/SKILL.md). Outside Runner, stage/commit only the
-   explicitly authorized cohesive change set; otherwise report the unstaged result and draft
-   message without claiming a commit. Inside Runner obey its exclusive COMMIT/HANDOFF ownership.
-   Never push or rewrite history as part of finalization.
+7. Follow [git-workflow](../git-workflow/SKILL.md). Outside Runner, stage/commit only a cohesive
+   change set covered by the user request or standing polishing permission. Commit a successful
+   in-scope polishing handoff without another approval question under the
+   [handoff conditions](agent-runner.md). Report unauthorized work without claiming a commit.
+   Inside Runner obey its exclusive COMMIT/HANDOFF ownership. Never push or rewrite history.
 
 Report the result, material checks and independent review outcome, actual Git state and any
 remaining acceptance evidence. Identify actual commits by hash/subject. Runtime/measurement

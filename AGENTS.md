@@ -38,7 +38,10 @@ and documentation preparation may use a delegated executor and independent revie
 
 User authorization remains task scoped. During `plan-execution`, only the Runner-authorized
 Worker `COMMIT` turn creates a planned local commit. `polishing` leaves a staged handoff and
-does not commit. Outside Runner, commit only a change set the user has explicitly requested.
+does not commit. The user grants standing permission to commit its in-scope successful handoff
+locally without asking again: wait for `DONE` and released workspace ownership, and preserve
+the exact finalized, independently reviewed staged content. Respect later instructions to
+withhold a commit. Other direct commits require authorization for their change set.
 Planning remains repository read-only apart from its designated ignored artifacts.
 
 Apply [test-authoring](.agents/skills/test-authoring/SKILL.md) to meaningful behavioral tests.

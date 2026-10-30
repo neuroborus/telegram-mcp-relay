@@ -10,9 +10,13 @@ message, and reading history.
 
 ## Authorization
 
-- Commit only when the user asks for it in the current conversation. A request covers the change
-  set it names; it does not carry over to later changes. An explicitly authorized
-  Agent Runner implementation task covers only its planned local execution commits;
+- Commit only a cohesive change set covered by the user's request or the standing polishing
+  permission below. A request covers the work it names, not unrelated later changes.
+- The user grants standing permission for local commits of in-scope work from successful
+  Agent Runner `polishing` handoffs; do not ask again. Apply the
+  [handoff conditions](../finalization/agent-runner.md) and respect later user instructions
+  to withhold a commit.
+- An explicitly authorized Agent Runner implementation task covers its planned local commits;
   only the one-shot Runner-authorized Worker `COMMIT` turn may create them.
 - Never push, create branches, tag, or change remotes unless the user asks.
 - Never rewrite history: no `git commit --amend`, `rebase`, `reset --hard`, `push --force`, or

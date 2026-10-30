@@ -50,8 +50,11 @@ rather than embedding machine policy in tracked instructions.
    durable status and unresolved blockers accurately.
 
 For existing changes needing refinement, `polishing` offers independent review/finalization
-and a Runner-owned staged HANDOFF. It does not commit. A separately user-authorized coordinator
-commit may follow once the run ends and workspace ownership is released.
+and a Runner-owned staged HANDOFF. The pipeline does not commit. The user grants standing
+permission for the coordinator to commit its in-scope successful result locally without
+asking again, after `DONE` and released workspace ownership. Verify that staged content still
+matches the exact finalized, independently reviewed snapshot, and respect later instructions
+to withhold a commit.
 
 Use [delegation](../.agents/skills/delegation/SKILL.md),
 [finalization](../.agents/skills/finalization/SKILL.md) and

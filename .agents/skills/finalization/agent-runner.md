@@ -36,6 +36,10 @@ Reserve `git diff --cached --check` and staged diff inspection for the Runner-ow
 HANDOFF boundary. Never add an index-relative prerequisite to bootstrap or FINALIZE. The
 coordinator keeps checkout, inputs, guidance and config unchanged while Runner owns the run.
 
-A later coordinator commit of a polishing handoff is a separate user-authorized action after
-the run has ended and ownership is released. No pipeline grants push, branch/ref changes,
-identity overrides, history rewrites, bodies/footers or co-author trailers.
+The user grants standing permission for the coordinator to commit in-scope work from a
+successful `polishing` handoff locally, without asking again. Wait for `DONE` and released
+workspace ownership, verify that the staged content still matches the exact finalized and
+independently reviewed snapshot, then commit under [git-workflow](../git-workflow/SKILL.md).
+Respect later user instructions to withhold a commit. This permission does not cover unrelated
+manual work. No pipeline grants push, branch/ref changes, identity overrides, history rewrites,
+bodies/footers or co-author trailers.
