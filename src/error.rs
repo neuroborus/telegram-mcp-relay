@@ -71,6 +71,7 @@ pub enum AppError {
     RouteConflict,
     RoutePending,
     PollerActive,
+    McpUnavailable,
     SendCapacity,
     SendBookkeepingFailed,
     RandomUnavailable,
@@ -100,6 +101,7 @@ impl AppError {
             Self::RouteConflict => "ROUTE_CONFLICT",
             Self::RoutePending => "ROUTE_PENDING",
             Self::PollerActive => "TELEGRAM_POLL_ACTIVE",
+            Self::McpUnavailable => "MCP_UNAVAILABLE",
             Self::SendCapacity => "SEND_CAPACITY",
             Self::SendBookkeepingFailed => "SEND_BOOKKEEPING_FAILED",
             Self::RandomUnavailable => "RANDOM_UNAVAILABLE",
@@ -153,6 +155,7 @@ impl fmt::Display for AppError {
             Self::PollerActive => {
                 write!(f, "{}: a Telegram poller is already running", self.code())
             }
+            Self::McpUnavailable => write!(f, "{}: local HTTP transport unavailable", self.code()),
             Self::SendCapacity => write!(f, "{}: admitted send limit reached", self.code()),
             Self::SendBookkeepingFailed => write!(
                 f,

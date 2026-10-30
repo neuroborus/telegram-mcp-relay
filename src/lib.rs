@@ -8,7 +8,9 @@ pub mod clients;
 pub mod config;
 pub mod domain;
 pub mod error;
+pub mod handlers;
 pub mod repositories;
+pub mod routes;
 pub mod services;
 
 /// Run the application scaffold without starting relay services.

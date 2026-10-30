@@ -66,6 +66,15 @@ See [development](DEVELOPMENT.md#read-only-cargo-validation) for provisioning an
 
 ## Behavioral acceptance
 
+`routes::tests` exercises real loopback HTTP discovery, native/same-origin clients, bearer auth,
+hostile/duplicate headers, paths, missing/mismatched `Mcp-Method`, required version/capability
+metadata, safe protocol failures and inclusive body bounds with declared/chunked input.
+Test-only SDK handlers check shared
+handler state across requests, safe correlation extensions, calls beyond 600 seconds, SSE
+admission, disconnect release and transport shutdown using explicit gates/controlled time.
+Fixtures are private, randomized and TMPDIR-aware. Execution remains pending FINALIZE;
+these transport tests do not establish application subscriptions or named client compatibility.
+
 Use the specification's complete section 16 matrix and [test-authoring](../.agents/skills/test-authoring/SKILL.md).
 Pure domain tests cover grapheme title normalization, final scalar text limits and native
 caption limits. Integration tests cover the interactions that pure tests cannot prove:

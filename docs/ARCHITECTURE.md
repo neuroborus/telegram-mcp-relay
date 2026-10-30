@@ -8,8 +8,8 @@ The library logs the scaffold status and returns without opening sockets or crea
 The library provides explicit SQLite initialization and session/route operations, but the
 binary does not open it.
 The library provides a bounded Telegram HTTP client and text/document delivery with durable
-reply routes. No MCP transport or production relay wiring exists yet. The accepted HTTP
-adapter's synthetic tests passed in Runner's complete workspace test suite,
+reply routes. A protected library MCP transport is available; production relay wiring remains
+pending. The accepted HTTP adapter's synthetic tests passed in Runner's complete workspace test suite,
 as described below.
 Library reply ingestion authorizes input and commits replies/dispositions with the cursor.
 A cancellable single-consumer long poller now drives it; production startup and MCP
@@ -46,7 +46,7 @@ Telegram requests or MCP interoperability tests have been performed.
 | Dependency | Selected version | Direct features (defaults disabled) | Purpose |
 | --- | --- | --- | --- |
 | [rmcp](https://docs.rs/crate/rmcp/3.8.0/features) | 3.8.0 | `server`, `transport-streamable-http-server` | Official MCP server, schema support and shared HTTP transport foundation |
-| [Tokio](https://docs.rs/crate/tokio/1.54.1/features) | 1.54.1 | `fs`, `io-util`, `macros`, `rt`, `sync`, `time` | Current-thread entry point, bounded file reads/admission and client deadlines/backoff |
+| [Tokio](https://docs.rs/crate/tokio/1.54.1/features) | 1.54.1 | `fs`, `io-util`, `macros`, `net`, `rt`, `sync`, `time` | Current-thread runtime, loopback listener, bounded I/O/admission and deadlines |
 | [tracing](https://docs.rs/crate/tracing/0.1.44/features) | 0.1.44 | `std` | Structured diagnostic events |
 | [tracing-subscriber](https://docs.rs/crate/tracing-subscriber/0.3.23/features) | 0.3.23 | `fmt`, `std` | Fallible stderr diagnostic initialization with an INFO ceiling |
 | [serde](https://docs.rs/crate/serde/1.0.229/features) | 1.0.229 | `derive`, `std` | Typed settings deserialization; already in the SDK graph |
@@ -58,9 +58,10 @@ Telegram requests or MCP interoperability tests have been performed.
 | [reqwest](https://docs.rs/crate/reqwest/0.13.5/features) | 0.13.5 | `json`, `multipart`, `rustls`, `stream` | Reusable direct Telegram HTTPS client with streamed multipart uploads, without default features |
 | [serde_json](https://docs.rs/crate/serde_json/1.0.154/features) | 1.0.154 | `std` | Bounded Bot API envelope decoding; already locked through rmcp |
 | [futures-util](https://docs.rs/crate/futures-util/0.3.34/features) | 0.3.34 | `std` | Lazy fallible file-chunk stream; already in the locked SDK graph |
+| `http`, `http-body-util`, `hyper`, `hyper-util`, `tokio-util` | 1.5.0, 0.1.5, 1.12.0, 0.1.21, 0.7.20 | `std`; none; `http1`, `server`; `tokio`; `rt` | Existing HTTP types/body adapters, bounded HTTP/1 serving and SDK cancellation without a second MCP stack |
 
-Dev-only Tokio `net` and `test-util` support synthetic HTTP peers and
-controlled deadlines. Direct `sync` use supplies owned send-admission permits; it was already
+Dev-only Tokio `test-util` supports controlled deadlines. Direct `sync` use supplies owned
+send-admission permits; it was already
 enabled in the locked SDK graph and adds no packages or lockfile changes.
 The reqwest archive checksum matches published registry metadata;
 its inspected client, chunked-response and retry sources match the archive. Its `json` and
@@ -100,8 +101,37 @@ The rmcp source defines `ProtocolVersion::V_2026_07_28`, `server/discover` and
 `subscriptions/listen`. `ServerHandler::accepted_subscription_filter` and `listen` accept
 subscription interests; `SubscriptionSink::send` enforces the accepted resource URI filter.
 Modern `StreamableHttpService` dispatch creates a handler for each request, so later
-application state must be shared through its factory. These are verified SDK APIs, not
-implemented relay capabilities. No client/version interoperability is claimed yet.
+application state must be shared through its factory. The protected transport below uses this
+lifecycle; relay subscriptions remain pending. No external client interoperability is claimed.
+
+## Protected MCP transport
+
+`routes::McpEndpoint` serves only the configured loopback listener and fixed `/mcp` path.
+The SDK owns parsing, negotiation, dispatch and SSE. Each factory call clones one shared
+`handlers::McpHandler`, including its SQLite handle; HTTP identity never creates an agent session.
+The checksum-verified locked rmcp 3.8.0 sources confirm `server/discover`, HTTP request parts
+in context extensions and modern stateless negotiation. Only MCP 2026-07-28 is advertised:
+requests require matching `Mcp-Method` and `MCP-Protocol-Version` headers and `_meta`
+protocolVersion plus clientCapabilities entries. Legacy initialize sessions are unsupported.
+Tools, inbox resources and application subscriptions land separately; discovery currently
+advertises no capabilities.
+
+Host must be the configured numeric authority or `localhost`, including its port. Present
+Origin must use HTTP with either authority; missing Origin supports native clients. Duplicate
+Host/Origin values and unapproved absolute authorities fail closed. Configured bearer auth
+requires exactly one matching Authorization header before SDK dispatch. Request bodies are
+bounded incrementally by the SDK, including chunked bodies. Admission lasts through response
+completion/drop, including SSE; saturation returns 503. Connections are limited to twice request
+admission, with 32 headers, 16 KiB header/buffer bounds and a ten-second header deadline. There
+is no global call timeout. Cancellation closes connections and pending body reads; complete
+daemon drain ordering remains later work.
+
+Correlation uses fresh random IDs, never client-supplied IDs. Authorization, proxy authorization,
+cookies and client correlation headers are removed before SDK dispatch. HTTP rejection text is
+static; JSON-RPC failures retain codes, IDs and structured negotiation data with safe messages.
+Binary diagnostics suppress rmcp targets, whose upstream logs can contain raw metadata;
+library embedders must retain this filter. New synthetic HTTP tests await FINALIZE; no named
+client compatibility, live Telegram or production startup is claimed.
 
 ## Outbound formatting
 

@@ -7,7 +7,8 @@ session; a durable inbox supports subscriptions and an optional bounded wait.
 This checkout contains the project specification, repository conventions, Agent Runner
 workflow and an initial Rust application scaffold. The binary initializes structured
 diagnostics on a current-thread Tokio runtime, logs its scaffold status and exits. The MCP
-endpoint and runnable relay setup are not implemented yet.
+endpoint is available through the [library](docs/ARCHITECTURE.md#protected-mcp-transport);
+application tools and runnable relay setup remain pending.
 The library also implements validated [configuration and protected secrets](docs/CONFIGURATION.md);
 the binary does not load configuration yet.
 Pure [outbound formatting rules](docs/ARCHITECTURE.md#outbound-formatting) normalize session

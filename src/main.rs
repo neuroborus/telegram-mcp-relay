@@ -3,13 +3,22 @@
 #![forbid(unsafe_code)]
 
 use std::process::ExitCode;
+use tracing_subscriber::{filter::Targets, prelude::*};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> ExitCode {
-    if tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::INFO)
-        .with_target(false)
-        .with_writer(std::io::stderr)
+    // SDK diagnostics can include raw request metadata; emit our safe boundary events.
+    if tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_target(false)
+                .with_writer(std::io::stderr)
+                .with_filter(
+                    Targets::new()
+                        .with_default(tracing::Level::INFO)
+                        .with_target("rmcp", tracing_subscriber::filter::LevelFilter::OFF),
+                ),
+        )
         .try_init()
         .is_err()
     {

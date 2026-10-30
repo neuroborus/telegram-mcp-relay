@@ -44,8 +44,10 @@ Document streaming and its enforcement of the opening size during mutation remai
 Final outbound text/captions always have the fixed 1,000-scalar
 policy. Positive request/task/subscription/inbox/payload/metadata budgets reject excessive values
 and inconsistent capacities. SQLite's physical budget must exceed payload plus metadata budgets;
-later components enforce actual usage without early eviction. Host/Origin/authentication and
-other runtime enforcement land with their components; this step supplies validated settings.
+later components enforce actual usage without early eviction. The library MCP endpoint enforces
+`limits.request_bytes` and `limits.concurrent_requests`, expected Host/Origin and optional bearer
+authentication; see [transport policy](ARCHITECTURE.md#protected-mcp-transport). Native clients
+may omit Origin. A shared bearer assumes trusted local clients, not per-agent security isolation.
 
 SQLite initialization requires an existing owned private parent directory (normally 0700)
 and trusted ancestors. It creates only the database, with mode 0600; existing files and sidecars

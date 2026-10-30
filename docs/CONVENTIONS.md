@@ -15,7 +15,7 @@ and lockfile. Root workspace checks do not cover it; see [testing](TESTING.md).
 | `src/app.rs`, `src/state.rs` | Router/runtime composition and shared handles |
 | `src/config.rs`, `src/error.rs` | Validated configuration and typed application errors |
 | `src/dto/` | MCP/HTTP boundary request and response types |
-| `src/handlers/`, `src/routes/` | Thin tool/resource/HTTP entry points and route wiring |
+| `src/handlers.rs`, `src/routes.rs`, `src/routes/` | Shared SDK handler state, protected HTTP transport and its tests; later thin tool/resource entry points |
 | `src/domain/` | Session/title/text rules, reply state and retention invariants |
 | `src/services.rs`, `src/services/` | Text/document delivery, confined outbound file handles, authorized reply ingestion, one restart-safe poller, bounded inbox claims and durable processing/completion |
 | `src/repositories.rs`, `src/repositories/` | SQLite initialization/migrations, transactions and queries |
