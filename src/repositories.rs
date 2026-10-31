@@ -24,9 +24,10 @@ mod registry;
 pub(crate) use registry::PendingRoutes;
 pub use registry::{MessageRoute, RouteKind, RouteReservation, Session};
 mod ingress;
-pub(crate) use ingress::IncomingReply;
 pub use ingress::IngestOutcome;
+pub(crate) use ingress::{IncomingObservation, IncomingReply};
 mod inbox;
+pub(crate) use inbox::valid_cursor_id;
 pub use inbox::{ClaimedReply, InboxCursor, InboxPage, InboxReply, ReplyState, ReplyTarget};
 mod processing;
 pub use processing::{ProcessingStatus, ReconciledProcessing};
@@ -45,7 +46,7 @@ pub use history::{
     MessageSource, StoredMessage,
 };
 
-const SCHEMA_VERSION: i64 = 8;
+const SCHEMA_VERSION: i64 = 9;
 const APPLICATION_ID: i64 = 0x544d4352; // TMCR
 
 /// One private connection; services will expose narrowly scoped transactions, not raw SQL.
@@ -169,6 +170,21 @@ fn check_schema(connection: &Connection) -> Result<i64, AppError> {
 }
 
 fn initialize(connection: &mut Connection) -> Result<(), AppError> {
+    if check_schema(connection)? == SCHEMA_VERSION {
+        return initialize_schema(connection);
+    }
+    // SQLite's table-rebuild procedure requires FK actions disabled before BEGIN.
+    // The private connection is never exposed in this state. Validate all references
+    // before commit and restore enforcement after success or rollback.
+    connection.pragma_update(None, "foreign_keys", false)?;
+    let result = initialize_schema(connection);
+    let restored = connection
+        .pragma_update(None, "foreign_keys", true)
+        .map_err(AppError::from);
+    result.and(restored)
+}
+
+fn initialize_schema(connection: &mut Connection) -> Result<(), AppError> {
     // SQLite ignores this initialization setting inside a transaction. Set it before DDL.
     if check_schema(connection)? == 0 {
         connection.pragma_update(None, "auto_vacuum", 2)?;
@@ -201,9 +217,20 @@ fn initialize(connection: &mut Connection) -> Result<(), AppError> {
     if version < 8 {
         transaction.execute_batch(include_str!("repositories/history.sql"))?;
     }
+    if version < 9 {
+        transaction.execute_batch(include_str!("repositories/observations.sql"))?;
+    }
     transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     let vacuum: i64 = transaction.pragma_query_value(None, "auto_vacuum", |r| r.get(0))?;
     if vacuum != 2 {
+        return Err(AppError::StorageFailure);
+    }
+    let invalid: bool = transaction.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_foreign_key_check)",
+        [],
+        |r| r.get(0),
+    )?;
+    if invalid {
         return Err(AppError::StorageFailure);
     }
     transaction.commit()?;
@@ -320,6 +347,12 @@ mod tests {
             .pragma_update(None, "max_page_count", 20)
             .unwrap();
         assert_eq!(initialize(&mut connection), Err(AppError::StorageCapacity));
+        assert_eq!(
+            connection
+                .pragma_query_value::<i64, _>(None, "foreign_keys", |r| r.get(0))
+                .unwrap(),
+            1
+        );
         let tables: i64 = connection
             .query_row(
                 "SELECT count(*) FROM sqlite_schema WHERE type = 'table'",

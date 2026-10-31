@@ -5,7 +5,8 @@ use std::{fmt, sync::atomic::Ordering};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior};
 
 use super::{
-    Database,
+    AttachmentInput, Database, JournalInput,
+    history::{check_capacity, insert_attachment, insert_message},
     registry::{ROW_BYTES, expiry, random_key, usage},
 };
 use crate::error::AppError;
@@ -38,6 +39,12 @@ pub(crate) struct IncomingReply<'a> {
     pub attachments: Option<&'a str>,
 }
 
+pub(crate) struct IncomingObservation<'a> {
+    pub capture: bool,
+    pub journal: JournalInput<'a>,
+    pub attachments: Vec<AttachmentInput<'a>>,
+}
+
 impl Database {
     /// Last resolved ID, not a global high-water mark: Telegram can reset its ID sequence.
     pub fn update_cursor(&self) -> Result<Option<i64>, AppError> {
@@ -48,8 +55,12 @@ impl Database {
         )?)
     }
 
-    pub(crate) fn update_processed(&self, update_id: i64) -> Result<bool, AppError> {
-        update_processed(&self.connection, update_id)
+    pub(crate) fn update_processed(
+        &self,
+        update_id: i64,
+        source: Option<(i64, i64)>,
+    ) -> Result<bool, AppError> {
+        update_processed(&self.connection, update_id, source)
     }
 
     /// Submit each ordered Telegram batch without skipping failed input. IDs can have gaps
@@ -57,7 +68,9 @@ impl Database {
     pub(crate) fn ingest_update(
         &mut self,
         update_id: i64,
+        source: Option<(i64, i64)>,
         reply: Option<IncomingReply<'_>>,
+        observation: Option<IncomingObservation<'_>>,
         now: i64,
     ) -> Result<IngestOutcome, AppError> {
         if update_id < 0 {
@@ -67,8 +80,12 @@ impl Database {
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if update_processed(&transaction, update_id)? {
+        if update_processed(&transaction, update_id, source)? {
             return Ok(IngestOutcome::Duplicate);
+        }
+        if self.history.enabled && observation.as_ref().is_some_and(|o| o.capture) {
+            transaction.execute("UPDATE history_coverage SET has_gaps = 1 WHERE observed_from IS NOT NULL
+                AND (SELECT last_durably_processed_update_id FROM telegram_cursor WHERE singleton_id = 1) > ?1", [update_id])?;
         }
         let reserved_bytes = self.reserved_routes.bytes.load(Ordering::SeqCst);
         let session_key: Option<String> = if let Some(reply) = &reply {
@@ -83,15 +100,19 @@ impl Database {
         } else {
             None
         };
-        let duplicate: bool = if let Some(reply) = &reply {
+        let duplicate: bool = if let Some((chat, message)) = source {
             transaction.query_row(
                 "SELECT EXISTS(SELECT 1 FROM replies WHERE telegram_chat_id = ?1
                  AND telegram_message_id = ?2
                  UNION ALL SELECT 1 FROM update_dispositions WHERE kind = 'unroutable'
                  AND telegram_chat_id = ?1 AND telegram_message_id = ?2
                  UNION ALL SELECT 1 FROM notice_attempts WHERE telegram_chat_id = ?1
-                 AND trigger_message_id = ?2)",
-                (reply.chat_id, reply.message_id),
+                 AND trigger_message_id = ?2
+                 UNION ALL SELECT 1 FROM journal_records WHERE chat_id = ?1 AND message_id = ?2
+                 AND telegram_update_id IS NOT NULL
+                 UNION ALL SELECT 1 FROM acknowledgment_receipts WHERE telegram_chat_id = ?1
+                 AND telegram_message_id = ?2)",
+                (chat, message),
                 |r| r.get(0),
             )?
         } else {
@@ -175,9 +196,74 @@ impl Database {
             )?;
             outcome
         };
+        if let Some(observation) = observation {
+            let source = observation.journal.source;
+            let owner: Option<(String, String)> = transaction
+                .query_row(
+                    "SELECT reply_id, session_key FROM replies WHERE telegram_chat_id = ?1
+                 AND telegram_message_id = ?2 AND expires_at > ?3",
+                    (source.chat_id, source.message_id, now),
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()?;
+            let session = owner
+                .as_ref()
+                .map(|(_, key)| super::registry::session_by(&transaction, "session_key", key))
+                .transpose()?
+                .flatten();
+            let saved = if observation.capture && self.history.enabled {
+                Some(insert_message(
+                    &transaction,
+                    &self.history,
+                    &JournalInput {
+                        session: session.as_ref(),
+                        ..observation.journal
+                    },
+                    now,
+                )?)
+            } else {
+                None
+            };
+            let message_handle = saved
+                .as_ref()
+                .filter(|s| s.expires_at > now)
+                .map(|s| s.message_handle.as_str());
+            if let Some(handle) = message_handle {
+                transaction.execute(
+                    "UPDATE journal_records SET telegram_update_id = ?1
+                     WHERE message_handle = ?2 AND telegram_update_id IS NULL",
+                    (update_id, handle),
+                )?;
+            }
+            let has_attachments = !observation.attachments.is_empty();
+            if owner.is_some() || message_handle.is_some() {
+                for attachment in observation.attachments {
+                    insert_attachment(
+                        &transaction,
+                        &self.history,
+                        &AttachmentInput {
+                            reply_id: owner.as_ref().map(|(id, _)| id.as_str()),
+                            message_handle,
+                            ..attachment
+                        },
+                        now,
+                    )?;
+                }
+            }
+            if saved.is_some() || owner.is_some() && has_attachments {
+                check_capacity(
+                    &transaction,
+                    &self.history,
+                    &self.registry,
+                    reserved_bytes,
+                    self.main_file_limit_bytes,
+                )?;
+            }
+        }
         transaction.execute(
-            "UPDATE telegram_cursor SET last_durably_processed_update_id = ?1 WHERE singleton_id = 1",
-            [update_id],
+            "UPDATE telegram_cursor SET last_durably_processed_update_id = ?1,
+             telegram_chat_id = ?2, telegram_message_id = ?3 WHERE singleton_id = 1",
+            (update_id, source.map(|s| s.0), source.map(|s| s.1)),
         )?;
         transaction.commit()?;
         if let IngestOutcome::ReplyStored { session_key, .. } = &outcome {
@@ -187,15 +273,36 @@ impl Database {
     }
 }
 
-fn update_processed(connection: &Connection, update_id: i64) -> Result<bool, AppError> {
+fn update_processed(
+    connection: &Connection,
+    update_id: i64,
+    source: Option<(i64, i64)>,
+) -> Result<bool, AppError> {
+    let Some((chat_id, message_id)) = source else {
+        // Ignored input retains no source identity. Only the current ignored cursor
+        // proves a harmless retry; an older ID could belong to another sequence.
+        return Ok(connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM telegram_cursor
+             WHERE last_durably_processed_update_id = ?1 AND telegram_chat_id IS NULL)",
+            [update_id],
+            |r| r.get(0),
+        )?);
+    };
     Ok(connection.query_row(
         "SELECT EXISTS(
             SELECT 1 FROM telegram_cursor WHERE last_durably_processed_update_id = ?1
+                AND telegram_chat_id = ?2 AND telegram_message_id = ?3
             UNION ALL SELECT 1 FROM replies WHERE telegram_update_id = ?1
+                AND telegram_chat_id = ?2 AND telegram_message_id = ?3
             UNION ALL SELECT 1 FROM acknowledgment_receipts WHERE telegram_update_id = ?1
+                AND telegram_chat_id = ?2 AND telegram_message_id = ?3
             UNION ALL SELECT 1 FROM notice_attempts WHERE telegram_update_id = ?1
-            UNION ALL SELECT 1 FROM update_dispositions WHERE telegram_update_id = ?1)",
-        [update_id],
+                AND telegram_chat_id = ?2 AND trigger_message_id = ?3
+            UNION ALL SELECT 1 FROM update_dispositions WHERE telegram_update_id = ?1
+                AND kind = 'unroutable' AND telegram_chat_id = ?2 AND telegram_message_id = ?3
+            UNION ALL SELECT 1 FROM journal_records WHERE telegram_update_id = ?1
+                AND chat_id = ?2 AND message_id = ?3)",
+        (update_id, chat_id, message_id),
         |r| r.get(0),
     )?)
 }

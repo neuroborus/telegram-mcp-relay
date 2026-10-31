@@ -25,6 +25,9 @@ pub enum ReplyState {
 pub struct InboxCursor {
     pub created_at: i64,
     pub telegram_update_id: i64,
+    /// Stable tie-breaker when a later sequence reuses an update ID at the same time.
+    /// Absent only for legacy two-component resource cursors.
+    pub reply_id: Option<String>,
 }
 
 /// Composite outbound identity for a waiting ask. Always scoped by session as well.
@@ -57,6 +60,7 @@ impl InboxReply {
         InboxCursor {
             created_at: self.created_at,
             telegram_update_id: self.telegram_update_id,
+            reply_id: Some(self.reply_id.clone()),
         }
     }
 }
@@ -103,7 +107,11 @@ impl Database {
         now: i64,
     ) -> Result<InboxPage, AppError> {
         validate_query(limit, now)?;
-        if after.is_some_and(|c| c.created_at < 0 || c.telegram_update_id < 0) {
+        if after.is_some_and(|c| {
+            c.created_at < 0
+                || c.telegram_update_id < 0
+                || c.reply_id.as_deref().is_some_and(|id| !valid_cursor_id(id))
+        }) {
             return Err(AppError::InvalidRequest("inbox cursor"));
         }
         ensure_session(&self.connection, session_key)?;
@@ -256,10 +264,11 @@ fn select_replies(
          coalesce(length(CAST(text_or_caption AS BLOB)), 0)
             + coalesce(length(CAST(attachment_metadata_json AS BLOB)), 0)
          FROM replies WHERE session_key = ?1 AND expires_at > ?2
-         AND (?3 IS NULL OR (created_at, telegram_update_id) > (?3, ?4))
+         AND (?3 IS NULL OR (created_at, telegram_update_id) > (?3, ?4)
+            OR ((created_at, telegram_update_id) = (?3, ?4) AND reply_id > ?9))
          AND (?5 IS NULL OR (telegram_chat_id = ?5 AND reply_to_bot_message_id = ?6))
          AND (?7 = 0 OR state = 'pending' OR (state = 'claimed' AND claim_expires_at <= ?2))
-         ORDER BY created_at, telegram_update_id LIMIT ?8",
+         ORDER BY created_at, telegram_update_id, reply_id LIMIT ?8",
     )?;
     let mut rows = statement.query((
         session_key,
@@ -270,6 +279,7 @@ fn select_replies(
         target.map(|t| t.message_id),
         claimable,
         limit + 1,
+        after.and_then(|c| c.reply_id.as_deref()),
     ))?;
     let mut selected = Vec::new();
     let mut bytes = 0;
@@ -289,6 +299,14 @@ fn select_replies(
         });
     }
     Ok((selected, false))
+}
+
+pub(crate) fn valid_cursor_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 64
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
 }
 
 fn reply_row(row: &Row<'_>) -> rusqlite::Result<InboxReply> {

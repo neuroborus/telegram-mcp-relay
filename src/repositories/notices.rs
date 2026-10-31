@@ -161,27 +161,26 @@ impl Database {
             let reserved = self.reserved_routes.bytes.load(Ordering::SeqCst);
             for (attempt, expires_at) in candidates {
                 let already_attempted: bool = transaction.query_row(
-                    "SELECT EXISTS(SELECT 1 FROM notice_attempts WHERE telegram_update_id = ?1
-                     OR (telegram_chat_id = ?2 AND trigger_message_id = ?3))",
-                    (
-                        attempt.telegram_update_id,
-                        attempt.telegram_chat_id,
-                        attempt.trigger_message_id,
-                    ),
+                    "SELECT EXISTS(SELECT 1 FROM notice_attempts
+                     WHERE telegram_chat_id = ?1 AND trigger_message_id = ?2)",
+                    (attempt.telegram_chat_id, attempt.trigger_message_id),
                     |r| r.get(0),
                 )?;
                 let (kind, mark) = match &attempt.kind {
                     NoticeKind::Unconfirmed { .. } => (
                         "unconfirmed",
-                        "UPDATE replies SET notice_attempted = 1 WHERE telegram_update_id = ?1",
+                        "UPDATE replies SET notice_attempted = 1
+                         WHERE telegram_chat_id = ?1 AND telegram_message_id = ?2",
                     ),
                     NoticeKind::Unroutable => (
                         "unroutable",
                         "UPDATE update_dispositions SET notice_attempted = 1
-                         WHERE telegram_update_id = ?1",
+                         WHERE kind = 'unroutable' AND telegram_chat_id = ?1
+                         AND telegram_message_id = ?2",
                     ),
                 };
-                transaction.execute(mark, [attempt.telegram_update_id])?;
+                transaction
+                    .execute(mark, (attempt.telegram_chat_id, attempt.trigger_message_id))?;
                 if already_attempted {
                     continue;
                 }

@@ -26,9 +26,26 @@ exercise the shared wait loop. These new cases await FINALIZE; no live acceptanc
 History storage fixtures in `tests/history.rs` define authenticated opt-in, stable opaque
 handles/display snapshots, redaction, deduplication/restart, independent expiry, source
 provenance after disabling/acknowledgment, admission rollback and bounded cleanup/reclamation.
-Storage migration coverage now preserves v1–v7 recovery data through v8 and checks transactional
-rollback of a failed v7 migration. Configuration tests reject unsafe/inconsistent history
-budgets. These cases await FINALIZE; capture and public history/download tools remain pending.
+Storage migration coverage preserves v1–v8 recovery data through v9 and checks transactional
+rollback of failed migrations. Configuration tests reject unsafe/inconsistent history
+budgets. These cases await FINALIZE; outgoing capture and public history/download tools remain pending.
+
+Incoming observation cases in `tests/ingress.rs` define authorized standalone text/document/
+photo capture, absence of unauthorized/unsupported content, unchanged notice/loop/route
+arbitration, failure at journal/attachment/cursor boundaries, whole-transaction capacity rollback,
+and source deduplication across restart/lower IDs and completion with history disabled.
+Existing photo fixtures now include actual photo dimensions; v1–v8 migration fixtures preserve
+older recovery state through v9. New cases await FINALIZE; no live bot coverage is inferred.
+Reused-ID regressions cover distinct standalone/routed/unroutable sources, tied inbox pages,
+separate notice decisions and acknowledgment receipts, rollback and restart. Actual v8-schema
+fixtures preserve reconciliation/token grants and attachment references through the key rebuild,
+including late-DDL rollback. Retention fixtures bound equal-ID deletion without removing live rows.
+
+Retention recovery assertions track private attachment provenance with history disabled: its
+source/ownership and independent reply deadline, orphan removal after acknowledgment, capacity
+recovery, and exact accounting/foreign-key rollback across restart. Scheduler coverage awaits
+complete startup readiness before advancing paused time, including any yielding reclamation.
+These regressions await FINALIZE; no passing result is inferred from source inspection.
 
 ## Repository gates
 

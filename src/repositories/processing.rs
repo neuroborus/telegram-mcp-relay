@@ -177,7 +177,8 @@ impl Database {
         }
         transaction.execute(
             "INSERT INTO acknowledgment_receipts(reply_id, session_key, claim_token,
-             telegram_update_id, created_at, expires_at) VALUES(?1, ?2, ?3, ?4, ?5, ?6)",
+             telegram_update_id, created_at, expires_at, telegram_chat_id, telegram_message_id)
+             VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             (
                 reply_id,
                 session_key,
@@ -185,6 +186,8 @@ impl Database {
                 owned.update_id,
                 now,
                 expires_at,
+                owned.status.telegram_chat_id,
+                owned.message_id,
             ),
         )?;
         transaction.execute(
@@ -200,6 +203,7 @@ impl Database {
 struct OwnedReply {
     status: ProcessingStatus,
     update_id: i64,
+    message_id: i64,
     attachment_bytes: u64,
     reconciliation_bytes: u64,
 }
@@ -216,7 +220,7 @@ fn owned_reply(
             "SELECT telegram_chat_id, processing_started_at, telegram_update_id,
              coalesce(length(CAST(attachment_metadata_json AS BLOB)), 0),
              coalesce(length(CAST(reconciliation_request_id AS BLOB)), 0)
-                + coalesce(length(CAST(reconciliation_from_token AS BLOB)), 0)
+                + coalesce(length(CAST(reconciliation_from_token AS BLOB)), 0), telegram_message_id
              FROM replies WHERE session_key = ?1 AND reply_id = ?2 AND claim_token = ?3
              AND expires_at > ?4 AND (state = 'processing'
                 OR (state = 'claimed' AND claim_expires_at > ?4))",
@@ -230,6 +234,7 @@ fn owned_reply(
                     update_id: r.get(2)?,
                     attachment_bytes: r.get(3)?,
                     reconciliation_bytes: r.get(4)?,
+                    message_id: r.get(5)?,
                 })
             },
         )

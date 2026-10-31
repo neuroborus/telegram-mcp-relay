@@ -184,8 +184,8 @@ async fn three_sessions_route_interleaved_old_text_and_document_replies_after_re
     let document = json!({"file_id":"incoming-document","file_unique_id":"document-unique",
         "file_name":"incoming.txt","mime_type":"text/plain","file_size":17});
     let photos = json!([
-        {"file_id":"small-photo","file_unique_id":"small-unique","file_size":10},
-        {"file_id":"large-photo","file_unique_id":"large-unique","file_size":20}
+        {"file_id":"small-photo","file_unique_id":"small-unique","file_size":10,"width":10,"height":10},
+        {"file_id":"large-photo","file_unique_id":"large-unique","file_size":20,"width":20,"height":20}
     ]);
     let mut attachment_only = incoming(200, 102, None);
     attachment_only["message"]["document"] = document.clone();

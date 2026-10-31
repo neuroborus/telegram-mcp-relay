@@ -1,8 +1,8 @@
-//! Bounded observations and private attachment provenance. Capture wiring is separate.
+//! Bounded observations and private attachment provenance, composed into ingress transactions.
 
 use std::{fmt, sync::atomic::Ordering};
 
-use rusqlite::{Connection, OptionalExtension, TransactionBehavior, named_params};
+use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, named_params};
 
 use super::{
     Database, Session,
@@ -49,6 +49,7 @@ pub struct JournalInput<'a> {
     pub sender_label: Option<&'a str>,
     pub session: Option<&'a Session>,
     pub message_date: i64,
+    pub reply_to_message_id: Option<i64>,
 }
 
 /// Service-authorized adapter provenance; never infer a missing legacy sender.
@@ -104,6 +105,15 @@ redacted!(
 );
 
 impl Database {
+    pub(crate) fn mark_observation_gap(&self) -> Result<(), AppError> {
+        if self.history.enabled {
+            self.connection.execute(
+                "UPDATE history_coverage SET has_gaps = 1 WHERE observed_from IS NOT NULL",
+                [],
+            )?;
+        }
+        Ok(())
+    }
     pub fn history_usage(&self) -> Result<HistoryUsage, AppError> {
         history_usage(&self.connection)
     }
@@ -116,72 +126,17 @@ impl Database {
         )?)
     }
 
-    /// No claims/cursor changes or notifications. Ingress/send transactions will compose
-    /// these operations with their own bookkeeping when capture is connected.
+    /// Standalone storage entry point. Ingress composes the same insert inside its cursor
+    /// transaction; this wrapper changes no claims/cursor and emits no notifications.
     pub fn record_message(
         &mut self,
         input: &JournalInput<'_>,
         now: i64,
     ) -> Result<StoredMessage, AppError> {
-        if !self.history.enabled {
-            return Err(AppError::HistoryDisabled);
-        }
-        validate_source(input.source)?;
-        if input.message_date < 0
-            || (matches!(input.direction, MessageDirection::Incoming)
-                && input.source.sender_user_id.is_none())
-        {
-            return Err(AppError::InvalidRequest("journal source"));
-        }
-        let title = input.session.map(|s| s.title.as_str());
-        let directory = input
-            .session
-            .and_then(|s| s.directory_label.as_ref().map(|d| d.as_str()));
-        let display_bytes = bounded_fields(&[
-            (input.chat_label, 1_024),
-            (input.sender_label, 1_024),
-            (title, 4_096),
-            (directory, 400),
-        ])?;
-        let body_bytes = input.body.map_or(0, str::len) as u64;
-        if body_bytes + display_bytes > u64::from(self.history.max_record_bytes) {
-            return Err(AppError::StorageCapacity);
-        }
-        let expires_at = expiry(now, self.history.retention_days as i64 * 86_400_000)?;
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let existing = transaction.query_row(
-            "SELECT message_handle, expires_at FROM journal_records WHERE chat_id = ?1 AND message_id = ?2
-             AND sender_user_id IS ?3 AND direction = ?4",
-            (input.source.chat_id, input.source.message_id, input.source.sender_user_id, input.direction.as_str()),
-            |r| Ok(StoredMessage { message_handle: r.get(0)?, expires_at: r.get(1)? }),
-        ).optional()?;
-        if let Some(existing) = existing {
-            return Ok(existing);
-        }
-        let display_id = input
-            .session
-            .map(|s| session_display(&transaction, &s.session_key))
-            .transpose()?;
-        let message_handle = random_key()?;
-        transaction.execute(
-            "INSERT INTO journal_records VALUES(:handle, :chat, :message, :direction, :sender,
-             :chat_label, :sender_label, :display, :title, :directory, :body, :date, :now, :expiry, :body_bytes, :metadata)",
-            named_params! {
-                ":handle": message_handle, ":chat": input.source.chat_id, ":message": input.source.message_id,
-                ":direction": input.direction.as_str(), ":sender": input.source.sender_user_id,
-                ":chat_label": input.chat_label, ":sender_label": input.sender_label, ":display": display_id,
-                ":title": title, ":directory": directory, ":body": input.body,
-                ":date": input.message_date, ":now": now, ":expiry": expires_at,
-                ":body_bytes": body_bytes, ":metadata": 512 + display_bytes,
-            },
-        )?;
-        transaction.execute(
-            "UPDATE history_coverage SET observed_from = coalesce(observed_from, ?1),
-             observed_through = max(coalesce(observed_through, ?1), ?1) WHERE singleton_id = 1",
-            [now],
-        )?;
+        let stored = insert_message(&transaction, &self.history, input, now)?;
         check_capacity(
             &transaction,
             &self.history,
@@ -190,10 +145,7 @@ impl Database {
             self.main_file_limit_bytes,
         )?;
         transaction.commit()?;
-        Ok(StoredMessage {
-            message_handle,
-            expires_at,
-        })
+        Ok(stored)
     }
 
     /// Own-reply provenance is retained even with shared history disabled. Each supplied
@@ -204,82 +156,172 @@ impl Database {
         input: &AttachmentInput<'_>,
         now: i64,
     ) -> Result<String, AppError> {
-        validate_source(input.source)?;
-        let sender = input.source.sender_user_id;
-        if input.reply_id.is_some() && sender.is_none() {
-            return Err(AppError::InvalidRequest("attachment source"));
-        }
-        let kind = match input.kind {
-            AttachmentKind::Document if input.width.is_none() && input.height.is_none() => {
-                "document"
-            }
-            AttachmentKind::Photo
-                if input.width.is_some_and(|v| v > 0) && input.height.is_some_and(|v| v > 0) =>
-            {
-                "photo"
-            }
-            _ => return Err(AppError::InvalidRequest("attachment dimensions")),
-        };
-        let bytes = bounded_fields(&[
-            (Some(input.file_id), 4_096),
-            (Some(input.file_unique_id), 512),
-            (input.filename, 1_024),
-            (input.mime_type, 256),
-        ])?;
-        if input.file_id.is_empty()
-            || input.file_unique_id.is_empty()
-            || now < 0
-            || input.file_size.is_some_and(|size| size > i64::MAX as u64)
-            || bytes > u64::from(self.history.max_record_bytes)
-        {
-            return Err(AppError::InvalidRequest("attachment metadata"));
-        }
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let reply_expiry: Option<i64> = if let Some(reply) = input.reply_id {
-            transaction
-                .query_row(
-                    "SELECT expires_at FROM replies WHERE reply_id = ?1
-                AND telegram_chat_id = ?2 AND telegram_message_id = ?3 AND expires_at > ?4",
-                    (reply, input.source.chat_id, input.source.message_id, now),
-                    |r| r.get(0),
-                )
-                .optional()?
-        } else {
-            None
-        };
-        let journal_expiry: Option<i64> = if self.history.enabled
-            && let Some(message) = input.message_handle
+        let handle = insert_attachment(&transaction, &self.history, input, now)?;
+        check_capacity(
+            &transaction,
+            &self.history,
+            &self.registry,
+            self.reserved_routes.bytes.load(Ordering::SeqCst),
+            self.main_file_limit_bytes,
+        )?;
+        transaction.commit()?;
+        Ok(handle)
+    }
+}
+
+pub(super) fn insert_message(
+    transaction: &Transaction<'_>,
+    policy: &crate::config::History,
+    input: &JournalInput<'_>,
+    now: i64,
+) -> Result<StoredMessage, AppError> {
+    if !policy.enabled {
+        return Err(AppError::HistoryDisabled);
+    }
+    validate_source(input.source)?;
+    if input.message_date < 0
+        || input.reply_to_message_id.is_some_and(|id| id <= 0)
+        || (matches!(input.direction, MessageDirection::Incoming)
+            && input.source.sender_user_id.is_none())
+    {
+        return Err(AppError::InvalidRequest("journal source"));
+    }
+    let title = input.session.map(|s| s.title.as_str());
+    let directory = input
+        .session
+        .and_then(|s| s.directory_label.as_ref().map(|d| d.as_str()));
+    let display_bytes = bounded_fields(&[
+        (input.chat_label, 1_024),
+        (input.sender_label, 1_024),
+        (title, 4_096),
+        (directory, 400),
+    ])?;
+    let body_bytes = input.body.map_or(0, str::len) as u64;
+    if body_bytes + display_bytes > u64::from(policy.max_record_bytes) {
+        return Err(AppError::StorageCapacity);
+    }
+    let expires_at = expiry(now, policy.retention_days as i64 * 86_400_000)?;
+    let existing = transaction.query_row(
+            "SELECT message_handle, expires_at FROM journal_records WHERE chat_id = ?1 AND message_id = ?2
+             AND sender_user_id IS ?3 AND direction = ?4",
+            (input.source.chat_id, input.source.message_id, input.source.sender_user_id, input.direction.as_str()),
+            |r| Ok(StoredMessage { message_handle: r.get(0)?, expires_at: r.get(1)? }),
+        ).optional()?;
+    if let Some(existing) = existing {
+        return Ok(existing);
+    }
+    let display_id = input
+        .session
+        .map(|s| session_display(transaction, &s.session_key))
+        .transpose()?;
+    let message_handle = random_key()?;
+    transaction.execute(
+            "INSERT INTO journal_records(message_handle, chat_id, message_id, direction, sender_user_id,
+             chat_label, sender_label, session_display_id, session_title, directory_label, body,
+             message_date, observed_at, expires_at, body_bytes, metadata_bytes, reply_to_message_id)
+             VALUES(:handle, :chat, :message, :direction, :sender,
+             :chat_label, :sender_label, :display, :title, :directory, :body, :date, :now, :expiry, :body_bytes, :metadata, :parent)",
+            named_params! {
+                ":handle": message_handle, ":chat": input.source.chat_id, ":message": input.source.message_id,
+                ":direction": input.direction.as_str(), ":sender": input.source.sender_user_id,
+                ":chat_label": input.chat_label, ":sender_label": input.sender_label, ":display": display_id,
+                ":title": title, ":directory": directory, ":body": input.body,
+                ":date": input.message_date, ":now": now, ":expiry": expires_at,
+                ":body_bytes": body_bytes, ":metadata": 512 + display_bytes,
+                ":parent": input.reply_to_message_id,
+            },
+        )?;
+    transaction.execute(
+        "UPDATE history_coverage SET observed_from = coalesce(observed_from, ?1),
+             observed_through = max(coalesce(observed_through, ?1), ?1) WHERE singleton_id = 1",
+        [now],
+    )?;
+    Ok(StoredMessage {
+        message_handle,
+        expires_at,
+    })
+}
+
+pub(super) fn insert_attachment(
+    transaction: &Transaction<'_>,
+    policy: &crate::config::History,
+    input: &AttachmentInput<'_>,
+    now: i64,
+) -> Result<String, AppError> {
+    validate_source(input.source)?;
+    let sender = input.source.sender_user_id;
+    if input.reply_id.is_some() && sender.is_none() {
+        return Err(AppError::InvalidRequest("attachment source"));
+    }
+    let kind = match input.kind {
+        AttachmentKind::Document if input.width.is_none() && input.height.is_none() => "document",
+        AttachmentKind::Photo
+            if input.width.is_some_and(|v| v > 0) && input.height.is_some_and(|v| v > 0) =>
         {
-            transaction
-                .query_row(
-                    "SELECT expires_at FROM journal_records WHERE message_handle = ?1
-                AND chat_id = ?2 AND message_id = ?3 AND sender_user_id IS ?4 AND expires_at > ?5",
-                    (
-                        message,
-                        input.source.chat_id,
-                        input.source.message_id,
-                        sender,
-                        now,
-                    ),
-                    |r| r.get(0),
-                )
-                .optional()?
-        } else {
-            None
-        };
-        if (input.reply_id.is_some() && reply_expiry.is_none())
-            || (input.message_handle.is_some() && journal_expiry.is_none())
-        {
-            return Err(AppError::InvalidRequest("attachment provenance"));
+            "photo"
         }
-        let expires_at = reply_expiry
-            .into_iter()
-            .chain(journal_expiry)
-            .max()
-            .ok_or(AppError::InvalidRequest("attachment provenance"))?;
-        let handle = transaction.query_row(
+        _ => return Err(AppError::InvalidRequest("attachment dimensions")),
+    };
+    let bytes = bounded_fields(&[
+        (Some(input.file_id), 4_096),
+        (Some(input.file_unique_id), 512),
+        (input.filename, 1_024),
+        (input.mime_type, 256),
+    ])?;
+    if input.file_id.is_empty()
+        || input.file_unique_id.is_empty()
+        || now < 0
+        || input.file_size.is_some_and(|size| size > i64::MAX as u64)
+        || bytes > u64::from(policy.max_record_bytes)
+    {
+        return Err(AppError::InvalidRequest("attachment metadata"));
+    }
+    let reply_expiry: Option<i64> = if let Some(reply) = input.reply_id {
+        transaction
+            .query_row(
+                "SELECT expires_at FROM replies WHERE reply_id = ?1
+                AND telegram_chat_id = ?2 AND telegram_message_id = ?3 AND expires_at > ?4",
+                (reply, input.source.chat_id, input.source.message_id, now),
+                |r| r.get(0),
+            )
+            .optional()?
+    } else {
+        None
+    };
+    let journal_expiry: Option<i64> = if policy.enabled
+        && let Some(message) = input.message_handle
+    {
+        transaction
+            .query_row(
+                "SELECT expires_at FROM journal_records WHERE message_handle = ?1
+                AND chat_id = ?2 AND message_id = ?3 AND sender_user_id IS ?4 AND expires_at > ?5",
+                (
+                    message,
+                    input.source.chat_id,
+                    input.source.message_id,
+                    sender,
+                    now,
+                ),
+                |r| r.get(0),
+            )
+            .optional()?
+    } else {
+        None
+    };
+    if (input.reply_id.is_some() && reply_expiry.is_none())
+        || (input.message_handle.is_some() && journal_expiry.is_none())
+    {
+        return Err(AppError::InvalidRequest("attachment provenance"));
+    }
+    let expires_at = reply_expiry
+        .into_iter()
+        .chain(journal_expiry)
+        .max()
+        .ok_or(AppError::InvalidRequest("attachment provenance"))?;
+    let handle = transaction.query_row(
             "INSERT INTO attachment_records VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
              ON CONFLICT(chat_id, message_id, file_unique_id) DO UPDATE SET
                 reply_id = coalesce(attachment_records.reply_id, excluded.reply_id),
@@ -293,16 +335,7 @@ impl Database {
                 input.filename, input.mime_type, input.file_size, expires_at, 512 + bytes,
                 kind, input.width, input.height], |r| r.get(0),
         )?;
-        check_capacity(
-            &transaction,
-            &self.history,
-            &self.registry,
-            self.reserved_routes.bytes.load(Ordering::SeqCst),
-            self.main_file_limit_bytes,
-        )?;
-        transaction.commit()?;
-        Ok(handle)
-    }
+    Ok(handle)
 }
 
 fn validate_source(source: MessageSource) -> Result<(), AppError> {
@@ -354,7 +387,7 @@ fn history_usage(connection: &Connection) -> Result<HistoryUsage, AppError> {
         |r| Ok(HistoryUsage { records: r.get(0)?, attachments: r.get(1)?, body_bytes: r.get(2)?, metadata_bytes: r.get(3)? }))?)
 }
 
-fn check_capacity(
+pub(super) fn check_capacity(
     connection: &Connection,
     policy: &crate::config::History,
     registry: &super::registry::RegistryPolicy,

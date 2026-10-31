@@ -85,8 +85,13 @@ impl McpHandler {
                 .map_err(|_| AppError::StorageFailure)?
                 .inbox_snapshot(key, after.as_ref(), limit, unix_millis()?)?;
             let next_uri = page.next.map(|cursor| {
+                let tie = cursor
+                    .reply_id
+                    .as_deref()
+                    .map(|id| format!(",{id}"))
+                    .unwrap_or_default();
                 format!(
-                    "telegram-bridge://sessions/{key}/inbox?limit={limit}&after={},{}",
+                    "telegram-bridge://sessions/{key}/inbox?limit={limit}&after={},{}{tie}",
                     cursor.created_at, cursor.telegram_update_id
                 )
             });
@@ -181,7 +186,15 @@ fn parse_uri(uri: &str) -> Result<(&str, Option<InboxCursor>, u32), ErrorData> {
                 limit = Some(value);
             }
             "after" if after.is_none() => {
-                let (created, update) = value.split_once(',').ok_or_else(invalid)?;
+                let mut parts = value.split(',');
+                let created = parts.next().ok_or_else(invalid)?;
+                let update = parts.next().ok_or_else(invalid)?;
+                let reply_id = parts.next();
+                if parts.next().is_some()
+                    || reply_id.is_some_and(|id| !crate::repositories::valid_cursor_id(id))
+                {
+                    return Err(invalid());
+                }
                 let created_at: i64 = created.parse().map_err(|_| invalid())?;
                 let telegram_update_id: i64 = update.parse().map_err(|_| invalid())?;
                 if created_at < 0 || telegram_update_id < 0 {
@@ -190,6 +203,7 @@ fn parse_uri(uri: &str) -> Result<(&str, Option<InboxCursor>, u32), ErrorData> {
                 after = Some(InboxCursor {
                     created_at,
                     telegram_update_id,
+                    reply_id: reply_id.map(str::to_owned),
                 });
             }
             _ => return Err(invalid()),

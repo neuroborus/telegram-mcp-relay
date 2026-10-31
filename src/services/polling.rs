@@ -96,6 +96,10 @@ impl PollingService {
             let updates = match self.telegram.get_updates(offset, BATCH_SIZE).await {
                 Ok(updates) => updates,
                 Err(error) => {
+                    self.database
+                        .lock()
+                        .map_err(|_| AppError::StorageFailure)?
+                        .mark_observation_gap()?;
                     retry_network(error, &mut failures).await?;
                     continue;
                 }
@@ -107,6 +111,10 @@ impl PollingService {
                 .any(|u| u.update_id < 0 || u.update_id == i64::MAX)
                 || updates.windows(2).any(|w| w[0].update_id >= w[1].update_id)
             {
+                self.database
+                    .lock()
+                    .map_err(|_| AppError::StorageFailure)?
+                    .mark_observation_gap()?;
                 return Err(TelegramError::InvalidResponse.into());
             }
             failures = 0;

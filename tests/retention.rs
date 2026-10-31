@@ -82,6 +82,63 @@ impl Fixture {
             .unwrap()
     }
 
+    fn assert_counts(&self, expected: &[(&str, i64)]) {
+        for &(table, count) in expected {
+            assert_eq!(self.count(table), count, "retained rows in {table}");
+        }
+    }
+
+    fn assert_provenance(
+        &self,
+        db: &Database,
+        message_id: i64,
+        reply_id: Option<&str>,
+        expires_at: i64,
+    ) {
+        self.assert_counts(&[("journal_records", 0), ("attachment_records", 1)]);
+        let sql = self.sql();
+        let (chat, message, sender, expiry): (i64, i64, i64, i64) = sql
+            .query_row(
+                "SELECT chat_id, message_id, sender_user_id, expires_at FROM attachment_records",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            (chat, message, sender, expiry),
+            (-101, message_id, 7, expires_at)
+        );
+        let (owner, shared): (Option<String>, Option<String>) = sql
+            .query_row(
+                "SELECT reply_id, message_handle FROM attachment_records",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(owner.as_deref(), reply_id);
+        assert_eq!(shared, None);
+        let usage = db.history_usage().unwrap();
+        assert_eq!(
+            (usage.records, usage.attachments, usage.body_bytes),
+            (0, 1, 0)
+        );
+        assert!(usage.metadata_bytes > 0);
+    }
+
+    fn assert_no_observations(&self, db: &Database) {
+        self.assert_counts(&[("journal_records", 0), ("attachment_records", 0)]);
+        let usage = db.history_usage().unwrap();
+        assert_eq!(
+            (
+                usage.records,
+                usage.attachments,
+                usage.body_bytes,
+                usage.metadata_bytes
+            ),
+            (0, 0, 0, 0)
+        );
+    }
+
     fn assert_integrity(&self) {
         assert!(
             !self
@@ -115,6 +172,43 @@ fn clean(db: &mut Database, now: i64) -> usize {
 }
 
 #[test]
+fn reused_update_ids_do_not_expand_cleanup_batches_or_delete_live_rows() {
+    let fixture = Fixture::new();
+    let mut db = fixture.open();
+    let sql = fixture.sql();
+    for message in 1..=102 {
+        let expires = if message == 102 { 5_000 } else { 1_000 };
+        sql.execute(
+            "INSERT INTO notice_attempts VALUES(100, -101, ?1, 'unroutable', NULL, 0, ?2)",
+            (message, expires),
+        )
+        .unwrap();
+        sql.execute(
+            "INSERT INTO update_dispositions VALUES(100, 'unroutable', -101, ?1, 0, ?2, 1)",
+            (message, expires),
+        )
+        .unwrap();
+    }
+    let mut sweep = CleanupSweep::new(1_000).unwrap();
+    let first = db.cleanup_batch(&mut sweep).unwrap();
+    assert_eq!(first.removed, 200); // At most 100 per table, even with equal update IDs.
+    assert!(!first.complete);
+    assert_eq!(fixture.count("notice_attempts"), 2);
+    assert_eq!(fixture.count("update_dispositions"), 2);
+    assert_eq!(db.cleanup_batch(&mut sweep).unwrap().removed, 2);
+    for table in ["notice_attempts", "update_dispositions"] {
+        assert_eq!(fixture.count(table), 1);
+        assert_eq!(
+            sql.query_row::<i64, _, _>(&format!("SELECT expires_at FROM {table}"), [], |r| r
+                .get(0))
+                .unwrap(),
+            5_000
+        );
+    }
+    fixture.assert_integrity();
+}
+
+#[test]
 fn independent_expiry_preserves_processing_recovery_after_route_and_session_ttl() {
     let fixture = Fixture::new();
     let mut db = fixture.open();
@@ -136,12 +230,16 @@ fn independent_expiry_preserves_processing_recovery_after_route_and_session_ttl(
             DAY,
         )
         .unwrap();
+    fixture.assert_provenance(&db, 111, Some(&claim.reply.reply_id), 4 * DAY);
+    let retained_usage = db.history_usage().unwrap();
     // Both parent TTLs end at day 2. The reply's independent receipt TTL ends at day 4.
     assert!(db.route(-101, 5, 2 * DAY - 1).unwrap().is_some());
     assert_eq!(db.route(-101, 5, 2 * DAY).unwrap(), None);
     assert_eq!(clean(&mut db, 2 * DAY), 1);
     assert_eq!(fixture.count("message_routes"), 0);
     assert_eq!(fixture.count("sessions"), 1);
+    assert_eq!(fixture.count("replies"), 1);
+    assert_eq!(db.history_usage().unwrap(), retained_usage);
     drop(db);
     let mut db = fixture.open();
     let resumed = inbox
@@ -166,6 +264,8 @@ fn independent_expiry_preserves_processing_recovery_after_route_and_session_ttl(
         (ReplyState::Processing, 4 * DAY)
     );
     assert_eq!(clean(&mut db, 4 * DAY - 1), 0);
+    fixture.assert_provenance(&db, 111, Some(&reply.reply_id), 4 * DAY);
+    assert_eq!(db.history_usage().unwrap(), retained_usage);
     assert!(
         db.inbox_snapshot(&key, None, 1, 4 * DAY)
             .unwrap()
@@ -183,7 +283,17 @@ fn independent_expiry_preserves_processing_recovery_after_route_and_session_ttl(
         ),
         Err(AppError::InvalidClaim)
     );
-    assert_eq!(clean(&mut db, 4 * DAY), 2);
+    // The independent reply deadline retires the reply, its provenance and the parent.
+    assert_eq!(clean(&mut db, 4 * DAY), 3);
+    fixture.assert_counts(&[
+        ("replies", 0),
+        ("message_routes", 0),
+        ("sessions", 0),
+        ("acknowledgment_receipts", 0),
+        ("notice_attempts", 0),
+        ("update_dispositions", 0),
+    ]);
+    fixture.assert_no_observations(&db);
     assert_eq!(db.session(&key), Err(AppError::SessionNotFound));
     assert_eq!(db.update_cursor().unwrap(), Some(11));
     fixture.assert_integrity();
@@ -204,6 +314,7 @@ fn valid_routes_and_receipts_keep_expired_session_identity_without_extending_chi
         .unwrap();
     let policy = NoticePolicy::new(&Delivery::default(), &Notifications::default()).unwrap();
     assert_eq!(db.take_notice_attempts(&policy, 1, DAY).unwrap().len(), 1);
+    fixture.assert_provenance(&db, 111, Some(&claim.reply.reply_id), 3 * DAY + 1);
     inbox
         .acknowledge(
             &mut db,
@@ -213,9 +324,21 @@ fn valid_routes_and_receipts_keep_expired_session_identity_without_extending_chi
             DAY,
         )
         .unwrap();
-    assert_eq!(clean(&mut db, DAY + 1), 0);
+    // Acknowledgment detaches private provenance; the next sweep removes the orphan
+    // without waiting for its old deadline or retiring the live route/receipt/notice.
+    fixture.assert_provenance(&db, 111, None, 3 * DAY + 1);
+    assert_eq!(clean(&mut db, DAY + 1), 1);
+    fixture.assert_no_observations(&db);
+    fixture.assert_counts(&[
+        ("sessions", 2),
+        ("message_routes", 2),
+        ("replies", 0),
+        ("acknowledgment_receipts", 1),
+        ("notice_attempts", 1),
+        ("update_dispositions", 0),
+    ]);
     assert!(db.session(&route_only).is_ok());
-    clean(&mut db, 2 * DAY);
+    assert_eq!(clean(&mut db, 2 * DAY), 3); // Two routes and the route-only session.
     assert_eq!(db.session(&route_only), Err(AppError::SessionNotFound));
     assert_eq!(fixture.count("notice_attempts"), 1);
     // Completing the source reply neither removes its attempt nor extends its TTL.
@@ -234,6 +357,14 @@ fn valid_routes_and_receipts_keep_expired_session_identity_without_extending_chi
         .unwrap();
     assert_eq!(clean(&mut db, 4 * DAY - 1), 0);
     assert_eq!(
+        fixture
+            .sql()
+            .query_row::<i64, _, _>("SELECT expires_at FROM acknowledgment_receipts", [], |r| r
+                .get(0))
+            .unwrap(),
+        4 * DAY
+    );
+    assert_eq!(
         inbox.acknowledge(
             &mut db,
             &completed,
@@ -245,6 +376,8 @@ fn valid_routes_and_receipts_keep_expired_session_identity_without_extending_chi
     );
     assert_eq!(clean(&mut db, 4 * DAY), 2);
     assert_eq!(fixture.count("acknowledgment_receipts"), 0);
+    assert_eq!(fixture.count("sessions"), 0);
+    fixture.assert_no_observations(&db);
     fixture.assert_integrity();
 }
 
@@ -314,11 +447,20 @@ fn expiry_recovers_shared_capacity_without_early_eviction() {
     let mut db = fixture.open();
     let key = fixture.session(&mut db, 5);
     fixture.receive(&mut db, 11, 5, 0).unwrap();
+    let reply = db
+        .inbox_snapshot(&key, None, 1, 0)
+        .unwrap()
+        .replies
+        .pop()
+        .unwrap();
+    fixture.assert_provenance(&db, 111, Some(&reply.reply_id), 3 * DAY);
+    let retained_usage = db.history_usage().unwrap();
     assert_eq!(
         fixture.receive(&mut db, 12, 5, 1),
         Err(AppError::StorageCapacity)
     );
     assert_eq!(db.update_cursor().unwrap(), Some(11));
+    assert_eq!(db.history_usage().unwrap(), retained_usage);
     fixture.receive(&mut db, 12, 999, 0).unwrap(); // One authorized unroutable disposition.
     let policy = NoticePolicy::new(&Delivery::default(), &Notifications::default()).unwrap();
     assert_eq!(db.take_notice_attempts(&policy, 1, 0).unwrap().len(), 1);
@@ -334,8 +476,20 @@ fn expiry_recovers_shared_capacity_without_early_eviction() {
     assert_eq!(fixture.count("replies"), 1);
     assert_eq!(fixture.count("notice_attempts"), 1);
     assert_eq!(fixture.count("update_dispositions"), 1);
+    fixture.assert_provenance(&db, 111, Some(&reply.reply_id), 3 * DAY);
     assert_eq!(clean(&mut db, 3 * DAY - 1), 0);
-    assert_eq!(clean(&mut db, 3 * DAY), 4); // Reply, attempt, disposition and session.
+    assert_eq!(db.history_usage().unwrap(), retained_usage);
+    // Reply, attempt, disposition, session and the reply's private provenance.
+    assert_eq!(clean(&mut db, 3 * DAY), 5);
+    fixture.assert_counts(&[
+        ("replies", 0),
+        ("message_routes", 0),
+        ("sessions", 0),
+        ("acknowledgment_receipts", 0),
+        ("notice_attempts", 0),
+        ("update_dispositions", 0),
+    ]);
+    fixture.assert_no_observations(&db);
     assert_eq!(db.update_cursor().unwrap(), Some(12));
     let key = db
         .register_session(None, None, "Same", None, 3 * DAY)
@@ -354,6 +508,13 @@ fn expiry_recovers_shared_capacity_without_early_eviction() {
             .len(),
         1
     );
+    let reply = db
+        .inbox_snapshot(&key, None, 1, 3 * DAY)
+        .unwrap()
+        .replies
+        .pop()
+        .unwrap();
+    fixture.assert_provenance(&db, 114, Some(&reply.reply_id), 6 * DAY);
     fixture.assert_integrity();
 }
 
@@ -361,8 +522,12 @@ fn expiry_recovers_shared_capacity_without_early_eviction() {
 fn cleanup_failure_rolls_back_all_tables_and_cursor_progress() {
     let fixture = Fixture::new();
     let mut db = fixture.open();
-    fixture.session(&mut db, 5);
+    let key = fixture.session(&mut db, 5);
     fixture.receive(&mut db, 11, 5, 0).unwrap();
+    let original = db.inbox_snapshot(&key, None, 1, 0).unwrap();
+    let reply_id = &original.replies[0].reply_id;
+    fixture.assert_provenance(&db, 111, Some(reply_id), 3 * DAY);
+    let retained_usage = db.history_usage().unwrap();
     fixture
         .sql()
         .execute_batch(
@@ -372,15 +537,33 @@ fn cleanup_failure_rolls_back_all_tables_and_cursor_progress() {
         .unwrap();
     let mut sweep = CleanupSweep::new(3 * DAY).unwrap();
     assert_eq!(db.cleanup_batch(&mut sweep), Err(AppError::StorageFailure));
-    assert_eq!(fixture.count("replies"), 1);
-    assert_eq!(fixture.count("message_routes"), 1);
+    fixture.assert_counts(&[
+        ("replies", 1),
+        ("message_routes", 1),
+        ("sessions", 1),
+        ("acknowledgment_receipts", 0),
+        ("notice_attempts", 0),
+        ("update_dispositions", 0),
+    ]);
+    fixture.assert_provenance(&db, 111, Some(reply_id), 3 * DAY);
+    assert_eq!(db.history_usage().unwrap(), retained_usage);
+    assert_eq!(db.inbox_snapshot(&key, None, 1, 0).unwrap(), original);
     assert_eq!(db.update_cursor().unwrap(), Some(11));
+    drop(db);
+    let mut db = fixture.open();
+    fixture.assert_provenance(&db, 111, Some(reply_id), 3 * DAY);
+    assert_eq!(db.history_usage().unwrap(), retained_usage);
+    assert_eq!(db.inbox_snapshot(&key, None, 1, 0).unwrap(), original);
     fixture
         .sql()
         .execute_batch("DROP TRIGGER fail_cleanup")
         .unwrap();
-    assert_eq!(db.cleanup_batch(&mut sweep).unwrap().removed, 3);
-    assert_eq!(fixture.count("sessions"), 0);
+    let batch = db.cleanup_batch(&mut sweep).unwrap();
+    assert_eq!(batch.removed, 4); // Reply, route, session and private provenance.
+    assert!(batch.complete);
+    fixture.assert_counts(&[("replies", 0), ("message_routes", 0), ("sessions", 0)]);
+    fixture.assert_no_observations(&db);
+    assert_eq!(db.update_cursor().unwrap(), Some(11));
     fixture.assert_integrity();
     assert!(matches!(
         CleanupSweep::new(-1),

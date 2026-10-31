@@ -81,16 +81,8 @@ impl Database {
                 "attachment_handle",
             ),
             ("acknowledgment_receipts", "reply_id", "reply_id"),
-            (
-                "notice_attempts",
-                "telegram_update_id",
-                "telegram_update_id",
-            ),
-            (
-                "update_dispositions",
-                "telegram_update_id",
-                "telegram_update_id",
-            ),
+            ("notice_attempts", "rowid", "rowid"),
+            ("update_dispositions", "rowid", "rowid"),
             (
                 "message_routes",
                 "(telegram_chat_id, telegram_message_id)",

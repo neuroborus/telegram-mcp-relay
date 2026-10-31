@@ -267,8 +267,10 @@ under [security](#retention-and-security); they are not separate per-client iden
 Snapshots contain JSON `replies` and nullable `next_uri`. Optional `?limit=1..100` defaults
 to 100; follow `next_uri` unchanged for keyset pagination in receipt-time/update-ID order.
 Each page also respects the configured reply payload budget. Continuations use
-`?limit=N&after=created_at,telegram_update_id`, scoped by the URI's session key. Pages reflect
-current durable state, not a frozen history. All delivery states, text/caption, attachment
+`?limit=N&after=created_at,telegram_update_id,reply_id`, scoped by the URI's session key.
+The reply ID breaks ties across reused update IDs; legacy two-component cursors remain valid
+with their original boundary semantics. Pages reflect current durable state, not a frozen
+history. All delivery states, text/caption, attachment
 metadata and routing IDs are visible; tokens are never present. Timestamps are Unix
 milliseconds. Reads never claim, acknowledge or refresh session activity. Lists and reads
 are private and immediately stale (`ttlMs=0`). Malformed URIs/cursors and unknown sessions
@@ -331,21 +333,48 @@ Telegram interoperability is claimed.
 
 ## Bounded observation storage
 
-The separately bounded history storage foundation uses protected transactional schema v8.
+Incoming observation uses the separately bounded history storage introduced in v8, with
+protected transactional schema v9 adding reply references and source IDs on new completions,
+and replacing global update-ID uniqueness with composite message/notice identity.
 Journal rows hold source identity, bounded text/display snapshots, nonsecret session display
-IDs and opaque message handles. Raw attachment adapter IDs live only in private provenance
-rows with opaque handles; there are no credential, recovery-token, local-path or file-byte
-fields in the shared record. Lazy display mappings are private and expire with sessions;
-stored display snapshots survive without pinning private recovery identities.
+IDs and opaque message handles. Raw attachment adapter IDs remain in private provenance
+rows and existing own-reply metadata. Journal records have no fields for raw file IDs,
+credentials, recovery tokens, local source paths or file bytes. Lazy display mappings are
+private and expire with sessions; stored display snapshots survive without pinning private
+recovery identities.
 
 Own-reply provenance requires a retained matching reply even when history is disabled;
 shared provenance requires an enabled retained matching journal source. Foreign keys clear
 expired/deleted source references independently, and indexed cleanup retires expired/orphaned
 provenance in bounded batches. Journal pressure rolls back without consuming inbox quotas or
 evicting valid replies. Coverage starts at actual observation, not migration; restart marks
-possible gaps and cannot reconstruct older bodies. Capture wiring and public read/download
+possible gaps and cannot reconstruct older bodies. Outgoing capture and public read/download
 tools remain pending; storage fixtures define behavior but await FINALIZE execution. See
 [history settings and privacy](CONFIGURATION.md#opt-in-history-storage).
+
+Ingress authorizes chat/user IDs and rejects bot senders before retaining observations. With
+history enabled it journals text/captions and document/photo metadata, including standalone,
+unroutable and notice-targeted messages. Supported input is the Bot API `message` projection;
+edited messages, channel posts and other update kinds remain unsupported. Display context is
+bounded and untrusted; quoted bodies, arbitrary update fields, local paths and file bytes are
+not archived. Actual bot visibility depends on Telegram group/privacy configuration.
+
+One transaction commits journal/display records, private attachment provenance, the routed
+reply or disposition, and cursor advancement. Only after commit does a new routed reply signal
+inbox interests. Failure rolls all of them back. Observing a standalone/unroutable message
+cannot assign an inbox owner, refresh another session or change notice/loop arbitration.
+Source chat/message identity deduplicates journal/provenance and retained deliveries, including
+new completion receipts across restart/lower or reused update-ID sequences. No legacy source
+identity is invented. Existing routes retain precedence over quoted service wording, and admitted-send
+deferral still precedes lost-notice recognition.
+A retained journal record without an ingress update ID cannot suppress its first authorized
+routed Reply; the ingestion transaction records that ID together with the routing disposition.
+
+Coverage begins at the first committed observation. Its last timestamp is the last distinct
+stored observation, not a promise of continuous chat coverage. Restarts, lower ID sequences,
+failed polling or malformed batches mark possible gaps. The upstream unconsumed-update window
+is separately **at most 24 hours**; no Bot API general history retrieval or reconstruction of
+unseen/expired messages is provided.
 
 ## Bounded asks
 
@@ -448,6 +477,12 @@ and composite trigger deduplication, preserving existing attempts and receipt ti
 Version 6 extends the session expiry index with its key for bounded cleanup pagination.
 Version 7 adds nullable bounded session directory display metadata; existing sessions default
 to omission, preserving identities, routes, claims and notices.
+
+Version 9 rebuilds reply, completion, disposition and notice keys to allow update-ID reuse
+across sequences. It preserves every token/reconciliation field and attachment reference.
+Only during this protected migration, before BEGIN, foreign-key actions are disabled for
+SQLite's parent-table rebuild procedure; a full foreign-key check precedes commit and
+enforcement is restored after success or rollback. Capacity/DDL failures roll back all changes.
 
 Initialization enables incremental auto-vacuum before the schema transaction. DDL, initial
 cursor, application ID and version commit together under an immediate transaction; errors
@@ -709,16 +744,21 @@ behavior remains untested, and production configuration exposes no endpoint over
 
 ## Reply ingestion
 
-`services::ingress::IngressService` accepts only allowlisted chats and non-bot senders, and
-explicit Replies containing text/captions or document/photo metadata. Unsupported/unapproved
-updates compact into a single ignored marker; authorized unknown/expired routes retain only
-an unroutable disposition with the triggering chat/message IDs. No full update is retained.
+`services::ingress::IngressService` accepts only allowlisted chats and non-bot senders with
+text/captions or document/photo metadata. Authorized standalone content can be observed with
+history enabled; only explicit Replies select inbox routes. Unsupported/unapproved updates
+compact into a single ignored marker. Authorized unknown/expired routes retain an unroutable
+disposition with the triggering chat/message IDs, independently of optional observation.
+No full update is retained.
 The repository resolves composite routes and commits a distinct pending reply, receipt-based
 expiry, monotonic session activity and cursor together. Redelivery produces no new reply.
 Only a successful commit returns `IngestOutcome::ReplyStored` and publishes an inbox signal.
-Exact retained update IDs, composite message identities and acknowledgment receipts suppress
-duplicates across restart; an unseen lower ID can start a new Telegram sequence. Redelivering
-a retained update leaves the current cursor unchanged, including after a sequence reset.
+Retained update IDs are compared with authorized composite message identities, including
+new acknowledgment receipts and journal observations. IDs alone cannot suppress a new source
+after a sequence reset. Legacy completion tokens remain valid without inventing source IDs.
+The cursor also records only the current authorized source, or no source for ignored input.
+Duplicates are suppressed across restart; an unseen lower ID can start a new sequence.
+Redelivering a retained update leaves the current cursor unchanged, including after a reset.
 
 Callers must submit ordered Telegram batches and stop at errors; gaps cannot reveal omitted input.
 Capacity/disk failures preserve cursor/replies. UTF-8 text plus bounded attachment JSON count
@@ -727,8 +767,8 @@ variable metadata accounting including send reservations. Unroutable disposition
 receipt count budget and reply TTL. The fixed ignored marker is bookkeeping like the singleton
 cursor: it consumes no receipt or variable metadata admission and remains under the physical
 database cap. Compacting it removes no reply, receipt or notice obligation; older ignored input
-may be ignored again without retaining contents or generating effects. Cleanup and downloads
-remain later work.
+may be ignored again without retaining contents or generating effects. Attachment downloads
+remain pending.
 
 ## Durable notice arbitration
 
@@ -746,7 +786,8 @@ a durable record and source flag; a crash before dispatch or an ambiguous send c
 It is an attempt decision, not proof of delivery, and never authorizes automatic retries.
 
 Authorized unroutable dispositions commit with ingress and deduplicate by composite trigger
-as well as update ID. Retained attempts also suppress redelivery after disposition removal.
+independently of reused update IDs. Retained attempts also suppress redelivery after
+disposition removal.
 Notice attempts share the receipt count and metadata budgets with acknowledgments and
 unroutable dispositions, including outstanding send reservations. Any batch admission/SQL
 failure rolls back every decision without removing replies or advancing ingress. Attempt
@@ -783,8 +824,9 @@ confirmed long work, wait/typing expiry and reconnects introduce no notice trigg
 ## Inbox snapshots and claims
 
 `Database::inbox_snapshot` reads unexpired replies in receipt-time/update-ID order, preserving
-ordered Telegram batch ties. Keyset pagination covers every delivery state without acquiring
-ownership, exposing claim tokens or refreshing session activity. Pages and claims are limited
+ordered Telegram batch ties, with reply IDs breaking otherwise equal keys after ID reuse.
+Keyset pagination covers every delivery state without acquiring ownership, exposing claim
+tokens or refreshing session activity. Pages and claims are limited
 to 100 items and `limits.reply_bytes` of combined UTF-8 text/attachment payload. If a newly
 lowered limit cannot fit the first retained reply, return capacity pressure without skipping it.
 

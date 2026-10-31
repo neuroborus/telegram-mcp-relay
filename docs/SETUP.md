@@ -237,6 +237,12 @@ That document also explains current tokens and explicit processing reconciliatio
 
 ## Recovery and retention
 
+Opted-in [incoming history](CONFIGURATION.md#opt-in-history-storage) captures only authorized
+messages the bot actually receives, including standalone content. Group privacy/permissions
+can hide messages; bot senders, edited messages, channel posts and unsupported update types
+are not captured. Shared reads and outgoing capture remain pending. Local coverage markers
+report the first/last committed observation and possible gaps, not complete Telegram history.
+
 Telegram keeps unconsumed updates for **at most 24 hours**. A longer outage can lose input
 before the bridge sees it; local retention cannot reconstruct Telegram history. Accepted
 replies/cursor survive restart in SQLite and require explicit completion acknowledgments.

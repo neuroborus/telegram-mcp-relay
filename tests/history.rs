@@ -62,6 +62,7 @@ fn input() -> JournalInput<'static> {
         sender_label: Some("Synthetic sender"),
         session: None,
         message_date: 1,
+        reply_to_message_id: None,
     }
 }
 
@@ -149,13 +150,17 @@ fn opt_in_deduplication_and_display_snapshots_survive_restart_without_secret_dis
 }
 
 #[test]
-fn capacity_failure_rolls_back_the_body_display_identity_and_coverage_without_touching_inbox() {
+fn capacity_failure_preserves_inbox_admission_for_an_observation_not_yet_ingested() {
     let mut fixture = Fixture::new();
     fixture.0.history.max_records = 1;
     let mut db = fixture.open();
     db.record_message(&input(), 10).unwrap();
     let before = db.history_usage().unwrap();
     let coverage = db.history_coverage().unwrap();
+    let update_id: Option<i64> = fixture.sql().query_row(
+        "SELECT telegram_update_id FROM journal_records WHERE chat_id = -101 AND message_id = 7",
+        [], |r| r.get(0)).unwrap();
+    assert_eq!(update_id, None);
     let session = db.register_session(None, None, "Another", None, 0).unwrap();
     let mut message = input();
     message.source.message_id = 8;
@@ -188,6 +193,28 @@ fn capacity_failure_rolls_back_the_body_display_identity_and_coverage_without_to
     ));
     assert_eq!(
         db.inbox_snapshot(&session.session_key, None, 1, 30)
+            .unwrap()
+            .replies
+            .len(),
+        1
+    );
+    // Retained content alone was not an ingress disposition. The first routed Reply
+    // reuses that bounded record, then its committed update ID fences redelivery.
+    assert_eq!(db.history_usage().unwrap(), before);
+    let update_id: Option<i64> = fixture.sql().query_row(
+        "SELECT telegram_update_id FROM journal_records WHERE chat_id = -101 AND message_id = 7",
+        [], |r| r.get(0)).unwrap();
+    assert_eq!(update_id, Some(11));
+    assert_eq!(
+        IngressService::new(&fixture.0)
+            .unwrap()
+            .ingest(&mut db, &update, 31)
+            .unwrap(),
+        IngestOutcome::Duplicate
+    );
+    assert_eq!(db.update_cursor().unwrap(), Some(11));
+    assert_eq!(
+        db.inbox_snapshot(&session.session_key, None, 2, 31)
             .unwrap()
             .replies
             .len(),
@@ -282,7 +309,11 @@ fn failed_v7_migration_preserves_old_schema_and_records_transactionally() {
     drop(db);
     let sql = fixture.sql();
     sql.execute_batch(
-        "DROP TABLE attachment_records; DROP TABLE journal_records; DROP TABLE session_displays;
+        "DROP INDEX receipts_message; ALTER TABLE acknowledgment_receipts DROP COLUMN telegram_message_id;
+        ALTER TABLE acknowledgment_receipts DROP COLUMN telegram_chat_id;
+        ALTER TABLE telegram_cursor DROP COLUMN telegram_message_id;
+        ALTER TABLE telegram_cursor DROP COLUMN telegram_chat_id;
+        DROP TABLE attachment_records; DROP TABLE journal_records; DROP TABLE session_displays;
         DROP TABLE history_usage; DROP TABLE history_coverage; PRAGMA user_version = 7;
         CREATE TABLE history_coverage(conflict TEXT);",
     )
@@ -303,7 +334,7 @@ fn failed_v7_migration_preserves_old_schema_and_records_transactionally() {
     assert!(!exists);
     sql.execute_batch("DROP TABLE history_coverage").unwrap();
     let db = fixture.open();
-    assert_eq!(db.schema_version().unwrap(), 8);
+    assert_eq!(db.schema_version().unwrap(), 9);
     assert_eq!(
         db.session(&session.session_key).unwrap().title.as_str(),
         "Preserve"

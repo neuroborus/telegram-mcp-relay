@@ -56,8 +56,24 @@ async fn startup_daily_schedule_exclusivity_and_shutdown_use_one_timer() {
     let service = fixture.service();
     let first = fixture.expired(&service);
     let (shutdown, receive) = watch::channel(false);
-    let mut running = Box::pin(service.run(receive.clone()));
-    assert!(poll!(running.as_mut()).is_pending());
+    let (ready, startup) = oneshot::channel();
+    let mut running = Box::pin(service.run_ready(receive.clone(), Some(ready)));
+    // Reclamation can yield before the daily timer is armed. Observe the same complete
+    // startup boundary as daemon composition before advancing the scheduler's clock.
+    tokio::select! {
+        result = running.as_mut() => panic!("cleanup stopped before readiness: {result:?}"),
+        result = startup => result.unwrap(),
+    }
+    assert_eq!(
+        service
+            .database
+            .lock()
+            .unwrap()
+            .disk_usage()
+            .unwrap()
+            .free_pages,
+        0
+    );
     assert_eq!(
         service.database.lock().unwrap().session(&first),
         Err(AppError::SessionNotFound)

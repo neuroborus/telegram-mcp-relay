@@ -5,12 +5,16 @@ use serde::{Deserialize, Serialize};
 #[derive(Deserialize)]
 pub struct Chat {
     pub id: i64,
+    pub title: Option<String>,
 }
 
 #[derive(Deserialize)]
 pub struct User {
     pub id: u64,
     pub is_bot: bool,
+    pub first_name: Option<String>,
+    pub last_name: Option<String>,
+    pub username: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -35,6 +39,10 @@ pub struct Attachment {
     pub file_name: Option<String>,
     pub mime_type: Option<String>,
     pub file_size: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub width: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub height: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -47,8 +55,16 @@ pub struct Message {
     pub text: Option<String>,
     pub caption: Option<String>,
     pub document: Option<Attachment>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "photos")]
     pub photo: Vec<Attachment>,
+}
+
+fn photos<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Vec<Attachment>, D::Error> {
+    let photos = Vec::<Attachment>::deserialize(deserializer)?;
+    if photos.len() > crate::config::INCOMING_ATTACHMENT_LIMIT {
+        return Err(serde::de::Error::custom("photo metadata capacity"));
+    }
+    Ok(photos)
 }
 
 #[derive(Deserialize)]

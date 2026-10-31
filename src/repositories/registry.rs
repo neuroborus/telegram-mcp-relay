@@ -435,7 +435,7 @@ fn session_row(row: &Row<'_>) -> rusqlite::Result<Session> {
     })
 }
 
-fn session_by(
+pub(super) fn session_by(
     connection: &Connection,
     column: &str,
     value: &str,

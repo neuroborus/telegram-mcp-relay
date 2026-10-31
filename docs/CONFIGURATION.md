@@ -140,13 +140,18 @@ See [architecture](ARCHITECTURE.md#session-and-route-persistence).
 
 ## Opt-in history storage
 
-The v8 storage foundation adds `[history]`; capture and shared-read/download tools are not yet
-connected. `enabled=false` is the default. Opt-in requires a configured MCP bearer source and
+`[history]` enables capture of authorized incoming observations, including standalone and
+unroutable text/captions/documents/photos. Outgoing capture and shared-read/download tools are
+not yet connected. `enabled=false` is the default. Opt-in requires a configured MCP bearer source and
 an actually resolved bearer at daemon construction. Library callers use `Database::open_with_history`
 with the same explicit authentication requirement; `Database::open` keeps shared capture disabled.
 Stored bodies, captions and display metadata are private conversation data readable by the
 trusted local operator. Opt-in does not grant claim/processing authority to other sessions.
 Disabling stops capture/shared reads; retained records expire normally rather than being wiped.
+Own routed replies retain private attachment provenance independently of history. Observation
+does not assign a recipient, change notice eligibility, claim a reply or acknowledge work.
+Display labels retain at most 256 scalars (1,024 UTF-8 bytes), with controls stripped. At most
+ten document/photo metadata entries per message are admitted; no file bytes are downloaded.
 
 | History setting | Default | Accepted positive range |
 | --- | --- | --- |
@@ -175,6 +180,12 @@ silently evicts valid replies or advances an ingress cursor on failure. The exis
 cap, DELETE journal durability and bounded reclamation remain in force. Disk snapshots now
 account separately for protected journal/WAL/SHM lengths and allocated blocks; normally WAL/SHM
 are absent. This is observation, not a filesystem quota or peak sidecar measurement.
+Schema v9 retains source chat/message IDs on new acknowledgment receipts for source-based
+deduplication after completion. Older receipts keep their existing token recovery proof and
+stored update ID; missing source IDs are not guessed or used to suppress a new message.
+Journal observation uses stable chat/message identity across redelivery, lower sequences and
+reused update IDs. Distinct sources may share an update ID without sharing claims, receipts
+or notice decisions; cleanup still deletes at most 100 expired rows per table per batch.
 
 The binary registers SIGINT and SIGTERM before service startup; either signal stops admission
 and drains accepted sends and route bookkeeping before exit. Registration failure logs

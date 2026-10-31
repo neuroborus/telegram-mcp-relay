@@ -257,8 +257,13 @@ fn unroutable_decisions_are_authorized_deduplicated_and_restart_safe() {
         Ok(IngestOutcome::Unroutable)
     );
     assert_eq!(
-        fixture.ingest(&mut db, 11, -102, 6, 1_001),
+        fixture.ingest(&mut db, 11, -101, 6, 1_001),
         Ok(IngestOutcome::Duplicate)
+    );
+    // The update ID can be reused: the other authorized chat is a distinct source.
+    assert_eq!(
+        fixture.ingest(&mut db, 11, -102, 6, 1_001),
+        Ok(IngestOutcome::Unroutable)
     );
     // A distinct update ID for the same composite message is still one Reply.
     let mut duplicate: Update = serde_json::from_value(json!({"update_id":12,
@@ -272,22 +277,26 @@ fn unroutable_decisions_are_authorized_deduplicated_and_restart_safe() {
         Ok(IngestOutcome::Duplicate)
     );
     assert_eq!(db.update_cursor().unwrap(), Some(12));
-    // Same Telegram message ID in a different authorized chat is a distinct obligation.
+    // Reidentifying that second source must not create another notice obligation.
     duplicate.update_id = 13;
     duplicate.message.as_mut().unwrap().chat.id = -102;
     assert_eq!(
         IngressService::new(&fixture.0)
             .unwrap()
             .ingest(&mut db, &duplicate, 1_003),
-        Ok(IngestOutcome::Unroutable)
+        Ok(IngestOutcome::Duplicate)
     );
     let attempts = db.take_notice_attempts(&policy(), 100, 1_003).unwrap();
     assert_eq!(
         attempts
             .iter()
-            .map(|a| a.telegram_update_id)
+            .map(|a| (
+                a.telegram_update_id,
+                a.telegram_chat_id,
+                a.trigger_message_id
+            ))
             .collect::<Vec<_>>(),
-        [11, 13]
+        [(11, -101, 111), (11, -102, 111)]
     );
     assert!(attempts.iter().all(|a| a.kind == NoticeKind::Unroutable));
     // No success message ID is needed: lost responses/crash-before-dispatch cannot retry.
@@ -308,6 +317,11 @@ fn unroutable_decisions_are_authorized_deduplicated_and_restart_safe() {
         .unwrap();
     assert_eq!(
         fixture.ingest(&mut db, 11, -101, 6, 61_000),
+        Ok(IngestOutcome::Duplicate)
+    );
+    assert_eq!(db.update_cursor().unwrap(), Some(13));
+    assert_eq!(
+        fixture.ingest(&mut db, 11, -102, 6, 61_000),
         Ok(IngestOutcome::Duplicate)
     );
     assert_eq!(db.update_cursor().unwrap(), Some(13));

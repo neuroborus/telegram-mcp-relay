@@ -90,6 +90,11 @@ async fn stable_templates_and_direct_paginated_snapshots_never_claim_or_enumerat
     assert_eq!(last["replies"].as_array().unwrap().len(), 1);
     assert_eq!(last["replies"][0]["telegram_update_id"], 13);
     assert_eq!(last["next_uri"], Value::Null);
+    let legacy = format!(
+        "{uri}?limit=2&after={},{}",
+        page["replies"][1]["created_at"], page["replies"][1]["telegram_update_id"]
+    );
+    assert_eq!(http.snapshot(&legacy).await, last);
     let other = http.snapshot(second["inbox_uri"].as_str().unwrap()).await;
     assert_eq!(other["replies"].as_array().unwrap().len(), 1);
     assert_eq!(other["replies"][0]["telegram_update_id"], 14);
@@ -236,6 +241,9 @@ async fn invalid_inbox_uris_and_claim_arguments_fail_safely_without_effects() {
         format!("{uri}?limit=1&limit=2"),
         format!("{uri}?after=-1,2"),
         format!("{uri}?after=private"),
+        format!("{uri}?after=1,2,"),
+        format!("{uri}?after=1,2,private,extra"),
+        format!("{uri}?after=1,2,{}", "a".repeat(65)),
         format!("{uri}#private"),
     ] {
         let result = http.rpc("resources/read", json!({"uri":invalid})).await;
