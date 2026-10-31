@@ -154,6 +154,41 @@ Binary diagnostics suppress rmcp targets, whose upstream logs can contain raw me
 library embedders must retain this filter. Synthetic HTTP tests are included in the recorded
 complete C6 outcome; no named-client compatibility or live Telegram behavior is claimed.
 
+### SDK transport session bounds
+
+`routes::sessions::BoundedSessions` wraps rmcp's `create_local_session`,
+`LocalSessionHandle` and `WorkerTransport` APIs. Legacy HTTP routing remains disabled;
+this adapter prepares bounded ownership without changing advertised protocol support.
+It shares the existing handler and database and never registers application identities.
+
+Transport admission and outstanding request/stream admission each use
+`limits.concurrent_requests`, independently of HTTP response admission. One additional
+notification slot allows cancellation under request pressure. Saturation fails immediately;
+admission remains charged while workers retire or SDK contexts outlive an HTTP body.
+Every session's SDK queues have capacity `clamp(concurrent_requests, 2, 16)`. Completed
+request channels are removed after terminal delivery (or SDK cancellation), SDK context
+release and response stream EOF/drop. Retaining a completed stream does not retain admission.
+Their permits remain charged through channel removal. No event store or completed-stream
+replay is enabled. Standalone/shadow stream creation consumes the same bounded stream budget.
+
+The adapter requires initialization and `notifications/initialized` within ten seconds,
+expires idle sessions after five minutes, and checks active sessions at most once per second
+in addition to ownership-change notifications. Attached calls/streams do not expire for
+inactivity, so valid long calls retain their configured service deadlines. A disconnected
+request gets thirty seconds to finish; afterward the adapter cancels it through the SDK.
+It retires an entirely abandoned session, while preserving attached calls in that session.
+These are transport lifetimes, independent of durable session/route/reply retention.
+
+Channel setup/control operations have a ten-second deadline; interrupted or failed setup
+retires that transport because its SDK channel state may be incomplete. Shutdown drops even
+unpolled stream receivers to release queue backpressure, cancels the SDK worker and awaits
+transport retirement plus outstanding handler contexts. Receiver registration uses the same
+lock as the retirement sweep; channels arriving after cancellation are released immediately.
+Accepted outbound sends retain their existing bounded completion/bookkeeping path and daemon
+drain. SDK service response draining
+can add its existing grace period; no short deadline aborts admitted sends. Synthetic adapter
+regressions cover these ownership rules; their execution belongs to the next FINALIZE gate.
+
 ## MCP registration and outbound tools
 
 `McpHandler::new` shares one SQLite handle, outbound service and pinned file-root opener

@@ -74,6 +74,15 @@ later components enforce actual usage without early eviction. The library MCP en
 `limits.request_bytes` and `limits.concurrent_requests`, expected Host/Origin and optional bearer
 authentication; see [transport policy](ARCHITECTURE.md#protected-mcp-transport). Native clients
 may omit Origin. A shared bearer assumes trusted local clients, not per-agent security isolation.
+The internal SDK session adapter also uses `limits.concurrent_requests` for transport-session
+admission and, separately, outstanding requests/streams, plus one reserved notification slot.
+Its queues contain at most 2–16 messages each, derived from that limit. Fixed internal
+lifetimes are ten seconds for initialization/control operations, five minutes for idle
+sessions, and thirty seconds for abandoned calls, with a one-second reclamation interval.
+Attached long-running calls retain their service deadlines. These are centralized constants,
+not new TOML settings, and do not change `limits.sessions` or durable retention.
+Legacy HTTP routing remains disabled in this preparatory change. See
+[SDK session ownership](ARCHITECTURE.md#sdk-transport-session-bounds) for reclamation and shutdown.
 Library resource subscriptions enforce `limits.subscriptions` (default 64) for both active
 listeners and URI entries per request, and `limits.subscription_queue` (default 16) per listener.
 Overflow or five seconds of SDK sink backpressure closes the affected stream; reconnect and

@@ -22,9 +22,7 @@ use hyper::{
 use hyper_util::rt::{TokioIo, TokioTimer};
 use rmcp::{
     ServerHandler,
-    transport::streamable_http_server::{
-        StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager,
-    },
+    transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService},
 };
 use tokio::{
     net::TcpListener,
@@ -42,6 +40,9 @@ use crate::{
 
 type ResponseBody = BoxBody<Bytes, Infallible>;
 
+mod sessions;
+use sessions::BoundedSessions;
+
 /// Generated locally; arbitrary client correlation values never enter diagnostics.
 #[derive(Clone, Debug)]
 pub struct RequestCorrelation(String);
@@ -58,7 +59,8 @@ pub struct McpEndpoint<S = McpHandler> {
 }
 
 struct Endpoint<S> {
-    sdk: StreamableHttpService<Arc<S>, LocalSessionManager>,
+    sdk: StreamableHttpService<Arc<S>, BoundedSessions>,
+    sessions: Arc<BoundedSessions>,
     listen: std::net::SocketAddr,
     hosts: [String; 2],
     auth: Option<HeaderValue>,
@@ -116,13 +118,18 @@ impl<S: ServerHandler> McpEndpoint<S> {
             .with_allowed_origins(hosts.iter().map(|host| format!("http://{host}")))
             .with_max_request_body_bytes(config.limits.request_bytes as usize)
             .with_cancellation_token(shutdown.clone());
+        let sessions = Arc::new(BoundedSessions::new(
+            config.limits.concurrent_requests as usize,
+            shutdown.clone(),
+        ));
         Ok(Self {
             inner: Arc::new(Endpoint {
                 sdk: StreamableHttpService::new(
                     move || Ok(handler.clone()),
-                    Arc::new(LocalSessionManager::default()),
+                    sessions.clone(),
                     sdk_config,
                 ),
+                sessions,
                 listen,
                 hosts,
                 auth,
@@ -183,6 +190,7 @@ impl<S: ServerHandler> McpEndpoint<S> {
         };
         self.inner.shutdown.cancel();
         while connections.join_next().await.is_some() {}
+        self.inner.sessions.drain().await;
         result
     }
 

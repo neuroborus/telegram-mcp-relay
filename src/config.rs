@@ -17,6 +17,12 @@ pub use secrets::{Secret, Secrets};
 
 /// Fixed final-text policy; this is deliberately not a TOML setting.
 pub const OUTBOUND_SCALAR_LIMIT: usize = 1_000;
+// Internal MCP transport bounds, separate from durable application sessions.
+pub(crate) const MCP_SESSION_IDLE: std::time::Duration = std::time::Duration::from_secs(300);
+pub(crate) const MCP_SESSION_INIT: std::time::Duration = std::time::Duration::from_secs(10);
+pub(crate) const MCP_SESSION_ABANDONED: std::time::Duration = std::time::Duration::from_secs(30);
+pub(crate) const MCP_SESSION_SWEEP: std::time::Duration = std::time::Duration::from_secs(1);
+pub(crate) const MCP_SESSION_QUEUE: usize = 16;
 const CONFIG_BYTES: usize = 65_536;
 
 #[derive(Default, Deserialize)]
