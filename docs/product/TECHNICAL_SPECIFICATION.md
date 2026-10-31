@@ -14,8 +14,9 @@
 The owner authorized revisions for identity/presentation, after-send waiting, shared history,
 incoming attachments, agent guidance and their configuration, security and acceptance contracts.
 Other requirements remain in force. These are accepted requirements, **not proof of implemented
-or validated features**. Native headers, `telegram_wait`, the shared journal/history tool,
-attachment downloads and `telegram_guidance` await their implementation and validation commits.
+or validated features**. Native headers have an implementation pending validation;
+`telegram_wait`, the shared journal/history tool, attachment downloads and `telegram_guidance`
+await their implementation and validation commits.
 The unchecked acceptance criteria below describe obligations, not observed test results.
 See [architecture](../ARCHITECTURE.md) for implementation status and
 [testing](../TESTING.md) for separately recorded validation evidence. Historical measurements

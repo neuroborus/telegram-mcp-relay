@@ -142,8 +142,29 @@ def chat(value):
     return integer(value, -(1 << 63), (1 << 63) - 1)
 
 
+def entities(value, text):
+    """Only the relay's bounded native header spans, on UTF-16 character boundaries."""
+    require(type(value) is list and len(value) <= 2)
+    boundaries = {0}
+    units = 0
+    try:
+        for character in text:
+            units += len(character.encode("utf-16-le")) // 2
+            boundaries.add(units)
+    except UnicodeError:
+        raise MockError("invalid synthetic text") from None
+    end = 0
+    for entity in value:
+        require(type(entity) is dict and set(entity) == {"type", "offset", "length"})
+        require(entity["type"] in ("bold", "italic"))
+        offset = integer(entity["offset"], end, units)
+        length = integer(entity["length"], 1, units)
+        end = offset + length
+        require(offset in boundaries and end in boundaries)
+
+
 def document(content_type, body, stopped, *, clock=time.monotonic):
-    # The probe's reqwest form has a known length and these three ordered parts.
+    # The probe's reqwest form has a known length and these four ordered parts.
     # Unsupported chunked/extra-part forms fail rather than entering a generic MIME stack.
     match = re.fullmatch(
         r'multipart/form-data; boundary=(?:"([A-Za-z0-9_-]{1,70})"|([A-Za-z0-9_-]{1,70}))',
@@ -154,13 +175,14 @@ def document(content_type, body, stopped, *, clock=time.monotonic):
     stream = Stream(body.read, stopped, seconds=UPLOAD_SECONDS, clock=clock)
     require(stream.exact(len(boundary) + 4) == b"--" + boundary + b"\r\n")
     values = {}
-    for name in ("chat_id", "caption", "document"):
+    for name in ("chat_id", "caption", "caption_entities", "document"):
         part = headers(stream.until(b"\r\n\r\n", PART_HEADER_BYTES))
         disposition = part.get("content-disposition", "")
         expected = 'form-data; name="' + name + '"'
         if name != "document":
             require(disposition == expected and set(part) == {"content-disposition"})
-            values[name] = stream.until(b"\r\n--" + boundary + b"\r\n", 4096)
+            limit = 256 if name == "caption_entities" else 4096
+            values[name] = stream.until(b"\r\n--" + boundary + b"\r\n", limit)
         else:
             require(re.fullmatch(re.escape(expected) + r'; filename="(?:[^"\\\r\n]|\\.){1,255}"',
                                  disposition) is not None)
@@ -171,7 +193,8 @@ def document(content_type, body, stopped, *, clock=time.monotonic):
         chat_id = chat(int(chat_text))
         caption = values["caption"].decode("utf-8")
         require(len(caption) <= 1000 and len(caption.encode("utf-16-le")) // 2 <= 1024)
-    except (ValueError, UnicodeError):
+        entities(json.loads(values["caption_entities"]), caption)
+    except (ValueError, UnicodeError, RecursionError):
         raise MockError("invalid synthetic document metadata") from None
     tail = b"\r\n--" + boundary + b"--\r\n"
     declared_size = body.remaining + len(stream.buffer) - len(tail)
@@ -248,7 +271,9 @@ def dispatch(method, content_type, body, state, stopped, *, clock=time.monotonic
         require(payload.get("action") == "typing")
         return True
     text = payload.get("text")
+    require(set(payload) == {"chat_id", "text", "entities"})
     require(type(text) is str and 0 < len(text) <= 1000)
+    entities(payload["entities"], text)
     return state.message(chat_id)
 
 

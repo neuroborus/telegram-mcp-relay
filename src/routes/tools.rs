@@ -10,6 +10,30 @@ struct Recorded {
     body: Vec<u8>,
 }
 
+impl Recorded {
+    fn part(&self, name: &str) -> &[u8] {
+        let boundary = self
+            .content_type
+            .strip_prefix("multipart/form-data; boundary=")
+            .unwrap();
+        let marker = format!("name=\"{name}\"");
+        let start = self
+            .body
+            .windows(marker.len())
+            .position(|b| b == marker.as_bytes())
+            .unwrap();
+        let part = &self.body[start..];
+        let header_end = part.windows(4).position(|b| b == b"\r\n\r\n").unwrap();
+        let body = &part[header_end + 4..];
+        let delimiter = format!("\r\n--{boundary}");
+        let end = body
+            .windows(delimiter.len())
+            .position(|b| b == delimiter.as_bytes())
+            .unwrap();
+        &body[..end]
+    }
+}
+
 pub(super) struct Telegram {
     client: TelegramClient,
     requests: Arc<Mutex<Vec<Recorded>>>,
@@ -218,12 +242,16 @@ async fn text_and_documents_return_committed_composite_routes_for_same_title_ses
         .register(json!({"external_session_id":"a","title":"界"}))
         .await;
     let second = http
-        .register(json!({"external_session_id":"b","title":"界"}))
+        .register(
+            json!({"external_session_id":"b","title":"界","directory_label":" \n 📁\u{202e} "}),
+        )
         .await;
-    let text = "a".repeat(996);
+    assert_eq!(second["directory_label"], "📁");
+    assert_eq!(first["directory_label"], Value::Null);
+    let text = "a".repeat(998);
     let path = fixture.directory.join("report.bin");
     fs::write(&path, b"synthetic report\0\xff").unwrap();
-    let caption = "😀".repeat(510);
+    let caption = "😀".repeat(509) + "a";
     for (tool, args, id) in [
         (
             "telegram_send",
@@ -257,10 +285,14 @@ async fn text_and_documents_return_committed_composite_routes_for_same_title_ses
         assert_eq!(requests.len(), 3);
         assert_eq!(requests[0].method, "/botSynthetic/sendMessage");
         let body: Value = serde_json::from_slice(&requests[0].body).unwrap();
-        assert_eq!(body, json!({"chat_id":-101,"text":format!("[界]\n{text}")}));
-        for (request, caption) in requests[1..]
+        assert_eq!(
+            body,
+            json!({"chat_id":-101,"text":format!("界\n{text}"),"entities":[{"type":"bold","offset":0,"length":1}]})
+        );
+        for (index, (request, caption)) in requests[1..]
             .iter()
-            .zip([format!("[界]\n{caption}"), "[Renamed]".into()])
+            .zip([format!("界\n📁\n{caption}"), "Renamed".into()])
+            .enumerate()
         {
             assert_eq!(request.method, "/botSynthetic/sendDocument");
             assert!(
@@ -268,11 +300,14 @@ async fn text_and_documents_return_committed_composite_routes_for_same_title_ses
                     .content_type
                     .starts_with("multipart/form-data; boundary=")
             );
-            assert!(
-                request
-                    .body
-                    .windows(caption.len())
-                    .any(|b| b == caption.as_bytes())
+            assert_eq!(request.part("caption"), caption.as_bytes());
+            assert_eq!(
+                serde_json::from_slice::<Value>(request.part("caption_entities")).unwrap(),
+                if index == 0 {
+                    json!([{"type":"bold","offset":0,"length":1}, {"type":"italic","offset":2,"length":2}])
+                } else {
+                    json!([{"type":"bold","offset":0,"length":7}])
+                }
             );
             let bytes = b"synthetic report\0\xff";
             assert!(request.body.windows(bytes.len()).any(|b| b == bytes));
@@ -336,18 +371,23 @@ async fn validation_and_protocol_failures_have_no_telegram_route_or_activity_eff
             "SESSION_IDENTITY_CONFLICT",
         ),
         (
+            "telegram_register",
+            json!({"session_key":key,"title":"private title","directory_label":"x".repeat(101)}),
+            "REQUEST_INVALID",
+        ),
+        (
             "telegram_send",
-            json!({"session_key":key,"text":"a".repeat(997)}),
+            json!({"session_key":key,"text":"a".repeat(999)}),
             "TEXT_TOO_LONG",
         ),
         (
             "telegram_send_file",
-            json!({"session_key":key,"path":path,"caption":"a".repeat(997)}),
+            json!({"session_key":key,"path":path,"caption":"a".repeat(999)}),
             "TEXT_TOO_LONG",
         ),
         (
             "telegram_send_file",
-            json!({"session_key":key,"path":path,"caption":"😀".repeat(510)+"a"}),
+            json!({"session_key":key,"path":path,"caption":"😀".repeat(511)+"a"}),
             "TEXT_TOO_LONG",
         ),
         (
@@ -383,7 +423,7 @@ async fn validation_and_protocol_failures_have_no_telegram_route_or_activity_eff
             );
             assert_eq!(
                 details["actual_characters"],
-                if native_caption { 515 } else { 1_001 }
+                if native_caption { 514 } else { 1_001 }
             );
             assert_eq!(
                 details["actual_utf16_units"],

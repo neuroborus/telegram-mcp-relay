@@ -154,7 +154,7 @@ impl Fixture {
         database
             .lock()
             .unwrap()
-            .register_session(None, None, " 界\n ", 50_000)
+            .register_session(None, None, " 界\n ", None, 50_000)
             .unwrap()
     }
 
@@ -346,7 +346,7 @@ async fn validates_before_effects_and_persists_exact_formatted_boundaries_across
             .unwrap_err(),
         AppError::SessionNotFound
     );
-    for body in ["a".repeat(997), "😀".repeat(997)] {
+    for body in ["a".repeat(999), "😀".repeat(999)] {
         let error = service
             .send_text(&session.session_key, &body)
             .await
@@ -375,8 +375,8 @@ async fn validates_before_effects_and_persists_exact_formatted_boundaries_across
             .unwrap()
             .is_none()
     );
-    // The normalized header consumes four scalars; astral text is legal below native bounds.
-    for (id, body) in [(7, "a".repeat(996)), (8, "😀".repeat(996))] {
+    // The normalized header consumes two scalars; astral text is legal below native bounds.
+    for (id, body) in [(7, "a".repeat(998)), (8, "😀".repeat(998))] {
         let result = service
             .send_text(&session.session_key, &body)
             .await
@@ -386,7 +386,7 @@ async fn validates_before_effects_and_persists_exact_formatted_boundaries_across
         assert_eq!(requests.last().unwrap().method, "/botSynthetic/sendMessage");
         assert_eq!(
             serde_json::from_slice::<Value>(&requests.last().unwrap().body).unwrap(),
-            json!({"chat_id":-101,"text":format!("[界]\n{body}")})
+            json!({"chat_id":-101,"text":format!("界\n{body}"),"entities":[{"type":"bold","offset":0,"length":1}]})
         );
     }
     assert_eq!(mock.count(), 2);

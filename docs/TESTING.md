@@ -1,5 +1,17 @@
 # Testing and Required Checks
 
+## Native header and service-prefix regressions
+
+The current change adds source coverage for native bold/italic UTF-16 spans, literal bodies,
+optional safe 100-scalar directory metadata, complete 1,000-scalar/1,024-unit caption limits,
+metadata admission and v1–v6 migration/restart continuity. Domain tests own Unicode/entity
+boundaries; registry/storage tests own persistence; MCP and outbound/document fixtures inspect
+actual JSON/multipart entity fields. Notice fixtures retain durable grace/processing arbitration,
+exact `🔧 ` framing, known-ID suppression and lost-ID recognition of both new and legacy notices.
+The bounded Python mock now accepts the ordered `caption_entities` part and validates native
+span boundaries without buffering documents. These added/updated cases await FINALIZE;
+source inspection or no-run compilation does not attest their execution or live rendering.
+
 ## Repository gates
 
 Run `just check-repo` (or `python3 tools/check_repository.py`) after documentation, skills,

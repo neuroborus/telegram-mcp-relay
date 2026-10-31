@@ -50,7 +50,7 @@ impl Fixture {
 
     fn session(&self, db: &mut Database, message: i64) -> String {
         let key = db
-            .register_session(None, None, "Same", 0)
+            .register_session(None, None, "Same", None, 0)
             .unwrap()
             .session_key;
         let reservation = db.reserve_route(&key).unwrap();
@@ -255,7 +255,7 @@ fn admitted_sends_pin_only_their_session_until_success_or_release() {
     let pinned = fixture.session(&mut db, 5);
     let released = fixture.session(&mut db, 6);
     let unrelated = db
-        .register_session(None, None, "Other", 0)
+        .register_session(None, None, "Other", None, 0)
         .unwrap()
         .session_key;
     let success = db.reserve_route(&pinned).unwrap();
@@ -281,7 +281,7 @@ fn protected_sessions_do_not_starve_later_candidates_and_interrupted_sweeps_rest
         fixture.session(&mut db, id);
     }
     let orphan = db
-        .register_session(None, None, "Orphan", DAY)
+        .register_session(None, None, "Orphan", None, DAY)
         .unwrap()
         .session_key;
     let mut sweep = CleanupSweep::new(2 * DAY).unwrap();
@@ -338,7 +338,7 @@ fn expiry_recovers_shared_capacity_without_early_eviction() {
     assert_eq!(clean(&mut db, 3 * DAY), 4); // Reply, attempt, disposition and session.
     assert_eq!(db.update_cursor().unwrap(), Some(12));
     let key = db
-        .register_session(None, None, "Same", 3 * DAY)
+        .register_session(None, None, "Same", None, 3 * DAY)
         .unwrap()
         .session_key;
     fixture.receive(&mut db, 13, 6, 3 * DAY).unwrap(); // Unknown route; disposition admission recovers.

@@ -67,8 +67,11 @@ or in-place writes. Files with all read bits cleared are rejected even under ele
 Only sanitized, at-most-128-byte ASCII basenames are prepared for upload; errors omit paths.
 Document streaming enforces the opening size during mutation; see
 [document delivery](ARCHITECTURE.md#document-delivery).
-Final outbound text/captions always have the fixed 1,000-scalar
-policy. Positive request/task/subscription/inbox/payload/metadata budgets reject excessive values
+Final outbound text/captions always have the fixed 1,000-scalar policy, counting native headers,
+the optional directory, separators, service prefix and body; captions also fit 1,024 UTF-16 units.
+Registration's opt-in `directory_label` is normalized display metadata, omitted/cleared when
+absent or blank and rejected above 100 normalized scalars. Its UTF-8 bytes count toward
+`limits.metadata_bytes`; it never authorizes file access. Positive request/task/subscription/inbox/payload/metadata budgets reject excessive values
 and inconsistent capacities. SQLite's physical budget must exceed payload plus metadata budgets;
 later components enforce actual usage without early eviction. The library MCP endpoint enforces
 `limits.request_bytes` and `limits.concurrent_requests`, expected Host/Origin and optional bearer

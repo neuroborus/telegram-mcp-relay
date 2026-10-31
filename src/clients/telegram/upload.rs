@@ -12,6 +12,7 @@ use tokio::io::AsyncReadExt;
 use super::{TelegramClient, send_error, validate_sent};
 use crate::{
     clients::telegram::SentMessage,
+    domain::outbound::FormattedMessage,
     error::{AppError, TelegramError},
 };
 
@@ -24,17 +25,20 @@ impl TelegramClient {
     pub(crate) async fn send_document(
         &self,
         chat_id: i64,
-        caption: String,
+        caption: FormattedMessage,
         file: File,
         filename: String,
         size_bytes: u64,
     ) -> Result<SentMessage, AppError> {
+        let entities = serde_json::to_string(caption.entities())
+            .map_err(|_| AppError::InvalidRequest("caption entities"))?;
         let part =
             Part::stream_with_length(Body::wrap_stream(file_chunks(file, size_bytes)), size_bytes)
                 .file_name(filename);
         let form = Form::new()
             .text("chat_id", chat_id.to_string())
-            .text("caption", caption)
+            .text("caption", caption.as_str().to_owned())
+            .text("caption_entities", entities)
             .part("document", part);
         let request = self
             .http

@@ -8,7 +8,7 @@ use tokio_util::task::TaskTracker;
 use crate::{
     clients::telegram::{SentMessage, TelegramClient},
     config::Config,
-    domain::outbound::{format_caption, format_text},
+    domain::outbound::{FormattedMessage, format_caption, format_text},
     error::{AppError, TelegramError},
     repositories::{Database, RouteKind, RouteReservation},
 };
@@ -16,8 +16,8 @@ use crate::{
 use super::{files::ValidatedFile, typing::TypingService, unix_millis};
 
 enum Delivery {
-    Text(String),
-    Document(String, ValidatedFile),
+    Text(FormattedMessage),
+    Document(FormattedMessage, ValidatedFile),
 }
 
 /// Clones share send admission and the application's single database/client.
@@ -124,9 +124,16 @@ impl OutboundService {
             let mut database = self.database.lock().map_err(|_| AppError::StorageFailure)?;
             let session = database.session(session_key)?;
             let delivery = if let Some(file) = file {
-                Delivery::Document(format_caption(&session.title, body)?, file)
+                Delivery::Document(
+                    format_caption(&session.title, session.directory_label.as_ref(), body)?,
+                    file,
+                )
             } else {
-                Delivery::Text(format_text(&session.title, body)?)
+                Delivery::Text(format_text(
+                    &session.title,
+                    session.directory_label.as_ref(),
+                    body,
+                )?)
             };
             let permit = Arc::clone(&self.admission)
                 .try_acquire_owned()

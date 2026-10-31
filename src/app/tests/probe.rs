@@ -40,7 +40,7 @@ async fn probe_runs_shared_tools_and_drains_an_accepted_send() {
             .await
         });
         let send = mock.next("sendMessage").await;
-        assert_eq!(send.payload["text"], "[Resource probe]\nSynthetic");
+        assert_eq!(send.payload["text"], "Resource probe\nSynthetic");
         caller.abort();
         assert!(caller.await.unwrap_err().is_cancelled());
         stop.cancel();

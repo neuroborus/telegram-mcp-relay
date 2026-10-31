@@ -40,7 +40,7 @@ mod maintenance;
 pub use maintenance::DiskUsage;
 pub(crate) use maintenance::RECLAIM_PAGES;
 
-const SCHEMA_VERSION: i64 = 6;
+const SCHEMA_VERSION: i64 = 7;
 const APPLICATION_ID: i64 = 0x544d4352; // TMCR
 
 /// One private connection; services will expose narrowly scoped transactions, not raw SQL.
@@ -171,6 +171,9 @@ fn initialize(connection: &mut Connection) -> Result<(), AppError> {
     }
     if version < 6 {
         transaction.execute_batch(include_str!("repositories/retention.sql"))?;
+    }
+    if version < 7 {
+        transaction.execute_batch(include_str!("repositories/presentation.sql"))?;
     }
     transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     let vacuum: i64 = transaction.pragma_query_value(None, "auto_vacuum", |r| r.get(0))?;
@@ -313,7 +316,7 @@ mod tests {
         database
             .connection
             .execute(
-                "INSERT INTO sessions VALUES('a', NULL, 'Synthetic', 100, 100, 200)",
+                "INSERT INTO sessions VALUES('a', NULL, 'Synthetic', 100, 100, 200, NULL)",
                 [],
             )
             .unwrap();
@@ -346,7 +349,7 @@ mod tests {
         };
         let mut database = Database::open(&settings, &Limits::default()).unwrap();
         let key = database
-            .register_session(None, None, "Synthetic", 0)
+            .register_session(None, None, "Synthetic", None, 0)
             .unwrap()
             .session_key;
         let before = database.disk_usage().unwrap();
@@ -420,7 +423,7 @@ mod tests {
         };
         let mut database = Database::open(&settings, &Limits::default()).unwrap();
         let key = database
-            .register_session(None, None, "Synthetic", 0)
+            .register_session(None, None, "Synthetic", None, 0)
             .unwrap()
             .session_key;
         // Create free overflow pages while retaining the real session row and indexes.

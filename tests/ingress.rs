@@ -52,11 +52,11 @@ impl Fixture {
 
     fn seed(&self, database: &mut Database) -> (String, String) {
         let a = database
-            .register_session(None, None, "Same", 100)
+            .register_session(None, None, "Same", None, 100)
             .unwrap()
             .session_key;
         let b = database
-            .register_session(None, None, "Same", 100)
+            .register_session(None, None, "Same", None, 100)
             .unwrap()
             .session_key;
         for (key, chat, kind) in [(&a, -101, RouteKind::Text), (&b, -102, RouteKind::Document)] {
@@ -440,7 +440,7 @@ fn item_payload_and_metadata_pressure_preserve_replies_and_outstanding_send_admi
                 Err(AppError::StorageCapacity)
             ));
             assert_eq!(
-                database.register_session(None, Some(&a), "Larger title", 2_000),
+                database.register_session(None, Some(&a), "Larger title", None, 2_000),
                 Err(AppError::StorageCapacity)
             );
         }

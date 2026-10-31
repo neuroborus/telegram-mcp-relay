@@ -219,8 +219,9 @@ regressions cover these ownership rules; their execution belongs to the next FIN
 
 `McpHandler::new` shares one SQLite handle, outbound service and pinned file-root opener
 across per-request SDK handlers. `telegram_register` accepts a required title and optional
-`external_session_id`/saved `session_key`, using the existing transactional registration path.
-It returns `session_key`, normalized `title` and stable readable `inbox_uri`.
+`external_session_id`/saved `session_key` and opt-in `directory_label`, using the transactional
+registration path. It returns `session_key`, normalized `title`, nullable `directory_label`
+and stable readable `inbox_uri`. Omitted or blank directory labels clear future display context.
 Missing both identities creates a fresh session. Supplying
 both requires an existing match. Renaming affects future sends only, and equal titles never
 merge identities. Registration does not change resource listings or processing ownership.
@@ -345,21 +346,33 @@ LLM turn. Synthetic ask/event tests are included in the recorded C6 outcome in
 
 ## Outbound formatting
 
-`SessionTitle` collapses Unicode whitespace to one ASCII space, trims edges, removes other
-Unicode control scalars and truncates at 50 extended grapheme clusters. Blank titles become
-`Agent Session`. Emoji joiners and combining sequences remain intact. Titles are display
-labels; their debug representation is redacted.
+`SessionTitle` collapses Unicode whitespace to one ASCII space, trims edges, strips controls
+and unsafe invisible/directional formatting controls, and truncates at 50 extended grapheme
+clusters. Blank titles become `Agent Session`; emoji joiners and combining sequences remain
+intact. `DirectoryLabel` uses the same safe single-line normalization without truncation:
+more than 100 normalized Unicode scalars returns `REQUEST_INVALID`, while absent/blank values
+are omitted. Both are redacted display labels. Directory context is opt-in metadata, never
+file authorization, a filesystem instruction, host identity or routing input. Avoid personal
+absolute paths; the relay does not infer a working directory or a host conversation title.
 
-`format_text` handles messages/questions, `format_caption` handles documents and
-`format_notice` handles notices with an optional known-session title. All share the plain
-`[Title]` header with one newline before a nonempty body; an empty description leaves only
-the header. Bodies remain verbatim, with no markup parsing, splitting or truncation. An
-unprefixed empty notice is rejected with `TEXT_EMPTY` to respect Telegram's nonempty text bound.
+`format_text`, `format_caption` and `format_notice` return validated literal text plus native
+bold title and optional italic directory spans. The title is the first line, the directory
+is the optional second line, and a nonempty body follows one newline. An empty caption retains
+just these headers. Every service notice begins with exactly `🔧 ` before any title or body;
+unknown-session notices have no title/directory. Entity offsets/lengths use UTF-16 code units,
+including that prefix. Text uses `entities`; multipart documents use `caption_entities`.
+No `parse_mode`, Markdown/HTML parser, body splitting or truncation is introduced. Callers
+supply only the literal body and never reproduce server-owned headers.
 
-Before allocating the final output, these functions count the normalized title, brackets,
-separator and full body. They enforce the fixed 1,000 Unicode scalar cap and conservatively
-check native UTF-16 bounds of 4,096 for text/notices and 1,024 for captions. A very large
-single title grapheme can therefore cause rejection even when the body is empty.
+Before allocating final output or admitting a send, these functions count every visible
+scalar and UTF-16 unit: prefix, title, directory, separators and full body. They enforce the
+fixed 1,000-scalar cap plus conservative native bounds of 4,096 UTF-16 units for text/notices
+and 1,024 for captions. A very large single title grapheme can cause rejection even with an
+empty body. Native entity metadata adds no visible characters. These contracts follow the
+[Telegram entity](https://core.telegram.org/bots/api#messageentity),
+[text](https://core.telegram.org/bots/api#sendmessage) and
+[document](https://core.telegram.org/bots/api#senddocument) interfaces; new behavior still
+requires FINALIZE and later HOST acceptance, with no live Unicode/rendering claim here.
 
 `TEXT_TOO_LONG` carries serializable details: `limit=1000`, `actual_characters`,
 `native_limit_utf16`, `actual_utf16_units` and file-delivery `guidance`. Native caption
@@ -389,6 +402,8 @@ existing claims and first-start timestamps survive the transactional migration.
 Version 5 adds an unroutable-attempt flag and indexes for receipt-ordered notice eligibility
 and composite trigger deduplication, preserving existing attempts and receipt times.
 Version 6 extends the session expiry index with its key for bounded cleanup pagination.
+Version 7 adds nullable bounded session directory display metadata; existing sessions default
+to omission, preserving identities, routes, claims and notices.
 
 Initialization enables incremental auto-vacuum before the schema transaction. DDL, initial
 cursor, application ID and version commit together under an immediate transaction; errors
@@ -490,7 +505,8 @@ or a saved handle and rename future messages. New handles contain 32 OS-random b
 as 64 hex characters. Identical titles never share identity; absent external ID and handle
 means a new session. An unknown supplied handle fails without creating a replacement. When
 both identifiers are supplied they must already match. Registration does not touch replies
-or processing ownership. Results include the effective title and a stable inbox URI helper.
+or processing ownership. Results include effective title/directory display metadata and a
+stable inbox URI helper.
 
 Registration and successful route bookkeeping refresh session activity/expiry monotonically.
 Read-only session and composite chat/message route lookups do not refresh activity. Text and
@@ -503,7 +519,7 @@ resumable while its valid children await later cleanup/recovery.
 its owned reservation crosses awaits without a database guard and releases capacity on drop.
 All runtime admissions must share one `Database`. Registration/rename includes outstanding
 reservations in its budget. Retained expired rows still count until cleanup; pressure never
-evicts data. Logical session/route charges are 128 bytes per row plus UTF-8 identity/title
+evicts data. Logical session/route charges are 128 bytes per row plus UTF-8 identity/title/directory
 bytes (route rows include the session key). SQLite pages have their separate physical cap.
 Reservations live only in RAM and do not guarantee post-send disk success: the sending service
 reports failed bookkeeping distinctly from an unknown send outcome. Physical maintenance
@@ -567,14 +583,15 @@ is claimed. Decimal MB is the conservative interpretation used by configuration 
 ## Document delivery
 
 `OutboundService::send_file` consumes a `ValidatedFile` from the confined opener and formats
-the complete plain caption with the current session title before admission. Both the final
-1,000-scalar and 1,024-UTF-16-unit limits apply; an empty description leaves only `[Title]`.
+the complete literal caption with native title/directory entities before admission. Both the
+final 1,000-scalar and 1,024-UTF-16-unit limits apply; an empty description leaves only the headers.
 Text and documents share send admission, metadata reservations, detached task ownership and
 the successful-send transaction. A confirmed document commits a composite `Document` route
 and activity atomically; no caption, file contents or source path is stored.
 
-The private client uploader sends multipart `chat_id`, `caption` and `document` fields from
-the original descriptor with its sanitized filename and opening size. It neither reopens a
+The private client uploader sends multipart `chat_id`, `caption`, serialized `caption_entities`
+and `document` fields from the original descriptor with its sanitized filename and opening size.
+It neither reopens a
 path nor copies a file. Lazy reads and Tokio's file buffer are each capped at 64 KiB; total
 reads stop at the opening size even after growth. Early EOF fails the body instead of
 finishing a partial upload. Pathname replacement leaves the original inode selected; in-place
@@ -602,7 +619,7 @@ startup shares that client across polling, delivery, typing and notices. The del
 owns title formatting,
 destination authorization, capacity reservations and durable routes for text/document sends.
 
-The adapter provides `getUpdates`, `getWebhookInfo`, plain `sendMessage`, streamed
+The adapter provides `getUpdates`, `getWebhookInfo`, native-entity `sendMessage`, streamed
 `sendDocument` and typing `sendChatAction`. Updates retain
 only message/reply IDs, sender/chat, text/caption and document/photo metadata; quoted messages
 are not recursively decoded. DTO and client Debug output is redacted. Outbound text passes
@@ -696,9 +713,10 @@ reply/session foreign key. Cleanup remains later work.
 One global one-second sweep admits at most one eligible attempt, with one bounded HTTP send
 at a time and no per-reply tasks/timers. Startup recovers eligibility from SQLite. The current
 chat allowlist and complete final Unicode limits are checked before sending. Known sessions
-use their normalized title and factual unconfirmed-processing wording; unknown routes use
-the concise instruction to Reply to a newer agent message. Invalid final lengths consume the
-attempt without sending, splitting or truncating. Disabled categories remain untouched.
+use native title/directory entities and factual unconfirmed-processing wording; unknown routes use
+the concise instruction to Reply to a newer agent message. All notices begin with `🔧 `.
+Invalid final lengths consume the attempt without sending, splitting or truncating. Disabled
+categories remain untouched.
 
 Success records only the composite notice message ID on the existing attempt, never an
 ordinary route or session activity. Rejection, ambiguous delivery, cancellation and failed
@@ -708,7 +726,8 @@ cancels the current request and releases admission. Daemon supervision owns this
 
 Ingress silently commits Replies to retained composite notice IDs as ignored. If the success
 ID was lost, bot-authored quoted text matching the reserved service wording (including an old
-normalized title) also suppresses a loop across restart or attempt cleanup. Ordinary live
+normalized title and legacy bracketed/unprefixed notices) also suppresses a loop across restart
+or attempt cleanup. The new prefixed title/directory form is recognized too. Ordinary live
 routes take precedence, and the wording fallback waits for already-pending ordinary sends to
 settle. The fallback deliberately treats matching bot text without a live route as service
 text; human-authored matches and other unknown bot messages remain unroutable. The saved

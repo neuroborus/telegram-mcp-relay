@@ -53,7 +53,7 @@ fn same_titles_interleaved_text_and_documents_survive_rename_and_restart() {
     let mut keys = Vec::new();
     for external in ["thread-a", "thread-b", "thread-c"] {
         let session = database
-            .register_session(Some(external), None, " Same\n title ", 100)
+            .register_session(Some(external), None, " Same\n title ", None, 100)
             .unwrap();
         assert_eq!(session.title.as_str(), "Same title");
         assert_eq!(session.session_key.len(), 64);
@@ -72,15 +72,22 @@ fn same_titles_interleaved_text_and_documents_survive_rename_and_restart() {
             .persist_route(reservation, chat, message, kind, 150, 200)
             .unwrap();
     }
-    let old_text = format_text(&database.session(&keys[0]).unwrap().title, "Synthetic").unwrap();
+    let old_text = format_text(
+        &database.session(&keys[0]).unwrap().title,
+        None,
+        "Synthetic",
+    )
+    .unwrap();
     let renamed = database
-        .register_session(Some("thread-a"), None, " New\t title ", 300)
+        .register_session(Some("thread-a"), None, " New\t title ", None, 300)
         .unwrap();
     assert_eq!(renamed.session_key, keys[0]);
-    assert_eq!(old_text, "[Same title]\nSynthetic");
+    assert_eq!(old_text.as_str(), "Same title\nSynthetic");
     assert_eq!(
-        format_text(&renamed.title, "Synthetic").unwrap(),
-        "[New title]\nSynthetic"
+        format_text(&renamed.title, None, "Synthetic")
+            .unwrap()
+            .as_str(),
+        "New title\nSynthetic"
     );
     assert_eq!(
         renamed.inbox_uri(),
@@ -103,7 +110,7 @@ fn same_titles_interleaved_text_and_documents_survive_rename_and_restart() {
     assert_eq!(database.route(-102, 8, 400).unwrap(), None);
     assert_eq!(
         database
-            .register_session(Some("thread-a"), Some(&keys[0]), "New title", 400)
+            .register_session(Some("thread-a"), Some(&keys[0]), "New title", None, 400)
             .unwrap()
             .created_at,
         100
@@ -115,25 +122,33 @@ fn saved_handle_resumes_anonymous_identity_and_conflicts_never_create_sessions()
     let fixture = Fixture::new();
     let limits = Limits::default();
     let mut database = fixture.open(&limits);
-    let anonymous = database.register_session(None, None, "", 100).unwrap();
+    let anonymous = database
+        .register_session(None, None, "", None, 100)
+        .unwrap();
     let another = database
-        .register_session(Some("stable"), None, "", 100)
+        .register_session(Some("stable"), None, "", None, 100)
         .unwrap();
     assert_ne!(anonymous.session_key, another.session_key);
     drop(database);
     let mut database = fixture.open(&limits);
     let resumed = database
-        .register_session(None, Some(&anonymous.session_key), "Renamed", 200)
+        .register_session(None, Some(&anonymous.session_key), "Renamed", None, 200)
         .unwrap();
     assert_eq!(resumed.session_key, anonymous.session_key);
     assert_eq!(resumed.external_session_id, None);
     assert_eq!(resumed.created_at, 100);
     assert_eq!(
-        database.register_session(Some("stable"), Some(&anonymous.session_key), "wrong", 300),
+        database.register_session(
+            Some("stable"),
+            Some(&anonymous.session_key),
+            "wrong",
+            None,
+            300
+        ),
         Err(AppError::SessionIdentityConflict)
     );
     assert_eq!(
-        database.register_session(Some("stable"), Some("unknown"), "wrong", 300),
+        database.register_session(Some("stable"), Some("unknown"), "wrong", None, 300),
         Err(AppError::SessionNotFound)
     );
     assert_eq!(database.session(&anonymous.session_key).unwrap(), resumed);
@@ -145,13 +160,72 @@ fn saved_handle_resumes_anonymous_identity_and_conflicts_never_create_sessions()
 }
 
 #[test]
+fn directory_display_updates_are_durable_bounded_and_do_not_change_old_routes() {
+    let fixture = Fixture::new();
+    // Exactly a session plus one route; optional directory bytes share metadata admission.
+    let limits = Limits {
+        metadata_bytes: 128 + 64 + 4 + 1 + 128 + 64 + 4,
+        ..Limits::default()
+    };
+    let mut database = fixture.open(&limits);
+    let session = database
+        .register_session(Some("same"), None, "T", Some(" old\n "), 100)
+        .unwrap();
+    assert_eq!(session.directory_label.as_ref().unwrap().as_str(), "old");
+    let key = &session.session_key;
+    let old = format_text(&session.title, session.directory_label.as_ref(), "body").unwrap();
+    let reservation = database.reserve_route(key).unwrap();
+    assert_eq!(
+        database.register_session(Some("same"), None, "T", Some("📁a"), 200),
+        Err(AppError::StorageCapacity)
+    );
+    assert_eq!(database.session(key).unwrap(), session);
+    database
+        .persist_route(reservation, -101, 7, RouteKind::Document, 100, 100)
+        .unwrap();
+    let renamed = database
+        .register_session(Some("same"), None, "T", Some("📁"), 200)
+        .unwrap();
+    assert_eq!(renamed.session_key, *key);
+    assert_eq!(old.as_str(), "T\nold\nbody");
+    assert_eq!(
+        format_text(&renamed.title, renamed.directory_label.as_ref(), "body")
+            .unwrap()
+            .as_str(),
+        "T\n📁\nbody"
+    );
+    drop(database);
+    let mut database = fixture.open(&limits);
+    assert_eq!(database.session(key).unwrap(), renamed);
+    assert_eq!(
+        database.route(-101, 7, 300).unwrap().unwrap().session_key,
+        *key
+    );
+    assert_eq!(
+        database.register_session(Some("same"), None, "changed", Some(&"x".repeat(101)), 400),
+        Err(AppError::InvalidRequest("directory_label"))
+    );
+    assert_eq!(database.session(key).unwrap(), renamed);
+    for directory in [None, Some(" \t\n\u{202e}")] {
+        assert_eq!(
+            database
+                .register_session(Some("same"), None, "T", directory, 500)
+                .unwrap()
+                .directory_label,
+            None
+        );
+    }
+    assert!(!format!("{renamed:?}").contains("📁"));
+}
+
+#[test]
 fn session_activity_and_route_expiry_have_independent_anchors() {
     let mut fixture = Fixture::new();
     fixture.0.session_ttl_days = 1;
     fixture.0.route_ttl_days = 2;
     let mut database = fixture.open(&Limits::default());
     let key = database
-        .register_session(None, None, "Synthetic", 100)
+        .register_session(None, None, "Synthetic", None, 100)
         .unwrap()
         .session_key;
     let reservation = database.reserve_route(&key).unwrap();
@@ -166,7 +240,7 @@ fn session_activity_and_route_expiry_have_independent_anchors() {
     // A read/expired session does not expire its still-valid child route or refresh activity.
     assert_eq!(database.session(&key).unwrap(), sent);
     let resumed = database
-        .register_session(None, Some(&key), "Renamed", 3 * DAY)
+        .register_session(None, Some(&key), "Renamed", None, 3 * DAY)
         .unwrap();
     assert_eq!(resumed.expires_at, 4 * DAY);
     assert!(
@@ -178,7 +252,7 @@ fn session_activity_and_route_expiry_have_independent_anchors() {
     assert_eq!(database.route(-101, 7, route.expires_at).unwrap(), None);
     assert_eq!(
         database
-            .register_session(None, Some(&key), "Renamed", 200)
+            .register_session(None, Some(&key), "Renamed", None, 200)
             .unwrap(),
         resumed
     );
@@ -194,17 +268,17 @@ fn count_limits_include_retained_rows_and_simultaneous_sends() {
     };
     let mut database = fixture.open(&limits);
     let session = database
-        .register_session(Some("stable"), None, "Synthetic", 100)
+        .register_session(Some("stable"), None, "Synthetic", None, 100)
         .unwrap();
     let key = &session.session_key;
     assert_eq!(
-        database.register_session(None, None, "Other", 40 * DAY),
+        database.register_session(None, None, "Other", None, 40 * DAY),
         Err(AppError::StorageCapacity)
     );
     assert_eq!(database.session(key).unwrap(), session);
     assert_eq!(
         database
-            .register_session(Some("stable"), None, "Synthetic", 100)
+            .register_session(Some("stable"), None, "Synthetic", None, 100)
             .unwrap(),
         session
     );
@@ -240,7 +314,7 @@ fn metadata_budget_counts_utf8_and_reservations_and_rejects_rename_atomically() 
     };
     let mut database = fixture.open(&limits);
     let session = database
-        .register_session(Some("外部"), None, "界", 100)
+        .register_session(Some("外部"), None, "界", None, 100)
         .unwrap();
     let key = &session.session_key;
     // A schema-valid legacy title must be charged by stored bytes before normalization.
@@ -250,13 +324,13 @@ fn metadata_budget_counts_utf8_and_reservations_and_rejects_rename_atomically() 
         .unwrap();
     assert_eq!(
         database
-            .register_session(Some("外部"), None, "界", 100)
+            .register_session(Some("外部"), None, "界", None, 100)
             .unwrap(),
         session
     );
     let reservation = database.reserve_route(key).unwrap();
     assert_eq!(
-        database.register_session(Some("外部"), None, "界界", 200),
+        database.register_session(Some("外部"), None, "界界", None, 200),
         Err(AppError::StorageCapacity)
     );
     assert_eq!(database.session(key).unwrap(), session);
@@ -266,14 +340,14 @@ fn metadata_budget_counts_utf8_and_reservations_and_rejects_rename_atomically() 
     ));
     drop(reservation);
     database
-        .register_session(Some("外部"), None, "界界", 200)
+        .register_session(Some("外部"), None, "界界", None, 200)
         .unwrap();
     assert!(matches!(
         database.reserve_route(key),
         Err(AppError::StorageCapacity)
     ));
     database
-        .register_session(Some("外部"), None, "界", 300)
+        .register_session(Some("外部"), None, "界", None, 300)
         .unwrap();
     let reservation = database.reserve_route(key).unwrap();
     database
@@ -289,7 +363,7 @@ fn metadata_budget_counts_utf8_and_reservations_and_rejects_rename_atomically() 
         ..limits
     });
     assert!(matches!(
-        database.register_session(Some("外部"), None, "界", 400),
+        database.register_session(Some("外部"), None, "界", None, 400),
         Err(AppError::StorageCapacity)
     ));
     assert!(database.route(-101, 7, 400).unwrap().is_some());
@@ -299,8 +373,12 @@ fn metadata_budget_counts_utf8_and_reservations_and_rejects_rename_atomically() 
 fn route_conflicts_and_failed_bookkeeping_do_not_mutate_routes_or_activity() {
     let fixture = Fixture::new();
     let mut database = fixture.open(&Limits::default());
-    let a = database.register_session(None, None, "A", 100).unwrap();
-    let b = database.register_session(None, None, "B", 100).unwrap();
+    let a = database
+        .register_session(None, None, "A", None, 100)
+        .unwrap();
+    let b = database
+        .register_session(None, None, "B", None, 100)
+        .unwrap();
     let reservation = database.reserve_route(&a.session_key).unwrap();
     database
         .persist_route(reservation, -101, 7, RouteKind::Text, 100, 200)
@@ -339,17 +417,17 @@ fn invalid_inputs_and_foreign_reservations_fail_without_effects_or_private_diagn
     let fixture = Fixture::new();
     let mut database = fixture.open(&Limits::default());
     let session = database
-        .register_session(None, None, "Private title", 100)
+        .register_session(None, None, "Private title", None, 100)
         .unwrap();
     for timestamp in [-1, i64::MAX] {
         assert!(matches!(
-            database.register_session(None, Some(&session.session_key), "wrong", timestamp),
+            database.register_session(None, Some(&session.session_key), "wrong", None, timestamp),
             Err(AppError::InvalidRequest(_))
         ));
     }
     for external in ["", "synthetic\0id"] {
         assert_eq!(
-            database.register_session(Some(external), None, "wrong", 100),
+            database.register_session(Some(external), None, "wrong", None, 100),
             Err(AppError::InvalidRequest("external_session_id"))
         );
     }

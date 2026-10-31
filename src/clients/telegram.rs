@@ -8,7 +8,7 @@ use serde_json::json;
 
 use crate::{
     config::{Config, Secret},
-    domain::outbound::format_notice,
+    domain::outbound::FormattedMessage,
     error::{AppError, TelegramError},
 };
 
@@ -135,13 +135,16 @@ impl TelegramClient {
             .await?)
     }
 
-    /// Accepts final plain text. Services add titles, authorize and reserve routes first.
-    pub async fn send_message(&self, chat_id: i64, text: &str) -> Result<SentMessage, AppError> {
-        let text = format_notice(None, text)?;
+    /// Accepts validated literal text and native entities. Services authorize/reserve first.
+    pub async fn send_message(
+        &self,
+        chat_id: i64,
+        text: &FormattedMessage,
+    ) -> Result<SentMessage, AppError> {
         let sent: SentMessage = self
             .call(
                 "sendMessage",
-                &json!({"chat_id": chat_id, "text": text}),
+                &json!({"chat_id": chat_id, "text": text.as_str(), "entities": text.entities()}),
                 false,
                 REQUEST_TIMEOUT,
             )

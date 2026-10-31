@@ -104,7 +104,7 @@ async fn shutdown_and_service_failure_drain_disconnected_sends_and_preserve_ingr
         let key = {
             let mut db = fixture.database();
             let key = db
-                .register_session(None, None, "Drain", now)
+                .register_session(None, None, "Drain", None, now)
                 .unwrap()
                 .session_key;
             let reservation = db.reserve_route(&key).unwrap();
@@ -338,7 +338,9 @@ async fn composition_cleans_before_polling_and_shares_send_ingress_and_typing() 
     {
         let mut database = fixture.database();
         for _ in 0..105 {
-            database.register_session(None, None, "Expired", 0).unwrap();
+            database
+                .register_session(None, None, "Expired", None, 0)
+                .unwrap();
         }
     }
     let mut mock = Mock::new(&fixture.config).await;
@@ -360,7 +362,7 @@ async fn composition_cleans_before_polling_and_shares_send_ingress_and_typing() 
         request = mock.next("sendMessage") => request,
         _ = &mut send => panic!("send completed before Telegram response"),
     };
-    assert_eq!(request.payload["text"], "[Synthetic]\nQuestion");
+    assert_eq!(request.payload["text"], "Synthetic\nQuestion");
     request.respond(
         json!({"ok":true,"result":{"message_id":5,"chat":{"id":-101},
         "date":unix_millis().unwrap()/1000}}),
@@ -434,7 +436,7 @@ async fn recovered_notice_dispatch_and_terminal_poll_failure_are_supervised() {
     let key = {
         let mut db = fixture.database();
         let key = db
-            .register_session(None, None, "Recovered", now)
+            .register_session(None, None, "Recovered", None, now)
             .unwrap()
             .session_key;
         let reservation = db.reserve_route(&key).unwrap();

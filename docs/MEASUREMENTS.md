@@ -254,7 +254,10 @@ The mock implements `getWebhookInfo`, `getUpdates`, `sendMessage`, `sendDocument
 outstanding poll. Text/document response dates use current Unix seconds so committed routes
 retain their normal lifetime; request deadlines use a separate monotonic clock.
 Document forms follow the probe's length-delimited, ordered `chat_id`,
-`caption`, `document` parts. The mock incrementally discards document bytes and returns their
+`caption`, `caption_entities`, `document` parts. The native header-entity JSON field is bounded
+to 256 bytes and at most two nonoverlapping UTF-16 spans. This current mock change adds no
+new runtime measurement or reinterpretation of the historical capture above.
+The mock incrementally discards document bytes and returns their
 actual drained count as `document.file_size`. It applies the unchanged 50,000,000-byte limit and
 1,000-scalar/1,024-UTF-16-unit caption bounds. There is no artificial upload pacing.
 

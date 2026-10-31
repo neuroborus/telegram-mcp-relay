@@ -50,7 +50,7 @@ impl Fixture {
 
     fn session(&self, db: &mut Database, chat: i64) -> String {
         let key = db
-            .register_session(None, None, "Same", 100)
+            .register_session(None, None, "Same", None, 100)
             .unwrap()
             .session_key;
         self.route(db, &key, chat, 5);
@@ -223,7 +223,7 @@ fn restart_recovers_claims_at_lease_boundary_without_reclaiming_processing_work(
     assert_eq!(renewed[0].reply.claim_expires_at, Some(122_000));
     assert_eq!(renewed[0].reply.expires_at, original[0].reply.expires_at);
     // Neither a new registration nor a time beyond the typing cap steals processing work.
-    db.register_session(None, Some(&key), "Renamed", 700_000)
+    db.register_session(None, Some(&key), "Renamed", None, 700_000)
         .unwrap();
     let later = claims().claim(&mut db, &key, None, 2, 700_000).unwrap();
     assert_eq!(later.len(), 1);
@@ -608,7 +608,7 @@ fn restart_resume_reconciliation_has_one_cas_winner_and_preserves_first_start() 
         .unwrap();
     drop(db);
     let mut db = fixture.open();
-    db.register_session(None, Some(&key), "Resumed", DAY)
+    db.register_session(None, Some(&key), "Resumed", None, DAY)
         .unwrap();
     assert!(
         claims()

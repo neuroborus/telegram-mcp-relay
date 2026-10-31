@@ -38,7 +38,7 @@ impl Fixture {
             .database
             .lock()
             .unwrap()
-            .register_session(None, None, "Same", 0)
+            .register_session(None, None, "Same", None, 0)
             .unwrap()
             .session_key
     }

@@ -15,6 +15,9 @@ pub struct RegisterRequest {
     pub session_key: Option<String>,
     /// Display label, normalized to at most 50 grapheme clusters.
     pub title: String,
+    /// Opt-in directory display context, not file authority. Omitted/blank clears it.
+    /// Normalized to one safe line, at most 100 Unicode scalars; avoid personal paths.
+    pub directory_label: Option<String>,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -22,6 +25,7 @@ pub struct RegisterRequest {
 pub struct RegisterResult {
     pub session_key: String,
     pub title: String,
+    pub directory_label: Option<String>,
     /// Stable session inbox address.
     pub inbox_uri: String,
 }
@@ -31,7 +35,8 @@ pub struct RegisterResult {
 #[schemars(crate = "rmcp::schemars")]
 pub struct SendRequest {
     pub session_key: String,
-    /// Plain text; the final title, separator and text must fit 1,000 Unicode scalars.
+    /// Literal body only; the server adds native bold/italic headers. The complete visible
+    /// title, optional directory, separators and body must fit 1,000 Unicode scalars.
     pub text: String,
 }
 
@@ -42,7 +47,8 @@ pub struct SendFileRequest {
     pub session_key: String,
     /// Absolute local path beneath a configured approved root, without symlinks.
     pub path: PathBuf,
-    /// Optional description; the final caption must fit 1,000 scalars and 1,024 UTF-16 units.
+    /// Literal description only; the server adds the header. The complete caption must fit
+    /// 1,000 scalars and 1,024 UTF-16 units.
     #[serde(default)]
     pub caption: String,
 }

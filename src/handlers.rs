@@ -109,11 +109,16 @@ impl McpHandler {
                 request.external_session_id.as_deref(),
                 request.session_key.as_deref(),
                 &request.title,
+                request.directory_label.as_deref(),
                 unix_millis()?,
             )?;
         Ok(RegisterResult {
             inbox_uri: session.inbox_uri(),
             title: session.title.as_str().to_owned(),
+            directory_label: session
+                .directory_label
+                .as_ref()
+                .map(|label| label.as_str().to_owned()),
             session_key: session.session_key,
         })
     }
@@ -298,11 +303,11 @@ impl ServerHandler for McpHandler {
 
 fn tools() -> Vec<Tool> {
     vec![
-        Tool::new("telegram_register", "Register or resume an agent conversation; preserve the returned session key.", serde_json::Map::new())
+        Tool::new("telegram_register", "Register or resume a stable conversation; preserve the returned session key. Use the real host title when available, otherwise an honest fallback. Optional directory_label is display context only, not file authority; avoid personal paths. The server owns native bold/italic headers.", serde_json::Map::new())
             .with_input_schema::<RegisterRequest>().with_output_schema::<RegisterResult>(),
-        Tool::new("telegram_send", "Send concise plain text with a session header and durable reply route. Never automatically retry an uncertain send.", serde_json::Map::new())
+        Tool::new("telegram_send", "Send a concise literal body with a durable reply route. The server adds native bold/italic headers; do not reproduce them or supply markup for formatting. Complete visible text must fit 1,000 Unicode scalars. Never automatically retry an uncertain send.", serde_json::Map::new())
             .with_input_schema::<SendRequest>().with_output_schema::<SendResult>(),
-        Tool::new("telegram_send_file", "Stream an existing approved local file with a short session caption and durable reply route. Never automatically retry an uncertain send.", serde_json::Map::new())
+        Tool::new("telegram_send_file", "Stream an existing approved local file with a short literal caption and durable reply route. The server adds native bold/italic headers; do not reproduce them. Complete captions must fit 1,000 scalars and 1,024 UTF-16 units. Never automatically retry an uncertain send.", serde_json::Map::new())
             .with_input_schema::<SendFileRequest>().with_output_schema::<SendResult>(),
         Tool::new("telegram_inbox", "Atomically claim eligible replies on startup, resume or notification; preserve reply IDs and tokens. Never poll periodically. Read resources for snapshots without claiming.", serde_json::Map::new())
             .with_input_schema::<InboxRequest>().with_output_schema::<InboxResult>(),
@@ -310,7 +315,7 @@ fn tools() -> Vec<Tool> {
             .with_input_schema::<ProcessingRequest>().with_output_schema::<ProcessingResult>(),
         Tool::new("telegram_ack", "Acknowledge successful handling with the current session, reply ID and token. Identical valid-token retries are idempotent; stale tokens cannot complete work.", serde_json::Map::new())
             .with_input_schema::<AckRequest>().with_output_schema::<AckResult>(),
-        Tool::new("telegram_ask", "Send a concise question and, when enabled, wait for a matching reply up to the server timeout. Events stay active. Preserve the reply ID and token; confirm processing and acknowledge separately. Timeout grants no permission and later replies remain valid. Never automatically retry an uncertain send.", serde_json::Map::new())
+        Tool::new("telegram_ask", "Send a concise literal question body; the server adds native bold/italic headers. When enabled, wait for a matching reply up to the server timeout. Events stay active. Preserve the reply ID and token; confirm processing and acknowledge separately. Timeout grants no permission and later replies remain valid. Never automatically retry an uncertain send.", serde_json::Map::new())
             .with_input_schema::<SendRequest>().with_output_schema::<AskResult>(),
     ]
 }

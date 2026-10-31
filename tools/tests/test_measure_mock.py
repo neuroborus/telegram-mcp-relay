@@ -42,7 +42,9 @@ def wire(body, method="getWebhookInfo", *, content_type="application/json", extr
 
 def form_parts():
     prefix = (b'--synthetic\r\nContent-Disposition: form-data; name="chat_id"\r\n\r\n-123\r\n'
-              b'--synthetic\r\nContent-Disposition: form-data; name="caption"\r\n\r\n[Measure]\r\n'
+              b'--synthetic\r\nContent-Disposition: form-data; name="caption"\r\n\r\nMeasure\r\n'
+              b'--synthetic\r\nContent-Disposition: form-data; name="caption_entities"\r\n\r\n'
+              b'[{"type":"bold","offset":0,"length":7}]\r\n'
               b'--synthetic\r\nContent-Disposition: form-data; name="document"; filename="data.bin"\r\n'
               b'Content-Type: application/octet-stream\r\n\r\n')
     return prefix, b"\r\n--synthetic--\r\n"
@@ -68,6 +70,30 @@ class Stop:
 
 
 class MockTests(unittest.TestCase):
+    def test_native_header_entities_use_utf16_and_leave_literal_markup_untouched(self):
+        text = "🚀T\n📁 *dir*\n<b> & *literal*"
+        spans = [{"type": "bold", "offset": 0, "length": 3},
+                 {"type": "italic", "offset": 4, "length": 8}]
+        payload = {"chat_id": 123, "text": text, "entities": spans}
+        handle(io.BytesIO(wire(json.dumps(payload).encode(), "sendMessage")))
+        prefix, tail = form_parts()
+        metadata = json.dumps(spans).encode()
+        form = prefix.replace(b"Measure", text.encode()).replace(
+            b'[{"type":"bold","offset":0,"length":7}]', metadata)
+        result = handle(io.BytesIO(wire(form + b"data" + tail, "sendDocument",
+                                       content_type="multipart/form-data; boundary=synthetic")))
+        self.assertEqual(result["document"]["file_size"], 4)
+        for bad in [None, {}, [{"type": "bold", "offset": 1, "length": 1}],
+                    [{"type": "bold", "offset": 0, "length": 100}],
+                    [{"type": "html", "offset": 0, "length": 3}], spans * 2]:
+            with self.subTest(spans=bad), self.assertRaises(mock.MockError):
+                handle(io.BytesIO(wire(json.dumps({**payload, "entities": bad}).encode(),
+                                       "sendMessage")))
+        form = prefix.replace(b'[{"type":"bold","offset":0,"length":7}]', b"x" * 257)
+        with self.assertRaises(mock.MockError):
+            handle(io.BytesIO(wire(form + tail, "sendDocument",
+                                   content_type="multipart/form-data; boundary=synthetic")))
+
     def test_split_http_and_multipart_framing_preserves_binary_byte_count(self):
         prefix, tail = form_parts()
         payload = b"\0\xff\r\n--synthe\0\r\n--synthetic-not-a-delimiter"
@@ -124,9 +150,9 @@ class MockTests(unittest.TestCase):
                  (valid.replace(b'name="caption"', b'name="document"', 1),
                   "multipart/form-data; boundary=synthetic"),
                  (valid.replace(b"-123", b"true", 1), "multipart/form-data; boundary=synthetic"),
-                 (valid.replace(b"[Measure]", b"x" * 1001), "multipart/form-data; boundary=synthetic"),
-                 (valid.replace(b"[Measure]", b"\xff"), "multipart/form-data; boundary=synthetic"),
-                 (valid.replace(b"[Measure]", ("\U0001f680" * 513).encode()),
+                 (valid.replace(b"Measure", b"x" * 1001), "multipart/form-data; boundary=synthetic"),
+                 (valid.replace(b"Measure", b"\xff"), "multipart/form-data; boundary=synthetic"),
+                 (valid.replace(b"Measure", ("\U0001f680" * 513).encode()),
                   "multipart/form-data; boundary=synthetic"),
                  (valid.replace(b"Content-Type: application/octet-stream",
                                 b"X-Long: " + b"x" * mock.PART_HEADER_BYTES),
@@ -164,7 +190,7 @@ class MockTests(unittest.TestCase):
     def test_webhook_text_and_action_use_bot_api_envelopes_and_unique_routes(self):
         self.assertEqual(handle(io.BytesIO(wire(b"{}"))), {"url": "", "pending_update_count": 0})
         state = mock.State()
-        messages = [handle(io.BytesIO(wire(b'{"chat_id":123,"text":"[Measure]\\nsynthetic"}',
+        messages = [handle(io.BytesIO(wire(b'{"chat_id":123,"text":"Measure\\nsynthetic","entities":[{"type":"bold","offset":0,"length":7}]}',
                                            "sendMessage")), state=state) for _ in range(2)]
         self.assertEqual([item["message_id"] for item in messages], [1, 2])
         self.assertEqual(messages[0]["chat"]["id"], 123)
@@ -178,7 +204,7 @@ class MockTests(unittest.TestCase):
     def test_text_and_document_dates_use_current_unix_seconds_not_monotonic_time(self):
         now = [1_800_000_000.75]
         state = mock.State(wall_clock=lambda: now[0])
-        text = handle(io.BytesIO(wire(b'{"chat_id":123,"text":"[Measure] synthetic"}',
+        text = handle(io.BytesIO(wire(b'{"chat_id":123,"text":"Measure synthetic","entities":[{"type":"bold","offset":0,"length":7}]}',
                                      "sendMessage")), state=state)
         now[0] = 1_800_000_061.25
         prefix, tail = form_parts()

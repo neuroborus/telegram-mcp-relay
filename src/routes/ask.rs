@@ -97,7 +97,7 @@ impl Mock {
         database
             .lock()
             .unwrap()
-            .register_session(None, None, "界", unix_millis().unwrap())
+            .register_session(None, None, "界", None, unix_millis().unwrap())
             .unwrap()
     }
 
@@ -229,7 +229,7 @@ async fn waiter_and_events_share_one_reply_and_inbox_cannot_claim_it_twice() {
     let filter = json!({"resourceSubscriptions":[uri]});
     let mut events = http.listen(filter.clone(), filter).await;
     events.updated(uri).await;
-    let asked = http.start_ask(key, &"a".repeat(996));
+    let asked = http.start_ask(key, &"a".repeat(998));
     let respond = mock.next().await;
     failure(
         &http
@@ -483,7 +483,7 @@ async fn disabled_wait_keeps_events_and_invalid_questions_have_zero_effects() {
     events.updated(uri).await;
     let before = database.lock().unwrap().session(key).unwrap();
     for (key, text, code) in [
-        (key, "a".repeat(997), "TEXT_TOO_LONG"),
+        (key, "a".repeat(999), "TEXT_TOO_LONG"),
         ("private", "private".into(), "SESSION_NOT_FOUND"),
     ] {
         let error = http
@@ -708,7 +708,7 @@ async fn validation_and_rejected_sends_release_waiter_admission_without_routes_o
     let asks = mock.asks(&fixture, database.clone());
     let hub = database.lock().unwrap().inbox_notifications.clone();
     assert!(matches!(
-        asks.ask(&session.session_key, &"😀".repeat(997)).await,
+        asks.ask(&session.session_key, &"😀".repeat(999)).await,
         Err(AppError::TextTooLong(_))
     ));
     drop(hub.waiter(session.session_key.clone()).unwrap());

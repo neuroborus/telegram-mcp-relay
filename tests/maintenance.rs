@@ -49,7 +49,7 @@ impl Fixture {
 
     fn seed(&self, db: &mut Database) -> String {
         let key = db
-            .register_session(Some("synthetic"), None, "Same", 0)
+            .register_session(Some("synthetic"), None, "Same", None, 0)
             .unwrap()
             .session_key;
         let reservation = db.reserve_route(&key).unwrap();

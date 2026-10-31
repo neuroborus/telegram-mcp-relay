@@ -110,9 +110,13 @@ impl NoticeService {
             let text = match &attempt.kind {
                 NoticeKind::Unconfirmed { session_key } => {
                     let session = database.session(session_key)?;
-                    format_notice(Some(&session.title), UNCONFIRMED_NOTICE)?
+                    format_notice(
+                        Some(&session.title),
+                        session.directory_label.as_ref(),
+                        UNCONFIRMED_NOTICE,
+                    )?
                 }
-                NoticeKind::Unroutable => format_notice(None, UNROUTABLE_NOTICE)?,
+                NoticeKind::Unroutable => format_notice(None, None, UNROUTABLE_NOTICE)?,
             };
             (attempt, text)
         };

@@ -61,8 +61,12 @@ forced-stop deadlines can still interrupt bookkeeping; see
 
 The MVP uses one native process, loopback Streamable HTTP, Telegram long polling and SQLite.
 Outgoing text and captions have a strict 1,000 Unicode scalar limit including the session
-header; longer reports travel as files. Local paths refer to the daemon's filesystem beneath
-approved roots. Incoming attachment metadata is supported; attachment downloading is deferred.
+header, optional directory, separators and body; captions also fit 1,024 UTF-16 units.
+The server renders a native bold title and optional italic `directory_label`; callers supply
+literal bodies without manually adding headers. Directory context is opt-in display metadata
+(up to 100 normalized scalars), never file authorization. Every service notice begins `🔧 `.
+Longer reports travel as explicitly prepared files. Local paths refer to the daemon's filesystem
+beneath approved roots. Incoming attachment metadata is supported; attachment downloading is deferred.
 The shared bearer assumes trusted local clients. Notifications cannot guarantee that an idle agent
 host starts a new turn. Unconsumed Telegram updates last at most 24 hours, independently of
 the bridge's default 30-day local retention.

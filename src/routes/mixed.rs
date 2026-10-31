@@ -526,7 +526,13 @@ async fn legacy_ask_cancellation_and_abandonment_preserve_sends_and_recover_capa
         let session = database
             .lock()
             .unwrap()
-            .register_session(Some("reconnect"), None, "Same", unix_millis().unwrap())
+            .register_session(
+                Some("reconnect"),
+                None,
+                "Same",
+                None,
+                unix_millis().unwrap(),
+            )
             .unwrap();
         let (ended, mut endings) = mpsc::channel(4);
         let (mut http, endpoint) = fixture

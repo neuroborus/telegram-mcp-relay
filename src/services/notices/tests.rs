@@ -61,7 +61,7 @@ impl Fixture {
     fn seed(&self, db: &Arc<Mutex<Database>>, title: &str) -> String {
         let mut db = db.lock().unwrap();
         let key = db
-            .register_session(None, None, title, 100)
+            .register_session(None, None, title, None, 100)
             .unwrap()
             .session_key;
         let route = db.reserve_route(&key).unwrap();
@@ -197,17 +197,29 @@ async fn factual_notices_stay_outside_routes_and_known_targets_are_silent_after_
     let fixture = Fixture::new();
     let db = fixture.open();
     let key = fixture.seed(&db, " Same\n title ");
+    db.lock()
+        .unwrap()
+        .register_session(None, Some(&key), "Same title", Some("workspace/📁"), 100)
+        .unwrap();
     fixture.ingest(&db, 11, json!({"message_id":5}));
     fixture.ingest(&db, 12, json!({"message_id":6}));
     let mut mock = Mock::new(&fixture.0).await;
     let service = fixture.service(db.clone(), mock.client.clone());
     for (id, expected) in [
-        (201, format!("[Same title]\n{UNCONFIRMED_NOTICE}")),
-        (202, UNROUTABLE_NOTICE.to_owned()),
+        (
+            201,
+            format!("🔧 Same title\nworkspace/📁\n{UNCONFIRMED_NOTICE}"),
+        ),
+        (202, format!("🔧 {UNROUTABLE_NOTICE}")),
     ] {
         let work = dispatch(&service);
         let request = mock.answer(200, sent(id)).await;
-        assert_eq!(request, json!({"chat_id":-101,"text":expected}));
+        assert_eq!(
+            request,
+            json!({"chat_id":-101,"text":expected,"entities": if id == 201 { json!([
+            {"type":"bold","offset":3,"length":10}, {"type":"italic","offset":14,"length":12}
+        ]) } else { json!([]) }})
+        );
         assert_eq!(work.await.unwrap(), Ok(()));
     }
     assert_eq!(fixture.count("message_routes"), 1);
@@ -351,7 +363,7 @@ async fn complete_notice_length_is_validated_without_truncation_or_replay() {
                 request["text"]
                     .as_str()
                     .unwrap()
-                    .starts_with(&format!("[{title}]\n"))
+                    .starts_with(&format!("🔧 {title}\n"))
             );
             assert_eq!(work.await.unwrap(), Ok(()));
         } else {
@@ -397,7 +409,7 @@ async fn ordinary_routes_win_and_untrusted_or_unrelated_wording_is_not_a_service
     let key = db
         .lock()
         .unwrap()
-        .register_session(None, None, "Other", 100)
+        .register_session(None, None, "Other", None, 100)
         .unwrap()
         .session_key;
     let pending = db.lock().unwrap().reserve_route(&key).unwrap();

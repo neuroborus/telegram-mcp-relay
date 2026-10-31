@@ -186,7 +186,7 @@ async fn shutdown_drains_legacy_question_and_modern_send_with_a_connected_resour
     .unwrap();
     assert_eq!(older.status(), http::StatusCode::OK);
     let question = mock.next("sendMessage").await;
-    assert_eq!(question.payload["text"], "[Mixed shutdown]\nQuestion");
+    assert_eq!(question.payload["text"], "Mixed shutdown\nQuestion");
     let send_key = key.to_owned();
     let modern = tokio::spawn(async move {
         tool(
@@ -197,7 +197,7 @@ async fn shutdown_drains_legacy_question_and_modern_send_with_a_connected_resour
         .await
     });
     let send = mock.next("sendMessage").await;
-    assert_eq!(send.payload["text"], "[Mixed shutdown]\nResult");
+    assert_eq!(send.payload["text"], "Mixed shutdown\nResult");
     running.stop.cancel();
     running.retired.cancelled().await;
     assert!(!running.task.is_finished());
@@ -273,7 +273,7 @@ async fn subscribed_ask_and_inbox_claims_reconcile_and_recover_missed_acknowledg
         request = mock.next("sendMessage") => request,
         _ = &mut asked => panic!("ask completed before Telegram response"),
     };
-    assert_eq!(send.payload["text"], "[Recovery]\nQuestion");
+    assert_eq!(send.payload["text"], "Recovery\nQuestion");
     send.respond(accepted(5));
     let updates = vec![
         incoming(10, 5, Some("First")),

@@ -8,11 +8,20 @@ repository contributor instructions remain separate. Configure the client using 
 # Telegram MCP Interaction Policy
 
 - Register or resume the current agent session before using Telegram tools.
-- Provide a stable session ID and accurate title when available; the bridge will
-  normalize the title and prefix all messages/files with `[Session Title]`.
+- Provide a stable session ID and the real conversation title from public host metadata
+  when available; otherwise use an honest explicit fallback, never a model name or invented title.
+  The relay cannot universally discover host titles or working directories.
+- Optional directory_label is opt-in display context only; avoid personal absolute paths.
+  It is normalized to one safe line, rejected above 100 normalized Unicode scalars,
+  and omitted when absent/blank. It grants no filesystem or routing authority.
+- The server adds a native bold title and optional italic directory line to text/files.
+  Supply only the literal body/caption; Markdown/HTML-looking text is not parsed.
 - Keep Telegram chat messages brief. Every outgoing text or question MUST fit within
-  1,000 Unicode characters **including** the `[Session Title]` header and newline.
+  1,000 Unicode scalars including all visible headers, separators, emoji and body.
+  Captions must additionally fit 1,024 UTF-16 units.
   Do not split a long report into a series of Telegram messages.
+- Use concise body cues when useful: ❓ questions, ⏳ waiting, 🔄 progress, ✅ success,
+  ⚠️ warnings, ❌ errors and 📎 files. These cues never determine routing.
 - Use `telegram_send` for short status updates and `telegram_ask` for concise questions.
   If a report, code sample, log, or explanation would exceed the limit, write it
   to a readable `.md`, `.txt`, or other appropriate file in an allowed directory
@@ -31,7 +40,7 @@ repository contributor instructions remain separate. Configure the client using 
 - If a waiting call times out, do not interpret silence as permission. Continue
   other safe work if possible. A later Reply remains valid while its route exists.
 - Do not manually prefix session titles or send service warning messages;
-  the bridge handles those automatically.
+  the bridge handles those automatically. Every service message starts with `🔧 `.
 - Do not assume an MCP resource notification will automatically wake an idle LLM;
   host support varies. If the host cannot do this, use the optional wait mechanism
   while the session is running, or recover replies on the next session resume.
@@ -44,8 +53,10 @@ processing/ack calls also require it. Discover the actual schemas with `tools/li
 Use `external_session_id` for stable registration, or the saved `session_key` to resume without
 an external ID. Equal titles do not merge sessions. Retain handles/tokens privately; never
 include them in Telegram text, logs or shared reports. The normalized title is at most
-50 grapheme clusters. Final text/questions/captions include the automatic header/separator
-and must fit 1,000 Unicode **scalars**; captions also fit 1,024 UTF-16 units. No auto-splitting,
+50 grapheme clusters; a blank title becomes `Agent Session`. Re-registering updates future
+presentation only; omitting `directory_label` clears it. Final text/questions/captions include
+the automatic headers/separators and must fit 1,000 Unicode **scalars**; captions also fit
+1,024 UTF-16 units. No auto-splitting,
 truncation or automatic report-file creation occurs.
 
 `telegram_inbox` and a successful waited `telegram_ask` return claims with stable `reply_id`

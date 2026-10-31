@@ -14,7 +14,7 @@ use tokio::sync::Notify;
 use super::Database;
 use crate::{
     config::{Limits, Storage},
-    domain::outbound::SessionTitle,
+    domain::outbound::{DirectoryLabel, SessionTitle},
     error::AppError,
 };
 
@@ -27,6 +27,7 @@ pub struct Session {
     pub session_key: String,
     pub external_session_id: Option<String>,
     pub title: SessionTitle,
+    pub directory_label: Option<DirectoryLabel>,
     pub created_at: i64,
     pub last_activity_at: i64,
     pub expires_at: i64,
@@ -190,6 +191,7 @@ impl Database {
         external_session_id: Option<&str>,
         session_key: Option<&str>,
         title: &str,
+        directory_label: Option<&str>,
         now: i64,
     ) -> Result<Session, AppError> {
         if external_session_id.is_some_and(|id| id.is_empty() || id.contains('\0')) {
@@ -197,6 +199,10 @@ impl Database {
         }
         let expires_at = expiry(now, self.registry.session_ttl_ms)?;
         let title = SessionTitle::new(title);
+        let directory_label = directory_label
+            .map(DirectoryLabel::new)
+            .transpose()?
+            .flatten();
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -221,12 +227,14 @@ impl Database {
                 session_key: random_key()?,
                 external_session_id: external_session_id.map(str::to_owned),
                 title: title.clone(),
+                directory_label: directory_label.clone(),
                 created_at: now,
                 last_activity_at: now,
                 expires_at,
             }
         };
         session.title = title;
+        session.directory_label = directory_label;
         session.last_activity_at = session.last_activity_at.max(now);
         session.expires_at = session.expires_at.max(expires_at);
         let used = usage(&transaction)?;
@@ -250,11 +258,11 @@ impl Database {
             return Err(AppError::StorageCapacity);
         }
         let sql = if existing.is_some() {
-            "UPDATE sessions SET title = ?3, last_activity_at = ?5, expires_at = ?6
+            "UPDATE sessions SET title = ?3, last_activity_at = ?5, expires_at = ?6, directory_label = ?7
              WHERE session_key = ?1 AND external_session_id IS ?2 AND created_at = ?4"
         } else {
             // A random-key collision must fail rather than adopt another session's identity.
-            "INSERT INTO sessions VALUES(?1, ?2, ?3, ?4, ?5, ?6)"
+            "INSERT INTO sessions VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)"
         };
         transaction.execute(
             sql,
@@ -265,6 +273,7 @@ impl Database {
                 session.created_at,
                 session.last_activity_at,
                 session.expires_at,
+                session.directory_label.as_ref().map(DirectoryLabel::as_str),
             ),
         )?;
         transaction.commit()?;
@@ -409,10 +418,17 @@ pub(super) fn random_key() -> Result<String, AppError> {
 
 fn session_row(row: &Row<'_>) -> rusqlite::Result<Session> {
     let title: String = row.get(2)?;
+    let directory_label: Option<String> = row.get(6)?;
     Ok(Session {
         session_key: row.get(0)?,
         external_session_id: row.get(1)?,
         title: SessionTitle::new(&title),
+        directory_label: directory_label
+            .as_deref()
+            .map(DirectoryLabel::new)
+            .transpose()
+            .map_err(|_| rusqlite::Error::InvalidQuery)?
+            .flatten(),
         created_at: row.get(3)?,
         last_activity_at: row.get(4)?,
         expires_at: row.get(5)?,
@@ -426,7 +442,7 @@ fn session_by(
 ) -> Result<Option<Session>, AppError> {
     // The column is selected only by repository code, never caller input.
     Ok(connection.query_row(
-        &format!("SELECT session_key, external_session_id, title, created_at, last_activity_at, expires_at
+        &format!("SELECT session_key, external_session_id, title, created_at, last_activity_at, expires_at, directory_label
                   FROM sessions WHERE {column} = ?1"), [value], session_row,
     ).optional()?)
 }
@@ -439,6 +455,10 @@ fn session_bytes(session: &Session) -> u64 {
             .as_ref()
             .map_or(0, |s| s.len() as u64)
         + session.title.as_str().len() as u64
+        + session
+            .directory_label
+            .as_ref()
+            .map_or(0, |label| label.as_str().len() as u64)
 }
 
 pub(super) struct Usage {
@@ -456,7 +476,8 @@ pub(super) fn usage(connection: &Connection) -> Result<Usage, AppError> {
         "SELECT (SELECT count(*) FROM sessions), (SELECT count(*) FROM message_routes),
          (SELECT coalesce(sum(128 + length(CAST(session_key AS BLOB))
              + coalesce(length(CAST(external_session_id AS BLOB)), 0)
-             + length(CAST(title AS BLOB))), 0) FROM sessions)
+             + length(CAST(title AS BLOB))
+             + coalesce(length(CAST(directory_label AS BLOB)), 0)), 0) FROM sessions)
          + (SELECT coalesce(sum(128 + length(CAST(session_key AS BLOB))), 0) FROM message_routes)
          + (SELECT coalesce(sum(128 + length(CAST(reply_id AS BLOB)) + length(CAST(session_key AS BLOB))
              + coalesce(length(CAST(claim_token AS BLOB)), 0)

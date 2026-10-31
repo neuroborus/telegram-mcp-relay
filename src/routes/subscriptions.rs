@@ -323,13 +323,13 @@ async fn listener_capacity_disconnect_overflow_and_restart_preserve_durable_repl
     let session = database
         .lock()
         .unwrap()
-        .register_session(Some("thread"), None, "Same", unix_millis().unwrap())
+        .register_session(Some("thread"), None, "Same", None, unix_millis().unwrap())
         .unwrap();
     route(&database, &session.session_key, 1);
     let other = database
         .lock()
         .unwrap()
-        .register_session(None, None, "Same", unix_millis().unwrap())
+        .register_session(None, None, "Same", None, unix_millis().unwrap())
         .unwrap();
     route(&database, &other.session_key, 2);
     let uri = session.inbox_uri();

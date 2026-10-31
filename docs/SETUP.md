@@ -198,8 +198,15 @@ because it advertises Streamable HTTP; actual HOST acceptance remains pending.
 | Concurrent asks/inbox/events and reconnect recovery | Existing [daemon recovery](../src/app/tests/recovery.rs) and [ask fixtures](../src/routes/ask.rs); new [mixed-protocol fixtures](../src/routes/mixed.rs) cover shared claims, fencing, restart and transport reclamation, with mixed-send daemon shutdown in the recovery suite. New cases await FINALIZE; no live client certification implied |
 | Named agent clients, live Telegram, automatic idle-host wake | Unverified; no named-client or automatic wake guarantee |
 
-Register/resume using a stable external ID and accurate title; save the returned session key
-and inbox URI. On modern clients, subscribe to that concrete canonical URI (no template or
+Register/resume using a stable external ID and the real title from available public host
+metadata (otherwise an honest explicit fallback); save the returned session key and inbox URI.
+Optional `directory_label` is display-only context: avoid personal absolute paths. It normalizes
+to one safe line, rejects more than 100 scalars and is omitted/cleared when absent or blank.
+The server adds native bold title/italic directory entities; supply only literal bodies/captions.
+No Markdown/HTML parsing occurs. Final visible text is limited to 1,000 scalars, captions also
+to 1,024 UTF-16 units. See [formatting](ARCHITECTURE.md#outbound-formatting).
+
+On modern clients, subscribe to the returned canonical inbox URI (no template or
 query page) using `params.notifications.resourceSubscriptions` in `subscriptions/listen`, and inspect the accepted
 filter. Read/claim on start, resume and notifications, without periodic agent polling. Resources
 are read-only and never claim. Events are invalidations, not durable payload delivery: after a

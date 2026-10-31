@@ -1,4 +1,9 @@
 use super::*;
+use crate::domain::outbound::{SessionTitle, format_text};
+
+fn formatted(body: &str) -> FormattedMessage {
+    format_text(&SessionTitle::new("Session"), None, body).unwrap()
+}
 use std::sync::{Arc, Mutex};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -115,7 +120,7 @@ impl Mock {
 }
 
 #[tokio::test]
-async fn plain_send_and_typing_use_typed_results_and_validate_before_io() {
+async fn native_send_and_typing_use_typed_results() {
     let mock = Mock::new(
         vec![reply(200, SENT), reply(200, r#"{"ok":true,"result":true}"#)],
         8_192,
@@ -123,26 +128,18 @@ async fn plain_send_and_typing_use_typed_results_and_validate_before_io() {
     .await;
     let sent = mock
         .client
-        .send_message(101, "[Session]\n<literal> 😀")
+        .send_message(101, &formatted("<literal> 😀"))
         .await
         .unwrap();
     assert_eq!((sent.message_id, sent.date, sent.chat.id), (7, 100, 101));
     mock.client.clone().send_chat_action(101).await.unwrap();
-    assert!(matches!(
-        mock.client.send_message(101, &"a".repeat(1_001)).await,
-        Err(AppError::TextTooLong(_))
-    ));
-    assert_eq!(
-        mock.client.send_message(101, "").await.unwrap_err(),
-        AppError::EmptyText
-    );
     let requests = mock.requests.lock().unwrap();
     assert_eq!(requests.len(), 2);
     assert_eq!(
         requests[0],
         (
             "/bot123:synthetic/sendMessage".into(),
-            json!({"chat_id":101,"text":"[Session]\n<literal> 😀"})
+            json!({"chat_id":101,"text":"Session\n<literal> 😀", "entities":[{"type":"bold","offset":0,"length":7}]})
         )
     );
     assert_eq!(requests[1].1, json!({"chat_id":101,"action":"typing"}));
@@ -279,7 +276,7 @@ async fn ambiguous_sends_are_never_repeated_or_redirected() {
         Step::Reply(b"HTTP/1.1 302 Redirect\r\nLocation: /private-target\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec()),
     ] {
         let mock = Mock::new(vec![step, reply(200, SENT)], 1_024).await;
-        assert_eq!(mock.client.send_message(101, "short").await.unwrap_err(), TelegramError::DeliveryUncertain.into());
+        assert_eq!(mock.client.send_message(101, &formatted("short")).await.unwrap_err(), TelegramError::DeliveryUncertain.into());
         assert_eq!(mock.count(), 1);
     }
     let mock = Mock::new(
@@ -291,7 +288,10 @@ async fn ambiguous_sends_are_never_repeated_or_redirected() {
     )
     .await;
     assert_eq!(
-        mock.client.send_message(101, "short").await.unwrap_err(),
+        mock.client
+            .send_message(101, &formatted("short"))
+            .await
+            .unwrap_err(),
         TelegramError::Rejected {
             code: 403,
             retry_after_seconds: None
@@ -327,7 +327,7 @@ async fn deadline_covers_a_response_that_stalls_after_headers() {
     )
     .await;
     let client = mock.client.clone();
-    let mut call = tokio::spawn(async move { client.send_message(101, "short").await });
+    let mut call = tokio::spawn(async move { client.send_message(101, &formatted("short")).await });
     tokio::select! {
         seen = mock.seen.recv() => assert!(seen.is_some()),
         result = &mut call => panic!("call ended before the mock response: {result:?}"),
