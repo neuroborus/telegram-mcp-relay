@@ -87,7 +87,8 @@ quiescent ownership boundary. See [probe interface and evidence limits](MEASUREM
 ## Python measurement tooling gates
 
 The standard-library [collectors](../tools/measure_collectors.py),
-[loopback mock](../tools/measure_mock.py) and their controlled tests under `tools/tests/`
+[loopback mock](../tools/measure_mock.py), [MCP driver](../tools/measure_driver.py) and their
+controlled tests under `tools/tests/`
 use this Native FINALIZE inventory:
 
 ```text
@@ -113,6 +114,17 @@ loopback binding policy, worker/request caps and shutdown-before-close on failur
 no sockets, install no signal handlers and establish no real resource measurements. Actual
 probe/Telegram HTTP and routing assertions remain owned by the complete C6 suite; the Python
 tests do not duplicate those proofs. Mock execution and quantitative HOST evidence remain pending.
+
+[Driver tests](../tools/tests/test_measure_driver.py) substitute MCP transports, HTTP peers,
+split control streams, clocks and phase controls. They cover modern per-request headers/metadata,
+discovery/registration/send result rejection, bounded fixed/chunked response parsing, direct
+numeric-loopback policy, cancellation and deadlines, control EOF/ordering, partial/blocked output
+and redacted CLI failures. Private-file cases check the exact sparse workload size, exclusive
+creation, confined mode-0700 roots, symlink/mutation rejection and descriptor closure on failed
+preparation. Files remain controller-owned until all peers retire; no test starts a child, binds
+a socket, installs signal handlers or samples a daemon. These tests belong to the unchanged
+P1/P2 FINALIZE gates. Actual MCP upload/committed-route assertions remain in C6; real orchestration
+and quantitative evidence remain HOST-owned and pending.
 
 ## Behavioral acceptance
 

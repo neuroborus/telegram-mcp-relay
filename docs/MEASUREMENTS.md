@@ -107,15 +107,80 @@ oversized/malformed input and exhausted worker/request budgets fail; failures re
 in the exit status. The mock does not implement incoming replies or live Telegram semantics.
 
 Controlled stream/event/server tests cover framing, bounded draining, cancellation and failure
-paths without binding sockets. Their execution belongs to P1/P2 in FINALIZE. The synthetic MCP
-driver, orchestration, real HOST capture and quantitative release acceptance remain pending.
+paths without binding sockets. Their execution belongs to P1/P2 in FINALIZE. Orchestration,
+real HOST capture and quantitative release acceptance remain pending.
+
+## Synthetic MCP driver
+
+[measure_driver.py](../tools/measure_driver.py) is a separate standard-library Python 3.9+
+process. Its subordinate interface for the future orchestrator is:
+
+```text
+python3 tools/measure_driver.py --mcp-address 127.0.0.1:<port> --allowed-root <private-export-root>
+```
+
+The controller supplies the probe's bound numeric loopback MCP address and an existing absolute,
+current-user-owned mode-0700 export root, also configured in the probe's allowed roots. Every
+root component must be free of symlinks. The workload expects synthetic destination chat `-101`;
+the orchestrator must explicitly allow that chat and a synthetic user in TOML. This interface
+does not launch a probe or mock, grant file access, sample processes or run HOST capture.
+
+The driver uses the implemented stateless MCP `2026-07-28` lifecycle: `server/discover`, then
+`telegram_register` with external ID `resource-measurement-v1` and title `Resource measurement`,
+then exactly one `telegram_send_file`. Every request carries `MCP-Protocol-Version`, `Mcp-Method`,
+tool calls carry `Mcp-Name`, and params carry the protocol-version and empty client-capabilities
+metadata. Discovery must confirm the version, private zero-TTL capability response and tools.
+The driver preserves the returned session key internally and validates structured tool results
+against their text representation. Neither the key nor an inbox URI is emitted.
+
+After discovery, stdout emits `responsive`; its monotonic timestamp identifies confirmed MCP
+responsiveness separately from the probe's readiness line. After registration and exclusive
+file creation, `idle` reports `upload_bytes=49999999`. The fixed `measurement-upload.bin` is a
+49,999,999-byte sparse zero file, one byte below the unchanged 50,000,000-byte production limit.
+Only its absolute path is passed to MCP; the driver never reads its contents. The normal probe
+file admission and Telegram multipart path read and stream all bytes. Caption text is
+`Synthetic near-limit upload.`, prefixed by the normal `[Resource measurement]` header; these
+ASCII strings fit both existing caption bounds. Root/file identity and metadata are rechecked
+before and after sending. Existing files are never overwritten or removed.
+
+Control input consists of newline-delimited JSON. The controller first waits for `idle` and
+primes its sampling window, then writes `{"command":"upload"}`. The driver emits
+`upload_started`, invokes the normal MCP send tool, validates the expected chat and positive
+message ID, then emits `uploaded` with those IDs and the actual verified file size. Tool success
+confirms Telegram acceptance and committed reply routing under the implemented service contract;
+existing C6 HTTP/routing tests own that proof. These events delimit the observed request interval,
+including MCP and bookkeeping overhead. The driver stays alive for the controller's trailing
+samples until `{"command":"stop"}`, then emits `stopped`. All events include
+`at_monotonic_seconds`. The controller records PID/start-tick identity separately; the driver
+does not claim a measurement from its events.
+
+Only those two commands in that order succeed. EOF, timeout, cancellation, protocol/tool errors,
+changed files and output failures exit nonzero with a static redacted diagnostic. There is no
+send retry; a failed/disconnected attempt may have been accepted. The controller must retire
+probe/mock/driver process groups before removing its private root, including a partial file
+left by failed preparation. The driver starts no children and deletes no resources itself.
+
+Control lines are capped at 256 bytes, each wait at 120 seconds, requests at 8 KiB, response
+headers at 8 KiB, decoded bodies at 64 KiB and total response framing at 128 KiB. Fixed-length
+and chunked JSON responses are supported; redirects, sessionful responses and encoded/SSE
+bodies fail. Stdout records are at most 1 KiB each and 4 KiB total, with five-second writes.
+Discovery and registration each have a ten-second absolute deadline; the upload request allows
+620 seconds for the production 600-second attempt and bookkeeping. Total driver lifetime is
+900 seconds. SIGINT/SIGTERM cancels waits/response reads within a quarter-second check interval;
+connect and small request writes are bounded by five seconds. Mock upload draining remains
+unpaced and independently bounded as documented above. Sample this driver's RSS/CPU separately
+from the probe and mock; the controller's sampling cadence/windows remain orchestration-owned.
+
+Controlled transports/streams/clocks and private-file tests cover protocol rejection, phase
+ordering, bounded framing, cancellation, redaction and file ownership. Execution belongs to
+FINALIZE; source and unit tests establish no real runtime/resource result.
 
 ## Bounded collectors
 
 [measure_collectors.py](../tools/measure_collectors.py) provides standard-library Python 3.9+
 building blocks. It does not launch the probe, run a workload, build binaries or produce a
-runtime acceptance report. The separate mock above is implemented; driver/orchestration and
-indexed release evidence remain subsequent planned work. Its interfaces are:
+runtime acceptance report. The separate mock and driver above are implemented; orchestration
+and indexed release evidence remain subsequent planned work. Its interfaces are:
 
 | Collector | Result and limits |
 | --- | --- |
