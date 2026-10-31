@@ -2,7 +2,7 @@
 
 use super::*;
 
-fn initialization(version: &str) -> Value {
+pub(super) fn initialization(version: &str) -> Value {
     json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
         "protocolVersion":version,"capabilities":{},
         "clientInfo":{"name":"synthetic-mcp-client","version":"1"}
@@ -14,7 +14,7 @@ fn inline_meta() -> Value {
         "io.modelcontextprotocol/clientCapabilities":{}})
 }
 
-async fn sse_message(response: reqwest::Response) -> Value {
+pub(super) async fn sse_message(response: reqwest::Response) -> Value {
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
         response.headers()[header::CONTENT_TYPE],
@@ -36,7 +36,11 @@ async fn sse_message(response: reqwest::Response) -> Value {
 }
 
 impl Http {
-    fn legacy_post(&self, body: Value, session: Option<&str>) -> reqwest::RequestBuilder {
+    pub(super) fn legacy_post(
+        &self,
+        body: Value,
+        session: Option<&str>,
+    ) -> reqwest::RequestBuilder {
         let mut request = self
             .client
             .post(format!("http://{}/mcp", self.address))
@@ -50,7 +54,11 @@ impl Http {
         request
     }
 
-    fn session_operation(&self, method: http::Method, session: &str) -> reqwest::RequestBuilder {
+    pub(super) fn session_operation(
+        &self,
+        method: http::Method,
+        session: &str,
+    ) -> reqwest::RequestBuilder {
         self.client
             .request(method, format!("http://{}/mcp", self.address))
             .header(header::ACCEPT, "text/event-stream")
@@ -58,7 +66,7 @@ impl Http {
             .header("mcp-protocol-version", LEGACY_VERSION)
     }
 
-    async fn initialize(&self, version: &str) -> (String, Value) {
+    pub(super) async fn initialize(&self, version: &str) -> (String, Value) {
         let response = self
             .legacy_post(initialization(version), None)
             .send()
@@ -82,7 +90,7 @@ impl Http {
         (session, result["result"].clone())
     }
 
-    async fn legacy_rpc(&self, session: &str, method: &str, params: Value) -> Value {
+    pub(super) async fn legacy_rpc(&self, session: &str, method: &str, params: Value) -> Value {
         let id = self
             .next_legacy_id
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);

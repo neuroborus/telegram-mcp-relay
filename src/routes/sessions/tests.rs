@@ -112,6 +112,13 @@ async fn reclaimed(manager: &BoundedSessions, capacity: u32) {
     drop(permits);
 }
 
+impl BoundedSessions {
+    // Observe real ownership release, rather than retrying HTTP admission or sleeping.
+    pub(in crate::routes) async fn wait_reclaimed(&self, capacity: u32) {
+        reclaimed(self, capacity).await;
+    }
+}
+
 #[tokio::test]
 async fn admission_includes_retiring_workers_and_closure_is_idempotent() {
     let manager = BoundedSessions::new(2, CancellationToken::new());

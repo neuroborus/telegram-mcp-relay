@@ -250,9 +250,36 @@ Supplied `Mcp-Method` initialization cases follow the SDK's legacy/modern header
 These new cases are authored for the dedicated FINALIZE gate; no execution result or
 named-client success is asserted here. The prior modern-only version-list assertion is
 intentionally expanded to the two supported versions; independent unsupported-version
-and security assertions remain. Mixed-client delivery/recovery acceptance is later planned
-work. The historical benchmark at `968802371f94f51eedab66998eff6031762db5ea` and its hashes
+and security assertions remain. The historical benchmark at
+`968802371f94f51eedab66998eff6031762db5ea` and its hashes
 and figures remain unchanged and do not measure the new runtime.
+
+`routes::tests::mixed` adds both protocols on one protected endpoint and shared handler.
+Each protocol exercises all seven tools, durable text/document/question routes, same-title
+identity isolation and cross-protocol external-ID resume. Initialization creates no application
+identity. Empty resource listings, stable templates and paginated reads agree across protocols
+without claiming, exposing claim tokens or changing session activity. Semantic length and
+file-root failures retain their pre-effect validation.
+
+Concurrent legacy/modern inbox calls acquire distinct claims. Processing, reconciliation with
+a saved prior token/request ID, retries after transport/database restart, stale/wrong-session
+fencing and idempotent acknowledgments all use the same durable state. Concurrent questions
+on one identity match replies to their own outbound IDs while a modern resource listener
+remains active. Explicit cancellation preserves an admitted send; controlled abandonment
+preserves a committed question. Both release waiter/session capacity and allow a new transport
+to recover the reply.
+Semaphore acquisition observes actual socket disconnect and session reclamation; in-process
+HTTP body drop fixes the abandonment instant for the controlled-clock case, and
+paused time advances the abandonment deadline without sleeps or retrying admission.
+
+`app::tests::recovery` also defines production-composition shutdown with a legacy question,
+modern send and connected modern resource listener. Mock Telegram responses hold both admitted
+sends across admission closure; shutdown waits for durable route bookkeeping, and both routes
+accept recoverable replies afterward without implicit acknowledgment. These mixed-protocol
+cases await dedicated FINALIZE execution. Source inspection or no-run compilation does not
+establish a passing test outcome, real Codex discovery, live Telegram operation or fresh
+resource measurements. Named-client acceptance remains the coordinator's later HOST check
+after Runner DONE and ownership retirement, including actual discovery of all seven tools.
 
 `routes::tests::tools` exercises the real shared handler through separate modern MCP HTTP
 requests and a separate synthetic Bot API. It covers typed input/output discovery, stable
@@ -548,7 +575,7 @@ mark the unchanged product specification accepted or establish named-client/live
 | One native daemon, one poller, no vendor adapters/agent management, external database, broker, Node.js or Docker requirement; no public HTTPS/webhook needed (§§1–3, 13, 16, 19) | [Application](../src/app.rs), application/poller tests and [architecture](ARCHITECTURE.md) define and exercise the composition; [setup](SETUP.md) documents locked builds and optional user deployment. [HOST record](MEASUREMENTS.md#recorded-host-capture) preserves the resource result and initial failed/later successful static unit verification |
 | Concise agent text/file policy; no periodic agent polling and no universal LLM wake promise (§§2, 6, 14, 16, 19) | Complete copyable section 14 [agent policy](AGENT_POLICY.md), token/reconciliation instructions and [client timeout guidance](SETUP.md#connect-mcp-clients); existing [contributor policy](../AGENTS.md) is preserved |
 | Telegram at-most-24-hour unconsumed backlog, independent TTLs and reconnect limitations explained to users (§§10–11, 16, 19) | [Setup/recovery](SETUP.md#recovery-and-retention), [README](../README.md), [architecture](ARCHITECTURE.md) and [configuration](CONFIGURATION.md) explain the independent limits and webhook-safe setup |
-| Protocol support and actual client capabilities (§§5–6, 16–19) | [Subscription](../src/routes/subscriptions.rs), transport and daemon recovery fixtures cover synthetic MCP 2026-07-28 clients. New [legacy HTTP fixtures](../src/routes/legacy.rs) add 2025-06-18 negotiation/tools/read-only resources; execution awaits FINALIZE. [Client requirements](SETUP.md#connect-mcp-clients) retain the older-event limitation and pending HOST named-client acceptance, live Telegram and automatic host wake boundaries |
+| Protocol support and actual client capabilities (§§5–6, 16–19) | [Subscription](../src/routes/subscriptions.rs), transport and daemon recovery fixtures cover synthetic MCP 2026-07-28 clients. New [legacy HTTP fixtures](../src/routes/legacy.rs) and [mixed clients](../src/routes/mixed.rs) add 2025-06-18 negotiation, all seven tools, read-only resources and shared delivery/recovery/shutdown; execution awaits FINALIZE. [Client requirements](SETUP.md#connect-mcp-clients) retain the older-event limitation and pending HOST named-client acceptance, live Telegram and automatic host wake boundaries |
 | Near-zero idle CPU, best-effort idle RSS below approximately 30 MB, startup, near-limit upload peak RSS, stripped locked release size and dependency profile (§§3, 9, 16–19) | [Recorded HOST benchmark](MEASUREMENTS.md#workload-and-observed-resources) gives actual probe/mock/driver figures, startup and sampled/lifetime limits; [build identity](MEASUREMENTS.md#provenance-and-release-identity) records stripped daemon/probe sizes and distinct profiles. Unit tests retain bounded-read/idle-scheduler proofs without asserting resource targets |
 
 ## Section 17 deliverable coverage

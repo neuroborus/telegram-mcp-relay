@@ -15,14 +15,14 @@ use subscriptions::{ingest, route};
 use tokio::sync::oneshot;
 use tools::failure;
 
-struct Mock {
+pub(super) struct Mock {
     client: TelegramClient,
     requests: mpsc::Receiver<(Value, oneshot::Sender<Value>)>,
     task: JoinHandle<()>,
 }
 
 impl Mock {
-    async fn new(config: &Config) -> Self {
+    pub(super) async fn new(config: &Config) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let client = TelegramClient::for_test(
             config,
@@ -63,7 +63,7 @@ impl Mock {
         }
     }
 
-    async fn next(&mut self) -> oneshot::Sender<Value> {
+    pub(super) async fn next(&mut self) -> oneshot::Sender<Value> {
         let (body, respond) = tokio::time::timeout(Duration::from_secs(2), self.requests.recv())
             .await
             .unwrap()
@@ -73,7 +73,7 @@ impl Mock {
         respond
     }
 
-    async fn accept(&mut self, database: &Arc<Mutex<Database>>, id: i64) {
+    pub(super) async fn accept(&mut self, database: &Arc<Mutex<Database>>, id: i64) {
         let respond = self.next().await;
         let changed = database.lock().unwrap().route_changes();
         let committed = changed.notified();
@@ -83,7 +83,7 @@ impl Mock {
         committed.await;
     }
 
-    fn shared(&self, fixture: &Fixture) -> (Arc<Mutex<Database>>, Arc<McpHandler>) {
+    pub(super) fn shared(&self, fixture: &Fixture) -> (Arc<Mutex<Database>>, Arc<McpHandler>) {
         let database = Arc::new(Mutex::new(
             Database::open(&fixture.config.storage, &fixture.config.limits).unwrap(),
         ));

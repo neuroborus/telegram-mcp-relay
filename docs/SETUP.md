@@ -195,7 +195,7 @@ because it advertises Streamable HTTP; actual HOST acceptance remains pending.
 | Legacy initialization, seven-tool listing, calls and private inbox reads | New [2025-06-18 HTTP fixtures](../src/routes/legacy.rs) define synthetic coverage; execution awaits FINALIZE, named-client discovery awaits HOST |
 | Modern discovery, seven typed tools, private inbox reads | Existing rmcp 3.8.0 / MCP 2026-07-28 fixtures in [transport tests](../src/routes/tests.rs) and [daemon scenarios](../src/app/tests/recovery.rs); see the [coverage map](TESTING.md#specification-1619-coverage-map) for evidence boundaries |
 | Resource events | POST SSE `subscriptions/listen`, accepted `notifications.resourceSubscriptions` filters and `notifications/resources/updated` are covered by [subscription fixtures](../src/routes/subscriptions.rs); older subscription APIs are unsupported |
-| Concurrent asks/inbox/events and reconnect recovery | Synthetic [daemon recovery](../src/app/tests/recovery.rs) and [ask fixtures](../src/routes/ask.rs); no live client certification implied |
+| Concurrent asks/inbox/events and reconnect recovery | Existing [daemon recovery](../src/app/tests/recovery.rs) and [ask fixtures](../src/routes/ask.rs); new [mixed-protocol fixtures](../src/routes/mixed.rs) cover shared claims, fencing, restart and transport reclamation, with mixed-send daemon shutdown in the recovery suite. New cases await FINALIZE; no live client certification implied |
 | Named agent clients, live Telegram, automatic idle-host wake | Unverified; no named-client or automatic wake guarantee |
 
 Register/resume using a stable external ID and accurate title; save the returned session key

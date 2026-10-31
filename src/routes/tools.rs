@@ -10,14 +10,14 @@ struct Recorded {
     body: Vec<u8>,
 }
 
-struct Telegram {
+pub(super) struct Telegram {
     client: TelegramClient,
     requests: Arc<Mutex<Vec<Recorded>>>,
     task: JoinHandle<()>,
 }
 
 impl Telegram {
-    async fn new(config: &Config, responses: Vec<(u16, Value)>) -> Self {
+    pub(super) async fn new(config: &Config, responses: Vec<(u16, Value)>) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let client = TelegramClient::for_test(
             config,
@@ -68,7 +68,7 @@ impl Telegram {
         }
     }
 
-    fn handler(&self, fixture: &Fixture) -> Arc<McpHandler> {
+    pub(super) fn handler(&self, fixture: &Fixture) -> Arc<McpHandler> {
         Arc::new(
             McpHandler::new(
                 Arc::new(Mutex::new(
@@ -116,7 +116,7 @@ impl Http {
     }
 }
 
-fn sent(id: i64) -> (u16, Value) {
+pub(super) fn sent(id: i64) -> (u16, Value) {
     (
         200,
         json!({"ok":true,"result":{"chat":{"id":-101},"message_id":id,"date":unix_millis().unwrap()/1000}}),

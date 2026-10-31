@@ -121,6 +121,127 @@ async fn invalid_claim(address: SocketAddr, name: &str, arguments: Value) {
 }
 
 #[tokio::test]
+async fn shutdown_drains_legacy_question_and_modern_send_with_a_connected_resource_listener() {
+    let mut fixture = Fixture::new().await;
+    fixture.config.activity.typing_enabled = false;
+    fixture.config.limits.concurrent_requests = 8;
+    let mut mock = Mock::new(&fixture.config).await;
+    let address = fixture.config.server.listen;
+    let (mut running, poll) = begin(&mut fixture, &mut mock).await;
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    let post = |body: Value| {
+        client
+            .post(format!("http://{address}/mcp"))
+            .header("accept", "application/json, text/event-stream")
+            .json(&body)
+    };
+    let initialized = post(
+        json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
+        "protocolVersion":"2025-06-18","capabilities":{},
+        "clientInfo":{"name":"synthetic-shutdown-client","version":"1"}}}),
+    )
+    .send()
+    .await
+    .unwrap();
+    assert_eq!(initialized.status(), http::StatusCode::OK);
+    let transport = initialized.headers()["mcp-session-id"]
+        .to_str()
+        .unwrap()
+        .to_owned();
+    let body = initialized.text().await.unwrap();
+    let data = body
+        .lines()
+        .find_map(|line| line.strip_prefix("data: ").filter(|data| !data.is_empty()))
+        .unwrap();
+    let result: Value = serde_json::from_str(data).unwrap();
+    assert_eq!(result["result"]["protocolVersion"], "2025-06-18");
+    assert_eq!(fixture.count("sessions"), 0);
+    assert_eq!(
+        post(json!({"jsonrpc":"2.0","method":"notifications/initialized"}))
+            .header("mcp-session-id", &transport)
+            .header("mcp-protocol-version", "2025-06-18")
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        http::StatusCode::ACCEPTED
+    );
+    let session = tool(
+        address,
+        "telegram_register",
+        json!({"title":"Mixed shutdown"}),
+    )
+    .await;
+    let key = session["session_key"].as_str().unwrap();
+    let uri = session["inbox_uri"].as_str().unwrap();
+    let events = Events::listen(address, uri).await;
+    let older = post(
+        json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{
+        "name":"telegram_ask","arguments":{"session_key":key,"text":"Question"}}}),
+    )
+    .header("mcp-session-id", &transport)
+    .header("mcp-protocol-version", "2025-06-18")
+    .send()
+    .await
+    .unwrap();
+    assert_eq!(older.status(), http::StatusCode::OK);
+    let question = mock.next("sendMessage").await;
+    assert_eq!(question.payload["text"], "[Mixed shutdown]\nQuestion");
+    let send_key = key.to_owned();
+    let modern = tokio::spawn(async move {
+        tool(
+            address,
+            "telegram_send",
+            json!({"session_key":send_key,"text":"Result"}),
+        )
+        .await
+    });
+    let send = mock.next("sendMessage").await;
+    assert_eq!(send.payload["text"], "[Mixed shutdown]\nResult");
+    running.stop.cancel();
+    running.retired.cancelled().await;
+    assert!(!running.task.is_finished());
+    modern.abort();
+    assert!(modern.await.unwrap_err().is_cancelled());
+    question.respond(accepted(7));
+    // The second admitted effect keeps shutdown pending until its own bookkeeping finishes.
+    assert!(!running.task.is_finished());
+    send.respond(accepted(8));
+    tokio::time::timeout(Duration::from_secs(10), &mut running.task)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    drop((older, events, poll)); // Connected SSE clients cannot prolong daemon shutdown.
+    assert!(tokio::net::TcpStream::connect(address).await.is_err());
+    let now = unix_millis().unwrap();
+    let mut database = fixture.database();
+    for id in [7, 8] {
+        assert_eq!(
+            database.route(-101, id, now).unwrap().unwrap().session_key,
+            key
+        );
+        IngressService::new(&fixture.config)
+            .unwrap()
+            .ingest(
+                &mut database,
+                &serde_json::from_value(incoming(10 + id, id, Some("After shutdown"))).unwrap(),
+                now,
+            )
+            .unwrap();
+    }
+    let page = database.inbox_snapshot(key, None, 10, now).unwrap();
+    assert_eq!(page.replies.len(), 2);
+    assert!(
+        page.replies
+            .iter()
+            .all(|reply| reply.state == crate::repositories::ReplyState::Pending)
+    );
+    assert_eq!(fixture.count("acknowledgment_receipts"), 0);
+    assert_eq!(fixture.count("sessions"), 1);
+}
+
+#[tokio::test]
 async fn subscribed_ask_and_inbox_claims_reconcile_and_recover_missed_acknowledgments() {
     let mut fixture = Fixture::new().await;
     fixture.config.activity.typing_enabled = false;

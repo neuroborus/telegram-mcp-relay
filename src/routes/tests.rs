@@ -26,6 +26,8 @@ mod ask;
 mod inbox;
 #[path = "legacy.rs"]
 mod legacy;
+#[path = "mixed.rs"]
+mod mixed;
 #[path = "subscriptions.rs"]
 mod subscriptions;
 #[path = "tools.rs"]
@@ -103,18 +105,27 @@ impl Fixture {
     }
 
     async fn serve<S: ServerHandler>(&mut self, handler: Arc<S>, auth: Option<&Secret>) -> Http {
+        self.serve_endpoint(handler, auth).await.0
+    }
+
+    async fn serve_endpoint<S: ServerHandler>(
+        &mut self,
+        handler: Arc<S>,
+        auth: Option<&Secret>,
+    ) -> (Http, McpEndpoint<S>) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         self.config.server.listen = listener.local_addr().unwrap();
         let stop = CancellationToken::new();
         let endpoint = McpEndpoint::new(&self.config, auth, handler, stop.clone()).unwrap();
-        let task = tokio::spawn(endpoint.serve(listener));
-        Http {
+        let task = tokio::spawn(endpoint.clone().serve(listener));
+        let http = Http {
             address: self.config.server.listen,
             stop,
             task,
             client: reqwest::Client::builder().no_proxy().build().unwrap(),
             next_legacy_id: std::sync::atomic::AtomicU64::new(10),
-        }
+        };
+        (http, endpoint)
     }
 }
 
