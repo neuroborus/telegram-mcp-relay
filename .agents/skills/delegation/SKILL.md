@@ -16,6 +16,13 @@ combined operator guide. Inspect `pipelines_list` rather than guessing current s
 backend flags. Read [development](../../../docs/DEVELOPMENT.md) for this repository's local
 configuration and [Runner finalization](../finalization/agent-runner.md) for check ownership.
 
+Serialize validation against the actual phase schema. Structured check IDs match
+`^C[1-9][0-9]{0,8}$`; IDs and exact commands are globally unique within an inventory.
+Share one row per command: scoped rows merge applicability into one nonempty, strictly
+ascending `steps` list; unscoped rows omit it. H/R/P labels in prose are logical names,
+not structured IDs. Persisted per-step receipt IDs may differ from global catalog IDs;
+export the observed receipt IDs, commands and provenance. Retain conditional checks.
+
 Use `plan-authoring` to write a reviewed commit plan, then `plan-execution` to implement it
 one verified local commit at a time. Select `independent` explicitly. `polishing` reviews and
 stages existing changes but never commits. Only a Runner-authorized Worker `COMMIT` turn may

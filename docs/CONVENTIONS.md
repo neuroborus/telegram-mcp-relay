@@ -1,27 +1,28 @@
 # Repository Conventions
 
-## Current and intended structure
+## Current structure
 
-One application crate at the repository root provides the initial runtime scaffold, with a
-complete `Cargo.lock`. Keep the lockfile with manifest changes and use locked builds/checks.
+One application crate at the repository root provides the native relay daemon and shared
+library, with a complete `Cargo.lock`. Keep the lockfile with manifest changes and use locked
+builds/checks.
 Use `telegram-mcp-relay` for the package/binary and `telegram_mcp_relay` for its Rust library.
 Keep `main.rs` to bootstrap and shutdown; `lib.rs` exposes the shared application entry point.
 The dependency-free development helper at `tools/runner-check/` has its own explicit workspace
 and lockfile. Root workspace checks do not cover it; see [testing](TESTING.md).
 
-| Current or intended path | Responsibility |
+| Path | Responsibility |
 | --- | --- |
 | `src/main.rs`, `src/lib.rs` | Binary bootstrap and testable library surface |
-| `src/app.rs`, `src/state.rs` | Router/runtime composition and shared handles |
+| `src/app.rs`, `src/app/` | Daemon composition, startup, supervision/shutdown and full-composition tests |
 | `src/app/probe.rs`, `tools/resource_probe.rs` | Credential-free loopback probe construction and explicit library-linked release example |
-| `src/config.rs`, `src/error.rs` | Validated configuration and typed application errors |
-| `src/dto.rs` | Typed MCP tool requests/results and their SDK-generated schemas |
+| `src/config.rs`, `src/config/`, `src/error.rs` | Validated configuration, protected secrets and typed application errors |
+| `src/dto.rs` | Typed tool requests/results, inbox resource snapshots and SDK-generated schemas |
 | `src/handlers.rs`, `src/handlers/`, `src/routes.rs`, `src/routes/` | Shared SDK handler state, thin typed tools/read-only inbox resources, bounded modern subscriptions, protected HTTP transport and its tests |
-| `src/domain/` | Session/title/text rules, reply state and retention invariants |
+| `src/domain.rs`, `src/domain/` | Pure title normalization, final outbound Unicode rules and their tests |
 | `src/services.rs`, `src/services/` | Text/document delivery, bounded question waits, confined outbound file handles, authorized reply ingestion, one restart-safe poller, bounded inbox claims, durable processing/completion, shared confirmed-processing typing, factual notice dispatch and bounded retention scheduling |
 | `src/repositories.rs`, `src/repositories/` | SQLite initialization/migrations, transactions, queries and bounded post-commit inbox interests |
-| `src/clients/` | Direct Telegram HTTP client and transport DTOs |
-| `tests/`, `tests/fixtures/` | Cross-module/MCP/mock-Telegram tests and sanitized inputs |
+| `src/clients.rs`, `src/clients/` | Bounded direct Telegram HTTP, streamed multipart uploads, transport DTOs and synthetic tests |
+| `tests/` | Cross-module storage, ingress, claim/recovery, notice, retention and maintenance tests |
 | `config/` | Nonsecret example configuration |
 | `deploy/` | Example `systemd --user` unit and protected secret-file guidance |
 | `tools/` | Small justified development/measurement helpers |
@@ -39,9 +40,10 @@ SDK owns route wiring; do not duplicate an HTTP server to imitate this tree.
 - Dependencies flow from transport/adapters into services and domain. Domain logic must not
   require HTTP, SQLite or an agent vendor. Add traits only for real effect boundaries needed
   by tests; avoid speculative plugin/repository frameworks.
-- Keep Axum handlers thin and compose the router centrally. Carry `x-request-id` correlation
-  where applicable without trusting arbitrary sensitive values for logging. Preserve protocol
-  errors and MCP structured tool errors rather than wrapping everything in an HTTP error.
+- Keep MCP handlers thin and compose the SDK/Hyper HTTP endpoint centrally. Generate safe
+  request correlation without trusting client-supplied identifiers or sensitive metadata.
+  Preserve protocol errors and MCP structured tool errors rather than wrapping everything
+  in an HTTP error.
 - Use `AppError` or equivalent typed application error mapping at boundaries. Stable codes and
   safe messages belong in client results; private causes belong only in redacted diagnostics.
 - No `unwrap`/`expect` on untrusted/runtime input. Explain exceptional invariant assertions.
@@ -52,8 +54,9 @@ SDK owns route wiring; do not duplicate an HTTP server to imitate this tree.
   TOML plus environment secrets, validated once at startup. Never commit actual bot tokens.
 
 Verify exact versions/features against official upstream sources when the Cargo manifest is
-introduced. Prefer `rmcp`, Tokio, Axum/Tower, reqwest with rustls, rusqlite, serde and tracing
-where needed. Do not inherit OpenAPI/Swagger, broad CORS, compression or a multi-thread runtime
+introduced. Prefer `rmcp`, Tokio, the existing Hyper/Tower transport integration, reqwest with
+rustls, rusqlite, serde and tracing where needed. Do not inherit OpenAPI/Swagger, broad CORS,
+compression or a multi-thread runtime
 merely because they occur in a service template.
 
 ## Tests, documents and local state
