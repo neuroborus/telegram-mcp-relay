@@ -2,10 +2,10 @@
 
 use std::{fmt, sync::atomic::Ordering};
 
-use rusqlite::TransactionBehavior;
+use rusqlite::{Connection, TransactionBehavior};
 
 use super::{
-    Database,
+    ConfirmedMessage, Database, OutgoingJournal, history,
     registry::{ROW_BYTES, usage},
 };
 use crate::{
@@ -81,9 +81,17 @@ impl Database {
     pub(crate) fn record_notice_message(
         &mut self,
         attempt: &NoticeAttempt,
-        message_id: i64,
+        sent: &ConfirmedMessage<'_>,
+        journal: Option<OutgoingJournal>,
+        now: i64,
     ) -> Result<(), AppError> {
-        let changed = self.connection.execute(
+        if sent.source.chat_id != attempt.telegram_chat_id || sent.source.message_id <= 0 {
+            return Err(AppError::StorageFailure);
+        }
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let changed = transaction.execute(
             "UPDATE notice_attempts SET notice_message_id = ?4
              WHERE telegram_update_id = ?1 AND telegram_chat_id = ?2 AND trigger_message_id = ?3
                 AND (notice_message_id IS NULL OR notice_message_id = ?4)",
@@ -91,12 +99,25 @@ impl Database {
                 attempt.telegram_update_id,
                 attempt.telegram_chat_id,
                 attempt.trigger_message_id,
-                message_id,
+                sent.source.message_id,
             ),
         )?;
         if changed != 1 {
             return Err(AppError::StorageFailure);
         }
+        let capturing = journal.is_some();
+        history::insert_outgoing(&transaction, &self.history, journal, sent, now)?;
+        if capturing {
+            history::check_capacity(
+                &transaction,
+                &self.history,
+                &self.registry,
+                self.reserved_routes.bytes.load(Ordering::SeqCst),
+                &self.reserved_history,
+                self.main_file_limit_bytes,
+            )?;
+        }
+        transaction.commit()?;
         Ok(())
     }
 
@@ -110,51 +131,50 @@ impl Database {
         limit: u32,
         now: i64,
     ) -> Result<Vec<NoticeAttempt>, AppError> {
+        self.admit_notice_attempts(policy, limit, now, None)
+    }
+
+    pub(crate) fn next_notice(
+        &self,
+        policy: &NoticePolicy,
+        now: i64,
+    ) -> Result<Option<NoticeAttempt>, AppError> {
+        Ok(notice_candidates(&self.connection, policy, 1, now)?
+            .pop()
+            .map(|(attempt, _)| attempt))
+    }
+
+    /// Recheck the prepared candidate under the write lock; a concurrent first start wins.
+    pub(crate) fn take_notice_attempt(
+        &mut self,
+        policy: &NoticePolicy,
+        expected: &NoticeAttempt,
+        now: i64,
+    ) -> Result<Option<NoticeAttempt>, AppError> {
+        Ok(self
+            .admit_notice_attempts(policy, 1, now, Some(expected))?
+            .pop())
+    }
+
+    fn admit_notice_attempts(
+        &mut self,
+        policy: &NoticePolicy,
+        limit: u32,
+        now: i64,
+        expected: Option<&NoticeAttempt>,
+    ) -> Result<Vec<NoticeAttempt>, AppError> {
         if now < 0 || !(1..=100).contains(&limit) {
             return Err(AppError::InvalidRequest("notice batch timestamp or limit"));
         }
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let candidates = {
-            let mut statement = transaction.prepare(
-                "SELECT telegram_update_id, telegram_chat_id, telegram_message_id,
-                    session_key, expires_at, created_at FROM replies
-                 WHERE ?1 AND processing_started_at IS NULL AND notice_attempted = 0
-                    AND created_at <= ?3 AND expires_at > ?4
-                 UNION ALL
-                 SELECT telegram_update_id, telegram_chat_id, telegram_message_id,
-                    NULL, expires_at, created_at FROM update_dispositions
-                 WHERE ?2 AND kind = 'unroutable' AND notice_attempted = 0
-                    AND created_at <= ?4 AND expires_at > ?4
-                 ORDER BY created_at, telegram_update_id LIMIT ?5",
-            )?;
-            statement
-                .query_map(
-                    (
-                        policy.unconfirmed,
-                        policy.unroutable,
-                        now - policy.grace_ms,
-                        now,
-                        limit,
-                    ),
-                    |r| {
-                        let key: Option<String> = r.get(3)?;
-                        Ok((
-                            NoticeAttempt {
-                                telegram_update_id: r.get(0)?,
-                                telegram_chat_id: r.get(1)?,
-                                trigger_message_id: r.get(2)?,
-                                kind: key.map_or(NoticeKind::Unroutable, |session_key| {
-                                    NoticeKind::Unconfirmed { session_key }
-                                }),
-                            },
-                            r.get::<_, i64>(4)?,
-                        ))
-                    },
-                )?
-                .collect::<Result<Vec<_>, _>>()?
-        };
+        let candidates = notice_candidates(&transaction, policy, limit, now)?;
+        if expected.is_some_and(|expected| {
+            candidates.first().map(|(candidate, _)| candidate) != Some(expected)
+        }) {
+            return Ok(Vec::new());
+        }
         let mut attempts = Vec::new();
         if !candidates.is_empty() {
             let mut used = usage(&transaction)?;
@@ -209,4 +229,54 @@ impl Database {
         transaction.commit()?;
         Ok(attempts)
     }
+}
+
+fn notice_candidates(
+    connection: &Connection,
+    policy: &NoticePolicy,
+    limit: u32,
+    now: i64,
+) -> Result<Vec<(NoticeAttempt, i64)>, AppError> {
+    if now < 0 || !(1..=100).contains(&limit) {
+        return Err(AppError::InvalidRequest("notice batch timestamp or limit"));
+    }
+    Ok({
+        let mut statement = connection.prepare(
+            "SELECT telegram_update_id, telegram_chat_id, telegram_message_id,
+                    session_key, expires_at, created_at FROM replies
+                 WHERE ?1 AND processing_started_at IS NULL AND notice_attempted = 0
+                    AND created_at <= ?3 AND expires_at > ?4
+                 UNION ALL
+                 SELECT telegram_update_id, telegram_chat_id, telegram_message_id,
+                    NULL, expires_at, created_at FROM update_dispositions
+                 WHERE ?2 AND kind = 'unroutable' AND notice_attempted = 0
+                    AND created_at <= ?4 AND expires_at > ?4
+                 ORDER BY created_at, telegram_update_id LIMIT ?5",
+        )?;
+        statement
+            .query_map(
+                (
+                    policy.unconfirmed,
+                    policy.unroutable,
+                    now - policy.grace_ms,
+                    now,
+                    limit,
+                ),
+                |r| {
+                    let key: Option<String> = r.get(3)?;
+                    Ok((
+                        NoticeAttempt {
+                            telegram_update_id: r.get(0)?,
+                            telegram_chat_id: r.get(1)?,
+                            trigger_message_id: r.get(2)?,
+                            kind: key.map_or(NoticeKind::Unroutable, |session_key| {
+                                NoticeKind::Unconfirmed { session_key }
+                            }),
+                        },
+                        r.get::<_, i64>(4)?,
+                    ))
+                },
+            )?
+            .collect::<Result<Vec<_>, _>>()?
+    })
 }

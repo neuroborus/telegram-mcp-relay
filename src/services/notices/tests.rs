@@ -44,7 +44,13 @@ impl Fixture {
 
     fn open(&self) -> Arc<Mutex<Database>> {
         Arc::new(Mutex::new(
-            Database::open(&self.0.storage, &self.0.limits).unwrap(),
+            Database::open_with_history(
+                &self.0.storage,
+                &self.0.limits,
+                &self.0.history,
+                self.0.history.enabled,
+            )
+            .unwrap(),
         ))
     }
 
@@ -594,4 +600,184 @@ async fn scheduler_is_exclusive_bounded_and_cancellation_leaves_no_retry_after_r
             .unwrap(),
         None
     );
+}
+
+#[tokio::test]
+async fn confirmed_service_history_keeps_admitted_context_without_routes_or_duplicate_notices() {
+    let mut fixture = Fixture::new();
+    fixture.0.history.enabled = true;
+    let db = fixture.open();
+    let key = fixture.seed(&db, "Synthetic");
+    fixture.ingest(&db, 11, json!({"message_id":5}));
+    fixture.ingest(&db, 12, json!({"message_id":6}));
+    let mut mock = Mock::new(&fixture.0).await;
+    let service = fixture.service(db.clone(), mock.client.clone());
+    for (id, parent) in [(201, 111), (202, 112)] {
+        let work = dispatch(&service);
+        let (request, response) = mock.requests.recv().await.unwrap();
+        if id == 201 {
+            db.lock()
+                .unwrap()
+                .register_session(None, Some(&key), "Renamed", None, 61_001)
+                .unwrap();
+        }
+        response.send((200, sent(id))).unwrap();
+        work.await.unwrap().unwrap();
+        let row: (String, Option<String>, i64) = fixture.sql().query_row(
+            "SELECT body, session_title, reply_to_message_id FROM journal_records WHERE message_id = ?1",
+            [id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
+        assert_eq!(row.0, request["text"].as_str().unwrap());
+        assert!(row.0.starts_with("🔧 "));
+        assert_eq!(row.1, (id == 201).then(|| "Synthetic".into()));
+        assert_eq!(row.2, parent);
+        assert!(
+            db.lock()
+                .unwrap()
+                .route(-101, id, 61_000)
+                .unwrap()
+                .is_none()
+        );
+    }
+    assert_eq!(fixture.count("message_routes"), 1);
+    let service_count: i64 = fixture
+        .sql()
+        .query_row(
+            "SELECT count(*) FROM journal_records WHERE direction = 'service'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(service_count, 2);
+    drop(service);
+    drop(db);
+    let db = fixture.open();
+    let service = fixture.service(db, mock.client.clone());
+    service.dispatch_one(62_000).await.unwrap();
+    assert!(mock.requests.try_recv().is_err());
+    assert_eq!(fixture.count("journal_records"), 4);
+}
+
+#[tokio::test]
+async fn journal_pressure_leaves_notice_eligible_until_capacity_is_available() {
+    let mut fixture = Fixture::new();
+    fixture.0.history.enabled = true;
+    fixture.0.history.max_records = 1;
+    let db = fixture.open();
+    fixture.seed(&db, "Synthetic");
+    fixture.ingest(&db, 11, json!({"message_id":5}));
+    let mut mock = Mock::new(&fixture.0).await;
+    let service = fixture.service(db.clone(), mock.client.clone());
+    assert_eq!(
+        service.dispatch_one(61_000).await,
+        Err(AppError::StorageCapacity)
+    );
+    assert_eq!(fixture.count("notice_attempts"), 0);
+    let attempted: bool = fixture
+        .sql()
+        .query_row("SELECT notice_attempted FROM replies", [], |r| r.get(0))
+        .unwrap();
+    assert!(!attempted);
+    assert!(mock.requests.try_recv().is_err());
+    fixture
+        .sql()
+        .execute("UPDATE journal_records SET expires_at = 60_000", [])
+        .unwrap();
+    let mut sweep = crate::repositories::CleanupSweep::new(61_000).unwrap();
+    while !db
+        .lock()
+        .unwrap()
+        .cleanup_batch(&mut sweep)
+        .unwrap()
+        .complete
+    {}
+    let work = dispatch(&service);
+    mock.answer(200, sent(201)).await;
+    work.await.unwrap().unwrap();
+    assert_eq!(fixture.count("notice_attempts"), 1);
+    assert_eq!(fixture.count("journal_records"), 1);
+}
+
+#[tokio::test]
+async fn service_journal_failure_and_cancellation_preserve_consumed_attempts_without_replay() {
+    for cancel in [false, true] {
+        let mut fixture = Fixture::new();
+        fixture.0.history.enabled = true;
+        fixture.0.history.max_records = 2;
+        let db = fixture.open();
+        fixture.seed(&db, "Synthetic");
+        fixture.ingest(&db, 11, json!({"message_id":5}));
+        if !cancel {
+            fixture.sql().execute_batch("CREATE TRIGGER fail_service BEFORE INSERT ON journal_records
+                WHEN NEW.direction = 'service' BEGIN SELECT RAISE(ABORT, 'synthetic failure'); END;").unwrap();
+        }
+        let mut mock = Mock::new(&fixture.0).await;
+        let service = fixture.service(db.clone(), mock.client.clone());
+        let work = dispatch(&service);
+        let (_, response) = mock.requests.recv().await.unwrap();
+        if cancel {
+            work.abort();
+            assert!(work.await.unwrap_err().is_cancelled());
+            drop(response);
+        } else {
+            response.send((200, sent(201))).unwrap();
+            assert_eq!(work.await.unwrap(), Err(AppError::StorageFailure));
+        }
+        assert_eq!(fixture.count("journal_records"), 1);
+        let saved: Option<i64> = fixture
+            .sql()
+            .query_row("SELECT notice_message_id FROM notice_attempts", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(saved, None);
+        // The failed/canceled request releases its journal admission immediately.
+        let reservation = db
+            .lock()
+            .unwrap()
+            .reserve_outgoing("Synthetic", None, false, Some(111))
+            .unwrap();
+        drop(reservation);
+        drop(service);
+        drop(db);
+        let db = fixture.open();
+        fixture
+            .service(db, mock.client.clone())
+            .dispatch_one(62_000)
+            .await
+            .unwrap();
+        assert!(mock.requests.try_recv().is_err());
+        assert_eq!(fixture.count("notice_attempts"), 1);
+    }
+}
+
+#[test]
+fn a_changed_notice_candidate_cannot_consume_the_next_unprepared_attempt() {
+    let fixture = Fixture::new();
+    let db = fixture.open();
+    fixture.seed(&db, "Synthetic");
+    fixture.ingest(&db, 11, json!({"message_id":5}));
+    fixture.ingest(&db, 12, json!({"message_id":6}));
+    let policy = service_policy(&fixture);
+    let mut database = db.lock().unwrap();
+    let prepared = database.next_notice(&policy, 61_000).unwrap().unwrap();
+    let mut other = Database::open(&fixture.0.storage, &fixture.0.limits).unwrap();
+    assert_eq!(
+        other
+            .take_notice_attempts(&policy, 1, 61_000)
+            .unwrap()
+            .first(),
+        Some(&prepared)
+    );
+    let candidate = database.next_notice(&policy, 61_000).unwrap().unwrap();
+    assert_eq!(
+        database
+            .take_notice_attempt(&policy, &prepared, 61_000)
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        database.next_notice(&policy, 61_000).unwrap(),
+        Some(candidate)
+    );
+    assert_eq!(fixture.count("notice_attempts"), 1);
 }

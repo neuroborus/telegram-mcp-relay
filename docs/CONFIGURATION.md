@@ -141,8 +141,9 @@ See [architecture](ARCHITECTURE.md#session-and-route-persistence).
 ## Opt-in history storage
 
 `[history]` enables capture of authorized incoming observations, including standalone and
-unroutable text/captions/documents/photos. Outgoing capture and shared-read/download tools are
-not yet connected. `enabled=false` is the default. Opt-in requires a configured MCP bearer source and
+unroutable text/captions/documents/photos, and confirmed outgoing text/captions, returned document
+metadata and service-message context. Shared-read/download tools are not yet connected.
+`enabled=false` is the default. Opt-in requires a configured MCP bearer source and
 an actually resolved bearer at daemon construction. Library callers use `Database::open_with_history`
 with the same explicit authentication requirement; `Database::open` keeps shared capture disabled.
 Stored bodies, captions and display metadata are private conversation data readable by the
@@ -150,7 +151,7 @@ trusted local operator. Opt-in does not grant claim/processing authority to othe
 Disabling stops capture/shared reads; retained records expire normally rather than being wiped.
 Own routed replies retain private attachment provenance independently of history. Observation
 does not assign a recipient, change notice eligibility, claim a reply or acknowledge work.
-Display labels retain at most 256 scalars (1,024 UTF-8 bytes), with controls stripped. At most
+Incoming display labels retain at most 256 scalars (1,024 UTF-8 bytes), with controls stripped. At most
 ten document/photo metadata entries per message are admitted; no file bytes are downloaded.
 
 | History setting | Default | Accepted positive range |
@@ -175,7 +176,12 @@ provenance still has finite count/metadata bounds independently of shared captur
 History metadata charges include conservative fixed row/index charges (512 bytes per message
 or attachment, 256 per lazy session-display mapping) plus bounded UTF-8 display/file identifiers.
 Admission preserves unused inbox payload/metadata budgets as physical live-page headroom and
-counts in-flight route reservations. SQLite overhead may still cause capacity errors; nothing
+counts in-flight route and journal reservations. Outgoing admission reserves a record, its
+visible UTF-8 body/display and up to one bounded returned document (including conservative
+row/display-map charges). Rejections, uncertainty and canceled notice requests release unused
+capacity; admitted ordinary sends drain through bookkeeping. Returned metadata exceeding the
+record bound fails confirmed-send bookkeeping without replay. Older uncaptured outgoing bodies
+cannot be reconstructed. SQLite overhead may still cause capacity errors; nothing
 silently evicts valid replies or advances an ingress cursor on failure. The existing main-file
 cap, DELETE journal durability and bounded reclamation remain in force. Disk snapshots now
 account separately for protected journal/WAL/SHM lengths and allocated blocks; normally WAL/SHM

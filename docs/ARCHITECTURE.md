@@ -348,8 +348,9 @@ shared provenance requires an enabled retained matching journal source. Foreign 
 expired/deleted source references independently, and indexed cleanup retires expired/orphaned
 provenance in bounded batches. Journal pressure rolls back without consuming inbox quotas or
 evicting valid replies. Coverage starts at actual observation, not migration; restart marks
-possible gaps and cannot reconstruct older bodies. Outgoing capture and public read/download
-tools remain pending; storage fixtures define behavior but await FINALIZE execution. See
+possible gaps and cannot reconstruct older bodies. Confirmed outgoing text/captions and service
+messages now use the same journal when enabled; public read/download tools remain pending.
+Returned document identifiers stay in private attachment provenance, never source paths or bytes. See
 [history settings and privacy](CONFIGURATION.md#opt-in-history-storage).
 
 Ingress authorizes chat/user IDs and rejects bot senders before retaining observations. With
@@ -464,8 +465,9 @@ Failures retain only safe typed classifications, without SQLite SQL, paths or ro
 
 The version 1 baseline uses strict tables for sessions, composite chat/message routes, incoming
 replies, the singleton cursor, minimal valid-token acknowledgment receipts and notice attempts.
-Only incoming text/captions and attachment metadata have payload columns. No table holds
-outbound bodies, full Telegram updates, file bytes or typing leases. A NULL initial cursor
+Only incoming text/captions and attachment metadata have payload columns in that baseline;
+it stores no outbound bodies, full Telegram updates, file bytes or typing leases. The later
+bounded journal adds explicitly opted-in bodies as described above. A NULL initial cursor
 means no update has been processed. Timestamps use Unix milliseconds. Schema version 2 adds
 minimal update dispositions, including one compact ignored marker, through a transactional
 migration preserving existing records.
@@ -620,7 +622,13 @@ caller leaves this bounded task and reservation alive until the HTTP result and 
 finish. A shared `TaskTracker` retires completed task storage immediately; daemon shutdown closes
 send admission and drains tracked work, including disconnected callers. Tracking is armed before
 permit acquisition so concurrent close cannot miss an admitted send. Crashes and forced process
-termination can still interrupt bookkeeping. No outbound body is written to SQLite.
+termination can still interrupt bookkeeping. With authenticated history opt-in, admission also
+reserves the exact visible body/display and bounded returned document metadata. Other journal
+writes honor outstanding reservations. Success atomically commits the route, activity and
+journal/provenance; default-disabled history retains no outbound body. Presentation is captured
+before sending, so an in-flight rename cannot relabel the historical message. Reservations
+are logical admission, not a guarantee against later disk or SQLite failure. Missing older
+outgoing bodies cannot be reconstructed.
 
 A consistent 4xx rejection remains definitive. A lost/invalid response remains
 `TELEGRAM_DELIVERY_UNCERTAIN`, with no fabricated route. A confirmed accepted send whose
@@ -666,7 +674,10 @@ the complete literal caption with native title/directory entities before admissi
 final 1,000-scalar and 1,024-UTF-16-unit limits apply; an empty description leaves only the headers.
 Text and documents share send admission, metadata reservations, detached task ownership and
 the successful-send transaction. A confirmed document commits a composite `Document` route
-and activity atomically; no caption, file contents or source path is stored.
+and activity atomically, plus its caption/presentation and any returned document metadata
+when history is enabled. Missing returned metadata creates no invented attachment. Returned
+metadata is bounded and validated; failure after confirmed acceptance is bookkeeping failure,
+not permission to resend. No file contents or local source path is stored.
 
 The private client uploader sends multipart `chat_id`, `caption`, serialized `caption_entities`
 and `document` fields from the original descriptor with its sanitized filename and opening size.
@@ -803,8 +814,11 @@ the concise instruction to Reply to a newer agent message. All notices begin wit
 Invalid final lengths consume the attempt without sending, splitting or truncating. Disabled
 categories remain untouched.
 
-Success records only the composite notice message ID on the existing attempt, never an
-ordinary route or session activity. Rejection, ambiguous delivery, cancellation and failed
+History-enabled dispatch reserves journal capacity before consuming the attempt and rechecks
+the selected candidate under the write lock. Capacity pressure leaves it eligible; a concurrent
+processing start can still prevent admission. Success atomically records the composite notice
+ID and a service journal entry with its trigger ID and presentation snapshot, never an ordinary
+route or session activity. Rejection, ambiguous delivery, cancellation and failed
 success bookkeeping cannot authorize replay. Rate-limit delays postpone other notice attempts
 without retrying the consumed one. Shutdown, loss of the supervisor or dropping the run future
 cancels the current request and releases admission. Daemon supervision owns this scheduler.
@@ -1030,7 +1044,8 @@ network/protocol behavior and cancellation. Shared state contains handles, not d
 - Start typing only after confirmed processing, cap refresh at ten minutes and keep idle free
   of typing activity. Warn once after the grace period only if processing never started.
 - Bound task counts, timers, parser sizes, upload buffers and inbox capacity. Stream files
-  through approved roots with safe opening; never persist outbound file contents or chat bodies.
+  through approved roots with safe opening; never persist outbound file contents. Outbound body
+  capture requires the explicit bounded history opt-in.
 
 ## Retention and security
 

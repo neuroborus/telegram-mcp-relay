@@ -1,6 +1,12 @@
 //! Bounded observations and private attachment provenance, composed into ingress transactions.
 
-use std::{fmt, sync::atomic::Ordering};
+use std::{
+    fmt,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+};
 
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, named_params};
 
@@ -9,6 +15,9 @@ use super::{
     registry::{expiry, random_key, usage},
 };
 use crate::error::AppError;
+
+// Maximum file ID, unique ID, filename and MIME bytes validated by insert_attachment.
+const DOCUMENT_METADATA_BYTES: u64 = 4_096 + 512 + 1_024 + 256;
 
 #[derive(Clone, Copy)]
 pub struct MessageSource {
@@ -54,6 +63,7 @@ pub struct JournalInput<'a> {
 
 /// Service-authorized adapter provenance; never infer a missing legacy sender.
 /// No serialization, arbitrary JSON, paths or binary payloads.
+#[derive(Clone, Copy)]
 pub struct AttachmentInput<'a> {
     pub source: MessageSource,
     pub reply_id: Option<&'a str>,
@@ -73,12 +83,63 @@ pub struct StoredMessage {
     pub expires_at: i64,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Default, Debug, PartialEq, Eq)]
 pub struct HistoryUsage {
     pub records: u64,
     pub attachments: u64,
     pub body_bytes: u64,
     pub metadata_bytes: u64,
+}
+
+#[derive(Default)]
+pub(super) struct ReservedHistory {
+    records: AtomicU64,
+    attachments: AtomicU64,
+    body_bytes: AtomicU64,
+    metadata_bytes: AtomicU64,
+}
+
+impl ReservedHistory {
+    fn change(&self, charge: &HistoryUsage, reserve: bool) {
+        for (counter, bytes) in [
+            (&self.records, charge.records),
+            (&self.attachments, charge.attachments),
+            (&self.body_bytes, charge.body_bytes),
+            (&self.metadata_bytes, charge.metadata_bytes),
+        ] {
+            if reserve {
+                counter.fetch_add(bytes, Ordering::SeqCst);
+            } else {
+                counter.fetch_sub(bytes, Ordering::SeqCst);
+            }
+        }
+    }
+}
+
+struct HistoryReservation {
+    shared: Arc<ReservedHistory>,
+    charge: HistoryUsage,
+}
+
+impl Drop for HistoryReservation {
+    fn drop(&mut self) {
+        self.shared.change(&self.charge, false);
+    }
+}
+
+/// Admission-time presentation, never reconstructed from a later session rename.
+pub(crate) struct OutgoingJournal {
+    body: String,
+    session: Option<Session>,
+    service_parent: Option<i64>,
+    document: bool,
+    reservation: HistoryReservation,
+}
+
+pub(crate) struct ConfirmedMessage<'a> {
+    pub source: MessageSource,
+    pub message_date: i64,
+    pub document: Option<AttachmentInput<'a>>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -101,10 +162,64 @@ redacted!(
     JournalInput<'_>,
     AttachmentInput<'_>,
     AttachmentKind,
-    StoredMessage
+    StoredMessage,
+    OutgoingJournal,
+    ConfirmedMessage<'_>
 );
 
 impl Database {
+    /// Reserve worst-case bounded returned document metadata, plus the exact body/display.
+    /// RAM reservations release on every error/cancellation and never promise disk success.
+    pub(crate) fn reserve_outgoing(
+        &self,
+        body: &str,
+        session: Option<&Session>,
+        document: bool,
+        service_parent: Option<i64>,
+    ) -> Result<Option<OutgoingJournal>, AppError> {
+        if !self.history.enabled {
+            return Ok(None);
+        }
+        let display = session.map_or(0, |s| {
+            s.title.as_str().len() + s.directory_label.as_ref().map_or(0, |d| d.as_str().len())
+        }) as u64;
+        if body.len() as u64 + display > u64::from(self.history.max_record_bytes) {
+            return Err(AppError::StorageCapacity);
+        }
+        let reservation = HistoryReservation {
+            shared: Arc::clone(&self.reserved_history),
+            charge: HistoryUsage {
+                records: 1,
+                attachments: u64::from(document),
+                body_bytes: body.len() as u64,
+                metadata_bytes: 512
+                    + display
+                    + if session.is_some() { 256 } else { 0 }
+                    + if document {
+                        512 + u64::from(self.history.max_record_bytes).min(DOCUMENT_METADATA_BYTES)
+                    } else {
+                        0
+                    },
+            },
+        };
+        reservation.shared.change(&reservation.charge, true);
+        check_capacity(
+            &self.connection,
+            &self.history,
+            &self.registry,
+            self.reserved_routes.bytes.load(Ordering::SeqCst),
+            &self.reserved_history,
+            self.main_file_limit_bytes,
+        )?;
+        Ok(Some(OutgoingJournal {
+            body: body.to_owned(),
+            session: session.cloned(),
+            service_parent,
+            document,
+            reservation,
+        }))
+    }
+
     pub(crate) fn mark_observation_gap(&self) -> Result<(), AppError> {
         if self.history.enabled {
             self.connection.execute(
@@ -142,6 +257,7 @@ impl Database {
             &self.history,
             &self.registry,
             self.reserved_routes.bytes.load(Ordering::SeqCst),
+            &self.reserved_history,
             self.main_file_limit_bytes,
         )?;
         transaction.commit()?;
@@ -165,11 +281,61 @@ impl Database {
             &self.history,
             &self.registry,
             self.reserved_routes.bytes.load(Ordering::SeqCst),
+            &self.reserved_history,
             self.main_file_limit_bytes,
         )?;
         transaction.commit()?;
         Ok(handle)
     }
+}
+
+pub(super) fn insert_outgoing(
+    transaction: &Transaction<'_>,
+    policy: &crate::config::History,
+    journal: Option<OutgoingJournal>,
+    sent: &ConfirmedMessage<'_>,
+    now: i64,
+) -> Result<(), AppError> {
+    let Some(journal) = journal else {
+        return Ok(());
+    };
+    let stored = insert_message(
+        transaction,
+        policy,
+        &JournalInput {
+            source: sent.source,
+            direction: if journal.service_parent.is_some() {
+                MessageDirection::Service
+            } else {
+                MessageDirection::Outgoing
+            },
+            body: Some(&journal.body),
+            chat_label: None,
+            sender_label: None,
+            session: journal.session.as_ref(),
+            message_date: sent.message_date,
+            reply_to_message_id: journal.service_parent,
+        },
+        now,
+    )?;
+    if journal.document
+        && let Some(attachment) = &sent.document
+    {
+        insert_attachment(
+            transaction,
+            policy,
+            &AttachmentInput {
+                source: sent.source,
+                reply_id: None,
+                message_handle: Some(&stored.message_handle),
+                ..*attachment
+            },
+            now,
+        )?;
+    }
+    // Replace this reservation by committed charges under the caller's database lock.
+    drop(journal.reservation);
+    Ok(())
 }
 
 pub(super) fn insert_message(
@@ -392,6 +558,7 @@ pub(super) fn check_capacity(
     policy: &crate::config::History,
     registry: &super::registry::RegistryPolicy,
     reserved: u64,
+    history: &ReservedHistory,
     physical_limit: u64,
 ) -> Result<(), AppError> {
     let used = history_usage(connection)?;
@@ -403,11 +570,16 @@ pub(super) fn check_capacity(
     // still reject writes; no pressure operation deletes valid records or confirms input.
     let headroom = registry.inbox_bytes.saturating_sub(inbox.payload_bytes)
         + registry.metadata_bytes.saturating_sub(inbox.metadata_bytes)
-        + reserved;
-    if used.records > u64::from(policy.max_records)
-        || used.attachments > u64::from(policy.max_attachments)
-        || used.body_bytes > u64::from(policy.max_body_bytes)
-        || used.metadata_bytes > u64::from(policy.max_metadata_bytes)
+        + reserved
+        + history.body_bytes.load(Ordering::SeqCst)
+        + history.metadata_bytes.load(Ordering::SeqCst);
+    if used.records + history.records.load(Ordering::SeqCst) > u64::from(policy.max_records)
+        || used.attachments + history.attachments.load(Ordering::SeqCst)
+            > u64::from(policy.max_attachments)
+        || used.body_bytes + history.body_bytes.load(Ordering::SeqCst)
+            > u64::from(policy.max_body_bytes)
+        || used.metadata_bytes + history.metadata_bytes.load(Ordering::SeqCst)
+            > u64::from(policy.max_metadata_bytes)
         || pages.checked_sub(free).ok_or(AppError::StorageFailure)? * page_size + headroom
             > physical_limit
     {

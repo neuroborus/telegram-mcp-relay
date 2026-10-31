@@ -256,6 +256,7 @@ impl Database {
                     &self.history,
                     &self.registry,
                     reserved_bytes,
+                    &self.reserved_history,
                     self.main_file_limit_bytes,
                 )?;
             }

@@ -22,6 +22,7 @@ pub struct SentMessage {
     pub message_id: i64,
     pub date: i64,
     pub chat: Chat,
+    pub document: Option<Attachment>,
 }
 
 /// Minimal target metadata for routing and service-loop suppression; never recurse.

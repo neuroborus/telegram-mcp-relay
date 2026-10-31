@@ -14,6 +14,8 @@ use crate::{config::Storage, repositories::Session, services::files::OutboundFil
 
 #[path = "documents.rs"]
 mod documents;
+#[path = "history.rs"]
+mod history;
 #[path = "typing.rs"]
 mod typing;
 
@@ -142,7 +144,13 @@ impl Fixture {
 
     fn open(&self) -> Arc<Mutex<Database>> {
         Arc::new(Mutex::new(
-            Database::open(&self.config.storage, &self.config.limits).unwrap(),
+            Database::open_with_history(
+                &self.config.storage,
+                &self.config.limits,
+                &self.config.history,
+                self.config.history.enabled,
+            )
+            .unwrap(),
         ))
     }
 

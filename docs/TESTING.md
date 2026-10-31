@@ -28,7 +28,7 @@ handles/display snapshots, redaction, deduplication/restart, independent expiry,
 provenance after disabling/acknowledgment, admission rollback and bounded cleanup/reclamation.
 Storage migration coverage preserves v1–v8 recovery data through v9 and checks transactional
 rollback of failed migrations. Configuration tests reject unsafe/inconsistent history
-budgets. These cases await FINALIZE; outgoing capture and public history/download tools remain pending.
+budgets. Public history/download tools remain pending.
 
 Incoming observation cases in `tests/ingress.rs` define authorized standalone text/document/
 photo capture, absence of unauthorized/unsupported content, unchanged notice/loop/route
@@ -46,6 +46,16 @@ source/ownership and independent reply deadline, orphan removal after acknowledg
 recovery, and exact accounting/foreign-key rollback across restart. Scheduler coverage awaits
 complete startup readiness before advancing paused time, including any yielding reclamation.
 These regressions await FINALIZE; no passing result is inferred from source inspection.
+
+## Confirmed outbound journal regressions
+
+`src/services/outbound/history.rs` defines opted-in text/document capture, admission-time display
+snapshots during rename/cancellation/draining, returned metadata, no source paths/bytes, deduplication,
+restart and independent expiry. Its rejection/uncertainty/SQL/metadata-failure cases preserve route,
+activity, coverage and capacity rollback without replay. Four-budget races cover other sends and
+incoming observation/cursor rollback. Notice cases define service context, atomic success-ID/journal
+rollback, pressure before attempt consumption, cancellation and restart-safe no-replay behavior.
+These new cases await FINALIZE; no executed or live result is inferred here.
 
 ## Repository gates
 
@@ -242,7 +252,7 @@ the Reply body. Multiple Replies have distinct stable IDs and receipt order. An 
 document and a captioned photo retain metadata through actual getUpdates, read-only MCP resource
 snapshots and concurrent per-session inbox claims. Reopened storage retains all six composite
 routes and seven unacknowledged Replies. After deleting the original outbound file, the fixture
-contains only SQLite, with no outbound bodies, captions, quoted original text, file bytes or
+contains only SQLite with history disabled, with no outbound bodies, captions, quoted original text, file bytes or
 local paths. The bounded mock accepts actual multipart uploads; response gates replace sleeps.
 
 `app::tests::recovery` combines actual modern subscriptions/listen, Telegram long polling,
@@ -609,7 +619,7 @@ mark the unchanged product specification accepted or establish named-client/live
 | Three concurrent sessions; same-title identity; normalized rename; old text/document Replies; multiple distinct ordered Replies (§§4.1–4.3, 16, 19) | [Daemon conversation](../src/app/tests/conversations.rs), `three_sessions_route_interleaved_old_text_and_document_replies_after_rename`; [registry tests](../tests/registry.rs) retain cross-chat message-ID collision and identity/restart proofs |
 | Attachment-only document and photo-caption metadata; resource reads and inbox claims preserve original-session routing (§§6, 9, 16, 19) | The daemon conversation above; [ingress](../tests/ingress.rs) and [MCP inbox](../src/routes/inbox.rs) retain authorization, rollback, pagination and fencing boundaries |
 | Title graphemes, final scalar/native caption limits, structured rejection without splitting/truncation or effects (§§4.2, 9, 16, 19) | [Outbound domain tests](../src/domain/outbound/tests.rs), [MCP tools](../src/routes/tools.rs) and [ask tests](../src/routes/ask.rs) |
-| Streamed, confined, Reply-routable files without retained outbound history/copies (§§9, 12, 16, 19) | Daemon conversation checks actual multipart contents, routes and persisted files; [file tests](../src/services/files/tests.rs), [document tests](../src/services/outbound/documents.rs) and [upload tests](../src/clients/telegram/upload.rs) retain path-race, mutation and bounded-read proofs |
+| Streamed, confined, Reply-routable files without source copies/default outbound history (§§9, 12, 16, 19) | Daemon conversation checks actual multipart contents, routes and persisted files; [file tests](../src/services/files/tests.rs), [document tests](../src/services/outbound/documents.rs) and [upload tests](../src/clients/telegram/upload.rs) retain path-race, mutation and bounded-read proofs |
 | Unknown/expired routes never reassigned; unauthorized input excluded; durable atomic cursor (§§4.3, 10–12, 16, 19) | [Ingress](../tests/ingress.rs), [retention](../tests/retention.rs) and [poller tests](../src/services/polling/tests.rs) |
 | Always-active events, enabled/disabled bounded waits, one reply shared by ask/inbox/resource consumers (§§5–6, 16, 19) | [Daemon recovery](../src/app/tests/recovery.rs), `subscribed_ask_and_inbox_claims_reconcile_and_recover_missed_acknowledgments`; [ask tests](../src/routes/ask.rs) retain disabled waiting, initial recheck and question-targeting proofs |
 | Wait timeout/cancellation never deletes routes/replies, acknowledges work, interrupts agents or emits timeout notices (§§6.2, 11, 16, 19) | [Ask tests](../src/routes/ask.rs), controlled timeout/late-reply recovery and subscribed disconnect cases; [daemon shutdown](../src/app/tests.rs) retains admitted send/ingress draining proofs |

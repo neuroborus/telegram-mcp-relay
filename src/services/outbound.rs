@@ -10,7 +10,10 @@ use crate::{
     config::Config,
     domain::outbound::{FormattedMessage, format_caption, format_text},
     error::{AppError, TelegramError},
-    repositories::{Database, RouteKind, RouteReservation},
+    repositories::{
+        AttachmentInput, AttachmentKind, ConfirmedMessage, Database, MessageSource,
+        OutgoingJournal, RouteKind, RouteReservation,
+    },
 };
 
 use super::{files::ValidatedFile, typing::TypingService, unix_millis};
@@ -124,7 +127,7 @@ impl OutboundService {
         // Track before admission: close/wait cannot miss a task that already has a permit,
         // even when another thread closes admission before the task is spawned.
         let task = self.tasks.token();
-        let (delivery, reservation, permit) = {
+        let (delivery, reservation, journal, permit) = {
             let mut database = self.database.lock().map_err(|_| AppError::StorageFailure)?;
             let session = database.session(session_key)?;
             let delivery = if let Some(file) = file {
@@ -143,7 +146,13 @@ impl OutboundService {
                 .try_acquire_owned()
                 .map_err(|_| AppError::SendCapacity)?;
             let reservation = database.reserve_route(session_key)?;
-            (delivery, reservation, permit)
+            let (text, document) = match &delivery {
+                Delivery::Text(text) => (text, false),
+                Delivery::Document(text, _) => (text, true),
+            };
+            let journal =
+                database.reserve_outgoing(text.as_str(), Some(&session), document, None)?;
+            (delivery, reservation, journal, permit)
         };
         // No await separates admission from transfer to the owned task. Dropping the join
         // handle cannot abort the send or the synchronous post-send transaction.
@@ -153,7 +162,7 @@ impl OutboundService {
         let handle = self.tasks.spawn(async move {
             let _permit = permit;
             let result = service
-                .send_reserved(delivery, reservation, &session_key)
+                .send_reserved(delivery, reservation, journal, &session_key)
                 .await;
             if let Err(error) = &result {
                 // Detached callers must not hide uncertainty; log only a safe static code.
@@ -173,6 +182,7 @@ impl OutboundService {
         &self,
         delivery: Delivery,
         reservation: RouteReservation,
+        journal: Option<OutgoingJournal>,
         session_key: &str,
     ) -> Result<SentMessage, AppError> {
         let (sent, kind) = match delivery {
@@ -193,7 +203,7 @@ impl OutboundService {
         // A known accepted result clears this session even if route persistence fails.
         // Rejected or ambiguous sends cannot establish that the agent sent its result.
         self.typing.stop_session(session_key);
-        self.record_success(reservation, &sent, kind)?;
+        self.record_success(reservation, &sent, kind, journal)?;
         Ok(sent)
     }
 
@@ -202,26 +212,45 @@ impl OutboundService {
         reservation: RouteReservation,
         sent: &SentMessage,
         kind: RouteKind,
+        journal: Option<OutgoingJournal>,
     ) -> Result<(), AppError> {
-        // Bot API dates are seconds; every repository timestamp is milliseconds.
-        let created_at = sent
-            .date
-            .checked_mul(1_000)
-            .ok_or(AppError::SendBookkeepingFailed)?;
+        let confirmed = confirmed_message(sent)?;
         let now = (self.now)().map_err(|_| AppError::SendBookkeepingFailed)?;
         self.database
             .lock()
             .map_err(|_| AppError::SendBookkeepingFailed)?
-            .persist_route(
-                reservation,
-                self.chat_id,
-                sent.message_id,
-                kind,
-                created_at,
-                now,
-            )
+            .persist_outgoing_route(reservation, &confirmed, kind, journal, now)
             .map_err(|_| AppError::SendBookkeepingFailed)
     }
+}
+
+pub(super) fn confirmed_message(sent: &SentMessage) -> Result<ConfirmedMessage<'_>, AppError> {
+    let source = MessageSource {
+        chat_id: sent.chat.id,
+        message_id: sent.message_id,
+        sender_user_id: None,
+    };
+    Ok(ConfirmedMessage {
+        source,
+        // Bot API dates are seconds; repository timestamps are milliseconds.
+        message_date: sent
+            .date
+            .checked_mul(1_000)
+            .ok_or(AppError::SendBookkeepingFailed)?,
+        document: sent.document.as_ref().map(|file| AttachmentInput {
+            source,
+            reply_id: None,
+            message_handle: None,
+            file_id: &file.file_id,
+            file_unique_id: &file.file_unique_id,
+            filename: file.file_name.as_deref(),
+            mime_type: file.mime_type.as_deref(),
+            file_size: file.file_size,
+            kind: AttachmentKind::Document,
+            width: None,
+            height: None,
+        }),
+    })
 }
 
 // Unwinding an admitted task must reach supervision even if its caller disconnected.

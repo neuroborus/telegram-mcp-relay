@@ -11,7 +11,7 @@ use std::{
 use rusqlite::{Connection, OptionalExtension, Row, TransactionBehavior};
 use tokio::sync::Notify;
 
-use super::Database;
+use super::{ConfirmedMessage, Database, MessageSource, OutgoingJournal, history};
 use crate::{
     config::{Limits, Storage},
     domain::outbound::{DirectoryLabel, SessionTitle},
@@ -328,9 +328,40 @@ impl Database {
         created_at: i64,
         now: i64,
     ) -> Result<(), AppError> {
+        self.persist_outgoing_route(
+            reservation,
+            &ConfirmedMessage {
+                source: MessageSource {
+                    chat_id,
+                    message_id,
+                    sender_user_id: None,
+                },
+                message_date: created_at,
+                document: None,
+            },
+            kind,
+            None,
+            now,
+        )
+    }
+
+    pub(crate) fn persist_outgoing_route(
+        &mut self,
+        reservation: RouteReservation,
+        sent: &ConfirmedMessage<'_>,
+        kind: RouteKind,
+        journal: Option<OutgoingJournal>,
+        now: i64,
+    ) -> Result<(), AppError> {
         if !Arc::ptr_eq(&reservation.reserved, &self.reserved_routes) {
             return Err(AppError::InvalidRequest("route reservation"));
         }
+        let MessageSource {
+            chat_id,
+            message_id,
+            ..
+        } = sent.source;
+        let created_at = sent.message_date;
         if chat_id == 0 || message_id <= 0 {
             return Err(AppError::InvalidRequest("Telegram message identity"));
         }
@@ -359,6 +390,18 @@ impl Database {
              expires_at = max(expires_at, ?3) WHERE session_key = ?1",
             (&reservation.session_key, now, session_expiry),
         )?;
+        let capturing = journal.is_some();
+        history::insert_outgoing(&transaction, &self.history, journal, sent, now)?;
+        if capturing {
+            history::check_capacity(
+                &transaction,
+                &self.history,
+                &self.registry,
+                self.reserved_routes.bytes.load(Ordering::SeqCst) - reservation.bytes,
+                &self.reserved_history,
+                self.main_file_limit_bytes,
+            )?;
+        }
         transaction.commit()?;
         Ok(())
     }

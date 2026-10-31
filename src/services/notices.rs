@@ -15,7 +15,7 @@ use crate::{
     repositories::{Database, NoticeKind, NoticePolicy},
 };
 
-use super::unix_millis;
+use super::{outbound::confirmed_message, unix_millis};
 
 pub struct NoticeService {
     database: Arc<Mutex<Database>>,
@@ -99,35 +99,60 @@ impl NoticeService {
     }
 
     async fn dispatch_one(&self, now: i64) -> Result<(), AppError> {
-        let (attempt, text) = {
+        let (attempt, text, journal) = {
             let mut database = self.database.lock().map_err(|_| AppError::StorageFailure)?;
-            let Some(attempt) = database.take_notice_attempts(&self.policy, 1, now)?.pop() else {
+            let Some(candidate) = database.next_notice(&self.policy, now)? else {
                 return Ok(());
             };
-            if !self.chats.contains(&attempt.telegram_chat_id) {
+            if !self.chats.contains(&candidate.telegram_chat_id) {
+                database.take_notice_attempt(&self.policy, &candidate, now)?;
                 return Ok(()); // An old authorization never overrides the current allowlist.
             }
-            let text = match &attempt.kind {
-                NoticeKind::Unconfirmed { session_key } => {
-                    let session = database.session(session_key)?;
+            let prepared = (|| {
+                let session = match &candidate.kind {
+                    NoticeKind::Unconfirmed { session_key } => Some(database.session(session_key)?),
+                    NoticeKind::Unroutable => None,
+                };
+                let text = if let Some(session) = &session {
                     format_notice(
                         Some(&session.title),
                         session.directory_label.as_ref(),
                         UNCONFIRMED_NOTICE,
                     )?
+                } else {
+                    format_notice(None, None, UNROUTABLE_NOTICE)?
+                };
+                Ok::<_, AppError>((session, text))
+            })();
+            let (session, text) = match prepared {
+                Ok(prepared) => prepared,
+                Err(error) => {
+                    // Invalid final formatting still consumes the attempt, without replay.
+                    database.take_notice_attempt(&self.policy, &candidate, now)?;
+                    return Err(error);
                 }
-                NoticeKind::Unroutable => format_notice(None, None, UNROUTABLE_NOTICE)?,
             };
-            (attempt, text)
+            let journal = database.reserve_outgoing(
+                text.as_str(),
+                session.as_ref(),
+                false,
+                Some(candidate.trigger_message_id),
+            )?;
+            let Some(attempt) = database.take_notice_attempt(&self.policy, &candidate, now)? else {
+                return Ok(());
+            };
+            (attempt, text, journal)
         };
         let sent = self
             .telegram
             .send_message(attempt.telegram_chat_id, &text)
             .await?;
+        let confirmed = confirmed_message(&sent).map_err(|_| AppError::StorageFailure)?;
+        let now = (self.now)()?;
         self.database
             .lock()
             .map_err(|_| AppError::StorageFailure)?
-            .record_notice_message(&attempt, sent.message_id)
+            .record_notice_message(&attempt, &confirmed, journal, now)
     }
 }
 

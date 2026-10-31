@@ -45,6 +45,7 @@ pub use history::{
     AttachmentInput, AttachmentKind, HistoryCoverage, HistoryUsage, JournalInput, MessageDirection,
     MessageSource, StoredMessage,
 };
+pub(crate) use history::{ConfirmedMessage, OutgoingJournal};
 
 const SCHEMA_VERSION: i64 = 9;
 const APPLICATION_ID: i64 = 0x544d4352; // TMCR
@@ -56,6 +57,7 @@ pub struct Database {
     main_file_limit_bytes: u64,
     registry: registry::RegistryPolicy,
     history: History,
+    reserved_history: Arc<history::ReservedHistory>,
     reserved_routes: Arc<registry::ReservedRoutes>,
     pending_routes: Vec<Weak<String>>,
     pub(crate) poll_admission: Arc<Semaphore>,
@@ -139,6 +141,7 @@ impl Database {
             registry,
             history: history.clone(),
             reserved_routes: Arc::default(),
+            reserved_history: Arc::default(),
             pending_routes: Vec::new(),
             poll_admission: Arc::new(Semaphore::new(1)),
             notice_admission: Arc::new(Semaphore::new(1)),
