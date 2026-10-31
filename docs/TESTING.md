@@ -515,9 +515,13 @@ Release acceptance records Linux target/toolchain, stripped locked release binar
 dependency profile, startup time, idle RSS/CPU and peak RSS during a near-limit streamed upload.
 Use an identified reproducible workload and state whether Telegram is mocked. The sub-30 MB
 idle target is best effort, not an unmeasured guarantee or a brittle unit-test assertion.
-The [measurement document](MEASUREMENTS.md) owns the implemented release probe and bounded Python
-collectors, with orchestration/evidence still pending; source/build checks do not attest runtime
-measurements.
+The [measurement document](MEASUREMENTS.md) owns the release probe, bounded Python collectors,
+mock/driver and receipt-gated HOST controller. `tools/tests/test_measure_resources.py` uses
+controlled processes, pipes and clocks for prerequisite/profile rejection, phase coordination,
+PID identity, artifact changes, retirement and exclusive failure reporting. It opens no network
+sockets or Cargo build processes. These tests belong to the existing P1/P2 FINALIZE gates;
+their execution and actual HOST evidence remain pending for this change. Source/build checks
+do not attest runtime measurements; existing complete C6 owns actual HTTP/routing proofs.
 
 Native Runner commands use the accepted staging-independent inventory and
 [Runner finalization](../.agents/skills/finalization/agent-runner.md). Staged inspection belongs

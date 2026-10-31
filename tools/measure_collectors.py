@@ -50,7 +50,7 @@ def private_workspace():
         yield Path(directory)
 
 
-def run_command(arguments, *, cwd, timeout=30):
+def run_command(arguments, *, cwd, timeout=30, environment=None):
     """Run only closed inspection vectors, retiring children on any failure."""
     arguments = tuple(arguments)
     if arguments not in EVIDENCE_COMMANDS:
@@ -61,7 +61,7 @@ def run_command(arguments, *, cwd, timeout=30):
         process = subprocess.Popen(
             arguments, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL, start_new_session=True,
-            env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"},
+            env={**(os.environ if environment is None else environment), "GIT_OPTIONAL_LOCKS": "0"},
         )
     except OSError as error:
         raise MeasurementError("missing or unusable command prerequisite") from error

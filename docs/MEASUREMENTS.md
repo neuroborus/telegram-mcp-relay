@@ -75,7 +75,7 @@ The production locked release build remains independently required.
 
 [measure_mock.py](../tools/measure_mock.py) is the standard-library Python 3.9+ peer for the
 probe's `/botSynthetic/` requests. It runs in one separate process, binds only numeric loopback
-addresses and never forwards requests. Its subordinate interface for the future orchestrator is:
+addresses and never forwards requests. Its subordinate interface for the controller is:
 
 ```text
 python3 tools/measure_mock.py --listen 127.0.0.1 --port 0
@@ -107,13 +107,13 @@ oversized/malformed input and exhausted worker/request budgets fail; failures re
 in the exit status. The mock does not implement incoming replies or live Telegram semantics.
 
 Controlled stream/event/server tests cover framing, bounded draining, cancellation and failure
-paths without binding sockets. Their execution belongs to P1/P2 in FINALIZE. Orchestration,
-real HOST capture and quantitative release acceptance remain pending.
+paths without binding sockets. Their execution belongs to P1/P2 in FINALIZE. Real HOST capture
+and quantitative release acceptance remain pending.
 
 ## Synthetic MCP driver
 
 [measure_driver.py](../tools/measure_driver.py) is a separate standard-library Python 3.9+
-process. Its subordinate interface for the future orchestrator is:
+process. Its subordinate interface for the controller is:
 
 ```text
 python3 tools/measure_driver.py --mcp-address 127.0.0.1:<port> --allowed-root <private-export-root>
@@ -179,8 +179,8 @@ FINALIZE; source and unit tests establish no real runtime/resource result.
 
 [measure_collectors.py](../tools/measure_collectors.py) provides standard-library Python 3.9+
 building blocks. It does not launch the probe, run a workload, build binaries or produce a
-runtime acceptance report. The separate mock and driver above are implemented; orchestration
-and indexed release evidence remain subsequent planned work. Its interfaces are:
+runtime acceptance report. The controller below composes these collectors with the separate
+mock and driver. Indexed release evidence remains pending. Its interfaces are:
 
 | Collector | Result and limits |
 | --- | --- |
@@ -220,7 +220,7 @@ No command fetches dependencies, repairs prerequisites or runs a release build.
 Git inspection disables optional locks/index refreshes with `GIT_OPTIONAL_LOCKS=0`.
 
 These identities record what was observed together. A digest is an integrity/binding check,
-not proof that arbitrary binaries were built from that source. The later orchestrator must
+not proof that arbitrary binaries were built from that source. The controller must
 verify accepted R1/R2/tooling prerequisites, preserve the exact build/profile provenance and
 recheck source/binaries around the workload. Bind all effective synthetic settings and workload
 details, including sample cadence, upload size and separate mock behavior; omit secrets and
@@ -228,12 +228,113 @@ machine-local private paths. Runtime identity/prerequisite failures must remain 
 Collector tests use synthetic proc/ELF files and substituted commands/clocks; they establish
 neither resource targets nor live Telegram behavior. Their execution belongs to FINALIZE.
 
-The assigned HOST commands remain pending until the orchestrator and its prerequisites exist:
+## HOST controller and prerequisites
+
+[measure_resources.py](../tools/measure_resources.py) implements the assigned interface:
 
 ```bash
 python3 tools/measure_resources.py --mock --output LOCAL_ARTIFACTS/mvp-measurements.json
 systemd-analyze --user verify deploy/telegram-mcp-relay.service
 ```
+
+The CLI disables bytecode caching before local imports so startup preserves the clean source tree.
+
+The second command remains a separate operator action. Neither command runs in IMPLEMENT or
+review. Capture remains **Pending HOST**; no measured value or accepted unit verification is
+recorded here. Linux `/proc`, Python 3.9+, Git, a native supported Rust toolchain and a complete
+local locked dependency cache are prerequisites. Missing inputs fail without fetching/repair.
+
+Before capture, the coordinator must export actual successful public Runner receipts to the
+ignored `LOCAL_ARTIFACTS/mvp-measurement-prerequisites.json`. This is a new measurement input,
+not a change to frozen Runner configuration/guidance or an export of Runner scratch/private
+state. The controller does not operate Runner. The JSON envelope is:
+
+```text
+schema_version: 1
+pipeline: "plan-execution"
+mode: "independent"
+step: 3
+run_id: <canonical public run UUID>
+source: <collectors.source_identity(root): head, tree, manifest and lock identities>
+rustc: <exact stripped stdout from rustc -vV>
+cargo: <exact stripped stdout from cargo --version>
+public_status: {runId: <same UUID>, completedCommits: <public execution projection's array>}
+checks: [{id, command, status: "PASS", route, public_revision}, ...]
+```
+
+The last public verified commit must equal the clean capture HEAD. Supply one check record for
+each of C1–C10 in the persisted step-3 inventory: C7/C8 are R1/R2 and C9/C10 are P1/P2.
+Preserve these actual receipt IDs, with the exact established command strings
+and positive integer public receipt revisions. Routes are `runner-trusted` for C4–C6 and
+`native` for the others. Obtain both the Native and selected trusted successful receipts;
+Native `NOT_RUN` for a selected command is insufficient. The global bootstrap catalog uses
+C11/C12 for R1/R2 and C13/C14 for P1/P2; those catalog IDs are distinct from persisted step-3
+receipt IDs. The frozen fourteen-row catalog, conditional helper gates and complete schedule
+remain unchanged. This file records commit 3 prerequisites and does not replace that catalog
+or renumber exported receipts. Do not synthesize PASS records from build/unit/source
+success, HOST execution or a clean tree. Coordinator exports are trusted operational input,
+not cryptographic attestations; retain the original public observations for evidence review.
+
+Only after these receipts match clean source and toolchain does the ordinary CLI materialize
+unchanged release builds. It starts with an empty private target directory, using these exact
+subordinate vectors (the mandatory Runner R1/R2 commands above remain separate):
+
+```bash
+cargo build --locked --offline --release --bin telegram-mcp-relay
+cargo build --locked --offline --release --example resource_probe
+```
+
+Both run with private `CARGO_TARGET_DIR`/`TMPDIR`, `CARGO_BUILD_JOBS=1` and
+`CARGO_NET_OFFLINE=true`. Inspection/build children disable Rustup automatic installation and
+update checks. Each build has a 600-second deadline and a 2 MiB combined diagnostic cap;
+diagnostic contents are discarded. Existing Cargo/Rust profile, target, flag and wrapper
+environment overrides and Cargo configuration files at the Cargo home or repository/ancestor
+levels and Git identity/index overrides are rejected. The manifest must retain thin LTO,
+one codegen unit and stripping. Normal HOST cache/toolchain access supplies prerequisites;
+no Runner scratch is exported and no HOST
+build counts as R1/R2. Builds and inspection children are excluded from runtime peer samples.
+
+The controller creates one exclusive mode-0700 TMPDIR-aware workspace, separate database/export
+roots and mode-0600 credential-free TOML. All effective nonsecret settings are explicit and
+recorded with logical private-path roles, synthetic chat `-101`, user `202`, default bounds and
+45-second polling. The MCP port is selected on numeric loopback; the existing probe interface
+requires releasing that reservation before launch. A competing bind fails without retry.
+
+Startup records launch-to-probe-ready and launch-to-confirmed-MCP-discovery separately, bounded
+by 60 seconds. The driver remains alive during a 50-second idle window, covering a complete
+45-second long poll, then performs its one 49,999,999-byte upload. Requested sampling cadence
+is 0.5 seconds for each of probe, mock and driver; actual timestamps, RSS/CPU counters and
+PID/start-tick identities accompany summaries. Upload sampling is primed before dispatch and
+retains a trailing observation, even when the request completes between cadence ticks. Its
+590-second controller deadline bounds observation without changing the production upload
+limit/deadline. Both driver event timestamps delimit the request interval; the sampled window
+also includes controller/MCP overhead. No mock pacing is added. Final mock accounting must
+confirm exactly one document and exactly 49,999,999 drained bytes.
+
+Before/after upload `VmHWM` readings retain process-lifetime scope. Short spikes may be absent
+from sampled maxima; an earlier startup/idle peak can dominate lifetime high water. Source,
+manifest/lock, toolchain, stripped ELF hashes/sizes, separate dependency-feature profiles,
+generated config identity, settings and workload are checked around capture. Private paths,
+session keys, child diagnostics and content are absent from the report. Probe bootstrap and
+dev-feature differences remain disclosed; controller/build/cache costs are excluded.
+
+Each peer uses its own process group and bounded control/output pipes. The controller drains
+and reaps the driver, probe and mock, checks exit statuses, and verifies group retirement.
+Failure/cancellation retires every owned group, escalating after five seconds where necessary;
+forced termination fails the capture and retains delivery uncertainty. Unverified retirement
+preserves owned temporary resources instead of deleting beneath possible survivors. Verified
+retirement permits removal only of the controller's original workspace. Completed phase data
+and safe failure phase remain in a failed report, along with owned process exit/retirement
+records (start ticks are unavailable for excluded build children or a failed initial sample).
+A failed capture never becomes a pass.
+
+The output must be beneath an existing nonsymlink repository `LOCAL_ARTIFACTS/` directory.
+Publication is atomic, mode-0600 and exclusive: existing evidence is never overwritten. The
+coordinator must preserve/archive a previous report before an authorized repeat capture. Output
+failure returns nonzero with a static diagnostic. Controlled orchestration tests exercise
+prerequisite rejection, framing, process ownership, phase coordination, identity changes and
+failure publication; they do not establish measured resource use. Accept a capture only with
+both zero CLI exit status and report `status: "success"`.
 
 HOST never replaces root/helper checks or either locked release build. Capture only at a
 verified paused-idle boundary with retired turns/children and quiescent ownership, or after

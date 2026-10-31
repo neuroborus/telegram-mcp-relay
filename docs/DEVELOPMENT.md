@@ -129,8 +129,10 @@ Do not infer release-build success from development compilation or a HOST measur
 
 [Bounded Python collectors](MEASUREMENTS.md#bounded-collectors) inspect existing artifacts and
 Linux samples without building or orchestrating a workload. Their P1/P2 source/unit gates are
-Native FINALIZE obligations; no Python lint gate is added. Future mock orchestration must
-disclose prerequisites and source/build/workload identity before capture. Runtime capture and
+Native FINALIZE obligations; no Python lint gate is added. The [HOST controller](MEASUREMENTS.md#host-controller-and-prerequisites)
+requires coordinator-exported actual public successful R1/R2/tooling receipts and records
+source/build/workload identity before capture. It may materialize unchanged offline release
+artifacts in private temporary output only after those gates pass. Runtime capture and
 user-unit verification belong to the task's HOST boundary, after applicable tooling/release
 gates and verified quiescent ownership. They do not
 run inside implementation/review turns or replace required checks; quantitative evidence remains
