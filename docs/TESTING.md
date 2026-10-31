@@ -86,8 +86,9 @@ quiescent ownership boundary. See [probe interface and evidence limits](MEASUREM
 
 ## Python measurement tooling gates
 
-The standard-library [collectors](../tools/measure_collectors.py),
-[loopback mock](../tools/measure_mock.py), [MCP driver](../tools/measure_driver.py) and their
+The standard-library [HOST controller](../tools/measure_resources.py),
+[collectors](../tools/measure_collectors.py), [loopback mock](../tools/measure_mock.py),
+[MCP driver](../tools/measure_driver.py) and their
 controlled tests under `tools/tests/`
 use this Native FINALIZE inventory:
 
@@ -103,7 +104,8 @@ ELF stripping/hash/size and mutation checks, clean source/build/feature identiti
 tampered settings/workload bindings, missing commands, output/deadline failures and private
 TMPDIR-aware cleanup. Clocks, proc files, binaries and command processes are controlled synthetic
 substitutes; these tests bind no sockets, invoke no Cargo/Git commands and measure no real daemon.
-Execution remains pending FINALIZE. Source/unit gates never replace the assigned HOST workload.
+Recorded P1/P2 outcomes are described below. Source/unit gates never replace the assigned HOST
+workload.
 
 [Mock tests](../tools/tests/test_measure_mock.py) use split input streams, generated near-limit
 zero runs, substituted clocks/events and server lifecycle substitutes. They cover exact binary
@@ -113,7 +115,8 @@ JSON/result construction, controlled Unix response timestamps, caption bounds,
 loopback binding policy, worker/request caps and shutdown-before-close on failure. They bind
 no sockets, install no signal handlers and establish no real resource measurements. Actual
 probe/Telegram HTTP and routing assertions remain owned by the complete C6 suite; the Python
-tests do not duplicate those proofs. Mock execution and quantitative HOST evidence remain pending.
+tests do not duplicate those proofs. The separate HOST capture is recorded in
+[measurements](MEASUREMENTS.md#recorded-host-capture).
 
 [Driver tests](../tools/tests/test_measure_driver.py) substitute MCP transports, HTTP peers,
 split control streams, clocks and phase controls. They cover modern per-request headers/metadata,
@@ -123,8 +126,36 @@ and redacted CLI failures. Private-file cases check the exact sparse workload si
 creation, confined mode-0700 roots, symlink/mutation rejection and descriptor closure on failed
 preparation. Files remain controller-owned until all peers retire; no test starts a child, binds
 a socket, installs signal handlers or samples a daemon. These tests belong to the unchanged
-P1/P2 FINALIZE gates. Actual MCP upload/committed-route assertions remain in C6; real orchestration
-and quantitative evidence remain HOST-owned and pending.
+P1/P2 FINALIZE gates. Actual MCP upload/committed-route assertions remain in C6; quantitative
+evidence comes from the separate HOST capture.
+
+## Recorded validation evidence
+
+The coordinator export for independent run `5852c1b2-e9ae-4736-a7fd-c1a541cfacf9` records
+aggregate finalization success at public revision 889, independent confirmation at 898 and
+verified commit `968802371f94f51eedab66998eff6031762db5ea` at the settled pause, revision 948.
+The source/tree, manifest/lock and toolchain agree with the
+[bound HOST record](MEASUREMENTS.md#provenance-and-release-identity). This reconciles the
+earlier source-defined pending-execution statements for the suites below. The evidence is a
+trusted coordinator export of public aggregate observations, not fresh check execution,
+cryptographic attestation, per-test counts or separate per-command logs/timings.
+
+| Prior step-3 obligation | Recorded outcome / owner |
+| --- | --- |
+| C1/C2 repository and whitespace; C3 formatting | Successful Native FINALIZE, aggregate revision 889 |
+| C4 Clippy, C5 rustdoc, C6 complete unfiltered workspace tests | Successful selected Runner-trusted FINALIZE, aggregate revision 889; Native `NOT_RUN` alone would not establish this |
+| R1 daemon and R2 probe locked release builds | Successful Native FINALIZE before HOST, aggregate revision 889 |
+| P1 Python source and P2 complete measurement unit suite | Successful Native FINALIZE, aggregate revision 889 |
+| HOST mocked capture | CLI exit 0 and report success/complete; separate process and workload accounting in measurements |
+| HOST user-unit verification | Failed, exit 1: configured executable absent; retained as unresolved operational evidence |
+| Current evidence-documentation changes | C1/C2 remain for their dedicated FINALIZE; the earlier receipts do not validate these edits |
+
+The exported persisted step-3 IDs C7/C8 denote R1/R2 and C9/C10 denote P1/P2. They do not
+renumber the frozen global fourteen-row catalog or change conditional helper H1–H4 applicability
+and selected trusted routes. No helper change or new helper-gate receipt is claimed here.
+The report and receipt identities, release profile, separate daemon/probe feature profiles
+and HOST retirement provenance are retained in the measurement record. Full MVP acceptance
+remains pending; live Telegram, named-client compatibility and idle-host wake are unverified.
 
 ## Behavioral acceptance
 
@@ -132,16 +163,15 @@ and quantitative evidence remain HOST-owned and pending.
 readiness followed by real MCP registration/send, caller cancellation and accepted-route
 draining/reopen, plus credential/remote-peer/listener rejection before storage or Telegram
 effects and failed cleanup without readiness. The example's pure argument tests reject DNS,
-remote/unspecified/zero-port peers and extra/missing arguments. These new tests await C6 in
-FINALIZE; no probe runtime capture or live Telegram acceptance is claimed.
+remote/unspecified/zero-port peers and extra/missing arguments. They are included in the
+recorded C6 outcome; the HOST probe capture is separate and establishes no live Telegram claim.
 
 Binary tests in `src/main.rs` launch isolated test subprocesses using the binary's shutdown
 signal registration. They send actual SIGINT and SIGTERM after a readiness gate, hold synthetic
 work until an explicit parent release, and check that a repeated signal permits completion
 before process exit. These tests cover signal delivery and continued execution during draining;
 the composition tests below cover actual send/route persistence with mocked Telegram.
-Signal-test execution remains pending the dedicated trusted FINALIZE suite; no signal test
-installs handlers in the parent test process or uses live Telegram.
+No signal test installs handlers in the parent test process or uses live Telegram.
 
 `app::tests` exercises the real daemon composition through modern MCP HTTP and a separate
 mocked Telegram service. It checks completion of a multi-batch startup cleanup before polling,
@@ -166,7 +196,6 @@ snapshots and concurrent per-session inbox claims. Reopened storage retains all 
 routes and seven unacknowledged Replies. After deleting the original outbound file, the fixture
 contains only SQLite, with no outbound bodies, captions, quoted original text, file bytes or
 local paths. The bounded mock accepts actual multipart uploads; response gates replace sleeps.
-Execution remains pending the complete trusted FINALIZE suite.
 
 `app::tests::recovery` combines actual modern subscriptions/listen, Telegram long polling,
 an ask and two competing inbox consumers with three reply slots and one-slot event queues.
@@ -180,7 +209,6 @@ first offset and initial subscription invalidation recover the one pending reply
 original ID; redelivery does not duplicate it. This models lost post-commit wakeups rather
 than injecting a process kill between synchronous commit/publish instructions. Fixtures use
 the production composition, private TMPDIR-aware storage and explicit HTTP response gates.
-Execution remains pending the dedicated complete trusted FINALIZE suite.
 
 `services::outbound::tests` holds admitted document responses across admission closure, proving
 the drain waits for success, rejection, uncertainty and failed persistence, with released task/
@@ -194,8 +222,8 @@ retire while clients remain connected, and closed tool admission rejects later s
 Existing transport shutdown and poller lease/cancellation cases cover stalled clients and
 uncommitted input without repeating them.
 These cases address shutdown and bounded-resource recovery in specification §§3, 6, 11, 16 and 19.
-Execution remains pending the dedicated trusted FINALIZE suite; subscription, ask and recovery
-acceptance interactions are defined in `app::tests::recovery` above.
+Subscription, ask and recovery acceptance interactions are defined in `app::tests::recovery`
+above.
 
 `routes::tests` exercises real loopback HTTP discovery, native/same-origin clients, bearer auth,
 hostile/duplicate headers, paths, missing/mismatched `Mcp-Method`, required version/capability
@@ -203,8 +231,8 @@ metadata, safe protocol failures and inclusive body bounds with declared/chunked
 Test-only SDK handlers check shared
 handler state across requests, safe correlation extensions, calls beyond 600 seconds, SSE
 admission, disconnect release and transport shutdown using explicit gates/controlled time.
-Fixtures are private, randomized and TMPDIR-aware. Execution remains pending FINALIZE;
-these transport probes do not establish named client compatibility.
+Fixtures are private, randomized and TMPDIR-aware. These transport probes do not establish
+named-client compatibility.
 
 `routes::tests::tools` exercises the real shared handler through separate modern MCP HTTP
 requests and a separate synthetic Bot API. It covers typed input/output discovery, stable
@@ -217,8 +245,7 @@ arguments/tools remain JSON-RPC errors; application failures are structured tool
 redacted counts/guidance. Tool-call fixtures supply the required matching `Mcp-Name`; missing
 and mismatched values retain the SDK header-error code/request ID without effects or input echo.
 Rejection, uncertain delivery and post-send persistence failure remain distinct, without replay
-or invented routes. Fixtures are private, randomized and TMPDIR-aware;
-execution remains pending the dedicated trusted FINALIZE suite.
+or invented routes. Fixtures are private, randomized and TMPDIR-aware.
 
 `routes::tests::inbox` adds actual modern MCP requests for stable template/empty resource
 listings across registration, direct reads, tied-receipt pagination, session separation,
@@ -228,7 +255,7 @@ explicit reconciliation, a lost reconciliation response across a fresh handler/d
 stale/wrong-session fencing and idempotent per-reply completion use the shared transitions.
 Invalid URIs, limits, listing cursors and tool arguments return safe errors without claiming.
 Fixtures honor TMPDIR and use private randomized directories; no live Telegram calls are made.
-Execution remains pending FINALIZE. These cases cover the read/claim/recovery portion of
+These cases cover the read/claim/recovery portion of
 specification §§6.3, 16 and 19; cross-feature ask interactions are described below.
 
 `routes::tests::subscriptions` defines actual MCP 2026-07-28 POST SSE interactions through
@@ -242,9 +269,8 @@ but before listener setup, listener admission, disconnect retirement, queue over
 recovery of offline commits through a fresh handler/database. Pure queue tests independently
 prove coalescing, slow-listener isolation, uninterested-session silence, drop-based admission
 release and budget validation. Fixtures are private and TMPDIR-aware; no live Telegram calls are made.
-These tests address subscription/reconnect and bounded slow-client criteria in §§6.1, 16 and 19;
-their execution remains pending the complete trusted FINALIZE suite. Named-client
-interoperability remains later acceptance work.
+These tests address subscription/reconnect and bounded slow-client criteria in §§6.1, 16 and 19.
+Named-client interoperability remains unverified.
 
 `routes::tests::ask` defines actual mocked Telegram sends and modern MCP calls alongside
 resource subscriptions. It covers exact formatted question boundaries, independent waiter
@@ -265,8 +291,8 @@ the other session's reply only once. The disconnect scenarios keep a real subscr
 through cancellation before/after send and after reply commit, preserving event delivery and
 restart recovery independently of the canceled waiter.
 These cases cover the ask/event/race, timeout and wait-cancellation portions of §§6.2–6.3,
-16 and 19. Fixtures are private and TMPDIR-aware. Execution remains pending FINALIZE;
-full-composition interactions are defined above, and named-client interoperability is unverified.
+16 and 19. Fixtures are private and TMPDIR-aware. Full-composition interactions are defined
+above, and named-client interoperability is unverified.
 
 `services::typing::tests` uses controlled time for per-chat merging, independent session/reply
 stops, cooldowns across stop/start races, the original 600-second cap across repeated starts
@@ -280,8 +306,8 @@ overlapping same-title sessions, accepted text/document sends stopping only thei
 rejection preserving activity, explicit resume, reconciliation retry after resumed processing,
 and expiry without completion or notices.
 The client tests also assert single-attempt chat actions with safe rate-limit propagation.
-These cases address typing criteria in §§7, 16 and 19. Execution remains pending FINALIZE;
-no live Telegram behavior or runtime measurements are claimed.
+These cases address typing criteria in §§7, 16 and 19. The tests establish no live Telegram
+behavior or runtime measurements.
 
 Use the specification's complete section 16 matrix and [test-authoring](../.agents/skills/test-authoring/SKILL.md).
 Pure domain tests cover grapheme title normalization, final scalar text limits and native
@@ -334,12 +360,12 @@ queries exclude expired routes/replies/receipts before deletion and preserve the
 `services::cleanup::tests` uses paused time and explicit future polling to check startup,
 the default daily interval, exclusive scheduling, shutdown and cancellation between batches.
 Fixtures are private, randomized and TMPDIR-aware. These cases address logical retention in
-specification §§10, 16 and 19; execution awaits the dedicated complete trusted FINALIZE suite.
+specification §§10, 16 and 19.
 Production startup ordering is covered separately by `app::tests` above.
 `services::outbound::tests::typing` also combines actual mocked Telegram HTTP, processing and
 cleanup with a single inbox slot: rollback preserves typing refreshes, and committed retention
 deletion frees the expired cap so a fresh reply can start typing. Controlled time separates
-typing expiry from retention; execution remains pending the complete trusted FINALIZE suite.
+typing expiry from retention.
 
 `tests/maintenance.rs` checks real file-length/allocated-block reduction in bounded incremental
 steps, restart after partial reclamation and preservation of valid processing identity,
@@ -353,8 +379,8 @@ with zero busy timeout forces reclamation's commit to fail after page moves; rol
 file size, free-list accounting and valid rows intact before a successful retry/reopen.
 Scheduler tests explicitly poll futures to prove yielding, cancellation/restart and preservation of retained payloads
 during physical maintenance, without timing sleeps. Fixtures are private, randomized and
-TMPDIR-aware. Execution awaits the dedicated complete trusted FINALIZE suite; these cases
-do not claim real filesystem ENOSPC, power-loss simulation or measured peak disk usage.
+TMPDIR-aware. These cases do not claim real filesystem ENOSPC, power-loss simulation or
+measured peak disk usage.
 See [physical limits](ARCHITECTURE.md#physical-disk-maintenance).
 
 `tests/notices.rs` covers exact receipt/grace and retention boundaries, ordered bounded batches,
@@ -366,7 +392,6 @@ prove batch/ingress rollback and safe errors; shared receipt/metadata pressure a
 send reservations preserve replies and unresolved input. Fixtures are private, randomized and
 TMPDIR-aware, with explicit timestamps/barriers and no network calls. These cases address
 the durable notice criteria in §§8, 16 and 19; dispatcher coverage is described below.
-Execution remains pending the dedicated complete trusted FINALIZE suite.
 
 `services::notices::tests` adds actual mocked HTTP delivery for both factual notice categories,
 successful composite-ID persistence without ordinary routes/activity changes, definitive
@@ -379,15 +404,15 @@ truncation or overlength network effects. Confirmed long work/inactivity, comple
 categories and unauthorized/unrelated input remain silent. Explicit response gates and
 controlled time check exclusive scheduling, one outstanding attempt, cancellation, lease
 release and restart with a still-pending second notice. Fixtures are private, randomized and
-TMPDIR-aware. These cases address notice dispatch/loop criteria in §§8, 16 and 19; execution
-remains pending the complete trusted FINALIZE suite, with no live Telegram claim.
+TMPDIR-aware. These cases address notice dispatch/loop criteria in §§8, 16 and 19, with no
+live Telegram claim.
 
 `tests/inbox.rs` covers read-only pagination, tied receipt ordering, attachment payloads,
 session/composite-question isolation, simultaneous SQLite claim consumers, restart/lease
 boundaries, fresh fencing tokens, retained processing ownership and independent reply expiry.
 It also covers item/payload bounds, token metadata admission with send reservations, whole-batch
 rollback and safe errors. Fixtures are private, randomized and TMPDIR-aware; timestamps are
-injected and contention uses a barrier without sleeps. Execution remains pending FINALIZE.
+injected and contention uses a barrier without sleeps.
 
 The same suite now covers idempotent first processing start, inactivity without releasing
 ownership, stale/wrong-session tokens, exact claim/reply/receipt expiry boundaries and direct
@@ -400,7 +425,6 @@ Lost acknowledgment responses retry from minimal receipts without extending rete
 receipts suppress redelivery after cursor advancement. Shared receipt/metadata pressure and
 outstanding send reservations preserve recoverable replies. Injected update/delete failures
 roll back first start, token rotation and receipt/payload replacement with redacted errors.
-These cases await the dedicated complete trusted FINALIZE suite; no execution is claimed here.
 
 `tests/ingress.rs` covers atomic reply/activity/cursor persistence, same-title cross-chat routes,
 multiple replies, attachment-only documents, photo captions, receipt-based TTLs, long incoming
@@ -411,7 +435,7 @@ subsequent authorized reply remains admissible. Tests also check safe unroutable
 authorization, route expiry, serialized metadata bounds, shared item/payload/
 metadata admission including outstanding sends, late transaction failures and actual SQLite
 page exhaustion without losing accepted replies or advancing unresolved input. Fixtures are
-private, randomized and TMPDIR-aware. Execution remains pending the trusted FINALIZE suite.
+private, randomized and TMPDIR-aware.
 
 `services::polling::tests` combines actual mocked Telegram HTTP and protected SQLite for
 ordered batches, default 45-second polling, durable restart offsets, redelivery deduplication,
@@ -424,7 +448,6 @@ cancellation and restart, and resume the retained batch after synthetic capacity
 and malformed batch order/IDs leave the cursor unchanged; no destructive API is called.
 Controlled-time tests cover bounded jittered backoff, unshortened large `retry_after` delays
 and cancellation during retry waits. Fixtures are private, randomized and TMPDIR-aware.
-Execution remains pending the complete trusted FINALIZE suite.
 
 `tests/registry.rs` exercises three same-title identities, interleaved text/document routes,
 cross-chat message-ID collisions, external-ID and saved-handle resume, normalized renaming and
@@ -442,8 +465,8 @@ routes, redacted errors, atomic rollback, released admission and restart-visible
 routes with seconds-to-milliseconds conversion. An explicitly gated HTTP response allows
 caller cancellation while a send remains admitted; competing sends stay bounded and the
 detached task finishes durable bookkeeping. Fixtures honor TMPDIR and use private randomized
-directories. These new tests are pending the complete trusted FINALIZE suite; implementation
-and source review do not attest their execution.
+directories. The recorded complete C6 outcome covers these cases; source review alone does
+not attest execution.
 
 `services::outbound::tests::documents` adds actual multipart HTTP/SQLite scenarios: complete
 caption scalar/native rejection without effects, exact 1,000-scalar/1,024-UTF-16-unit captions,
@@ -454,8 +477,8 @@ The tests check no replay, no invented routes, released permits/reservations and
 bytes/captions in SQLite. Explicit response gates and clock advancement avoid timing sleeps.
 `clients::telegram::upload::tests` consumes a sparse near-cloud-limit file incrementally,
 checking bounded lazy chunks, changes after the first read, growth exclusion, early EOF,
-read errors and empty snapshots without whole-file buffers. These tests await the complete trusted FINALIZE
-suite; no implementation-turn execution or resource measurement is claimed.
+read errors and empty snapshots without whole-file buffers. These are behavioral proofs;
+resource observations come from the separate HOST record.
 
 `services::files::tests` covers descriptor-confined regular/empty/nested files, multiple
 roots, exact configured/cloud decimal-byte boundaries, traversal and prefix collisions,
@@ -464,8 +487,7 @@ It checks root and leaf replacement after opening and concurrent atomic swaps be
 regular paths and escaping symlinks: accepted handles always read the approved file.
 Filename cases include controls, header punctuation, Unicode, non-UTF-8 and long basenames;
 errors and Debug output stay path-free. Fixtures are exclusive, private, randomized and
-TMPDIR-aware; size tests use sparse files, without allocating near-limit buffers. These tests
-await the dedicated complete trusted FINALIZE suite; no execution is claimed here.
+TMPDIR-aware; size tests use sparse files, without allocating near-limit buffers.
 
 Unit tests in `clients::telegram::tests` use a synthetic loopback HTTP peer with explicit
 disconnects, malformed/oversized and chunked bodies, redirects, webhook conflicts, rate limits
@@ -482,11 +504,11 @@ without skips. Earlier Native attempts failed before HTTP requests at loopback `
 ## Specification §§16/19 coverage map
 
 This maps every mandatory section 16 criterion and section 19 requirement group to its
-source-defined behavioral proof or outstanding evidence owner, not to a check receipt.
-Current changes await the complete trusted FINALIZE suite. Focused proofs remain in their
-owning suites; conversation/recovery scenarios add full-daemon interactions without repeating
-boundary cases. Pending documentation, protocol/client evidence and HOST measurements cannot
-be inferred from test source or successful implementation alone.
+behavioral proof or evidence owner. The recorded validation section above supplies the prior
+complete C6 outcome; the measurement record supplies the separate HOST result and failed unit
+verification. Focused proofs remain in their owning suites; conversation/recovery scenarios
+add full-daemon interactions without repeating boundary cases. This coverage map does not
+mark the unchanged product specification accepted or establish named-client/live behavior.
 
 | Acceptance / traceability contract | Owning proof |
 | --- | --- |
@@ -503,11 +525,29 @@ be inferred from test source or successful implementation alone.
 | Confirmed capped typing, no idle refresh, factual once-only notices without loops (§§7–8, 16, 19) | [Typing tests](../src/services/typing/tests.rs), [notice storage tests](../tests/notices.rs) and [notice dispatch tests](../src/services/notices/tests.rs) |
 | Independent TTLs, bounded cleanup and physical reclamation without losing valid replies (§§10–11, 16, 19) | [Retention](../tests/retention.rs), [maintenance](../tests/maintenance.rs) and [cleanup scheduler tests](../src/services/cleanup/tests.rs) |
 | Protected secrets/roots, loopback defaults and secure MCP transport (§§12–13, 16, 19) | [Configuration tests](../src/config.rs), [secret tests](../src/config/secrets.rs), [storage tests](../tests/storage.rs), file tests above and [HTTP transport tests](../src/routes/tests.rs) cover authorization, Host/Origin, redaction, body/concurrency bounds |
-| One native daemon, one poller, no vendor adapters/agent management, external database, broker, Node.js or Docker requirement; no public HTTPS/webhook needed (§§1–3, 13, 16, 19) | [Application](../src/app.rs), application/poller tests and [architecture](ARCHITECTURE.md) define and exercise the composition; [setup](SETUP.md) documents locked builds and optional user deployment. Release measurements and HOST unit verification remain pending |
+| One native daemon, one poller, no vendor adapters/agent management, external database, broker, Node.js or Docker requirement; no public HTTPS/webhook needed (§§1–3, 13, 16, 19) | [Application](../src/app.rs), application/poller tests and [architecture](ARCHITECTURE.md) define and exercise the composition; [setup](SETUP.md) documents locked builds and optional user deployment. [HOST record](MEASUREMENTS.md#recorded-host-capture) preserves the resource result and failed unit verification |
 | Concise agent text/file policy; no periodic agent polling and no universal LLM wake promise (§§2, 6, 14, 16, 19) | Complete copyable section 14 [agent policy](AGENT_POLICY.md), token/reconciliation instructions and [client timeout guidance](SETUP.md#connect-mcp-clients); existing [contributor policy](../AGENTS.md) is preserved |
 | Telegram at-most-24-hour unconsumed backlog, independent TTLs and reconnect limitations explained to users (§§10–11, 16, 19) | [Setup/recovery](SETUP.md#recovery-and-retention), [README](../README.md), [architecture](ARCHITECTURE.md) and [configuration](CONFIGURATION.md) explain the independent limits and webhook-safe setup |
 | Protocol support and actual client capabilities (§§5–6, 16–19) | [Subscription](../src/routes/subscriptions.rs), transport and daemon recovery fixtures exercise locked rmcp 3.8.0 with synthetic MCP 2026-07-28 HTTP clients. [Client requirements](SETUP.md#connect-mcp-clients) distinguish this from unsupported older revisions and unverified named-client interoperability, live Telegram and automatic host wake |
-| Near-zero idle CPU, best-effort idle RSS below approximately 30 MB, startup, near-limit upload peak RSS, stripped locked release size and dependency profile (§§3, 9, 16–19) | Bounded-read/idle-scheduler behavior has focused proofs above; quantitative release/build/probe and HOST evidence remain pending the measurement/release steps. Unit tests do not establish runtime resource targets |
+| Near-zero idle CPU, best-effort idle RSS below approximately 30 MB, startup, near-limit upload peak RSS, stripped locked release size and dependency profile (§§3, 9, 16–19) | [Recorded HOST benchmark](MEASUREMENTS.md#workload-and-observed-resources) gives actual probe/mock/driver figures, startup and sampled/lifetime limits; [build identity](MEASUREMENTS.md#provenance-and-release-identity) records stripped daemon/probe sizes and distinct profiles. Unit tests retain bounded-read/idle-scheduler proofs without asserting resource targets |
+
+## Section 17 deliverable coverage
+
+The original ten deliverables remain in scope. Their presence and prior checks are distinct
+from current documentation finalization and full operational acceptance.
+
+| Deliverable | Location / evidence and remaining limit |
+| --- | --- |
+| 1. Minimal working Rust source | [Architecture](ARCHITECTURE.md), `src/`, recorded complete C4–C6 and mocked daemon interactions |
+| 2. Lock, reproducible release instructions, sample configuration | [Cargo.lock](../Cargo.lock), [setup](SETUP.md), [sample TOML](../config/relay.example.toml), recorded R1/R2 and bound offline HOST materialization |
+| 3. SQLite initialization/migrations, cleanup, restart-safe cursor | [Repositories](../src/repositories.rs), storage/retention/maintenance/ingress/poller suites above |
+| 4. MCP tools/resources/subscriptions with tested current protocol | Transport/tools/inbox/subscription/ask and daemon recovery suites above; MCP 2026-07-28 synthetic clients only |
+| 5. Single poller, strict final text/caption limits, safe documents | Client, domain, file and outbound suites above; HOST near-limit normal-path upload; live Telegram unverified |
+| 6. Unit/integration tests using mock Telegram | Recorded complete unfiltered C6 and controlled P1/P2; no real messages or credentials used |
+| 7. README/setup covering bot, allowlists, URL, secrets, registration, wait caveat, notices | [README](../README.md), [setup/client guidance](SETUP.md), [configuration](CONFIGURATION.md); named-client compatibility remains unverified |
+| 8. Contributor or copyable section 14 agent policy | Preserved [AGENTS.md](../AGENTS.md) and complete copyable [agent policy](AGENT_POLICY.md), including file reports, no periodic inbox polling and explicit completion |
+| 9. Example user unit and protected environment-file approach | [Unit](../deploy/telegram-mcp-relay.service), [environment template](../deploy/relay.env.example), [setup](SETUP.md#optional-systemd-user-service); actual HOST verification failed for absent executable; no deployment performed |
+| 10. Benchmark target, RSS/CPU, file-upload peak and binary size | [Recorded HOST capture](MEASUREMENTS.md#recorded-host-capture), with separate process overhead and sampled/lifetime limits; production bootstrap was not measured |
 
 ## Measurements and check ownership
 
@@ -520,8 +560,9 @@ mock/driver and receipt-gated HOST controller. `tools/tests/test_measure_resourc
 controlled processes, pipes and clocks for prerequisite/profile rejection, phase coordination,
 PID identity, artifact changes, retirement and exclusive failure reporting. It opens no network
 sockets or Cargo build processes. These tests belong to the existing P1/P2 FINALIZE gates;
-their execution and actual HOST evidence remain pending for this change. Source/build checks
-do not attest runtime measurements; existing complete C6 owns actual HTTP/routing proofs.
+their prior successful outcome is recorded above. Actual resource values come from the
+separate bound HOST capture. Source/build checks do not attest runtime measurements; existing
+complete C6 owns actual HTTP/routing proofs. The failed unit verification remains unresolved.
 
 Native Runner commands use the accepted staging-independent inventory and
 [Runner finalization](../.agents/skills/finalization/agent-runner.md). Staged inspection belongs

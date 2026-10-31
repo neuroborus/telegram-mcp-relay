@@ -8,8 +8,12 @@ SQLite, the bounded Telegram client, text/document delivery, the shared protecte
 one reply poller, typing, notices and retention/reclamation. Startup and supervision are
 described under [runtime and ownership](#runtime-and-ownership), including graceful accepted-send
 draining after SIGINT/SIGTERM in the binary or host cancellation through the embedding API.
-The accepted HTTP adapter's synthetic tests passed in Runner's complete workspace test suite,
-as described below. New composition tests await FINALIZE.
+The coordinator's [recorded validation evidence](TESTING.md#recorded-validation-evidence)
+reports successful complete workspace tests, including composition, shutdown and protocol
+fixtures, at captured commit `968802371f94f51eedab66998eff6031762db5ea`. The
+[mocked HOST benchmark](MEASUREMENTS.md#recorded-host-capture) measures the library-linked probe
+with separate mock/driver accounting. User-unit verification failed because the configured
+executable was absent; operational acceptance remains pending.
 Reply ingestion authorizes input and commits replies/dispositions with the cursor.
 A cancellable single-consumer long poller drives it.
 Bounded library inbox snapshots, pre-processing claims, durable processing-start,
@@ -73,8 +77,9 @@ Tokio's `signal` feature adds the locked transitive `signal-hook-registry` 1.4.8
 existing `errno` and `libc` dependencies. Its version and checksum come from the cached Tokio
 1.54.1 upstream lockfile. The cached Tokio source confirms synchronous registration through
 `signal(SignalKind)` and asynchronous receipt through `Signal::recv`; handlers remain installed
-after listeners drop. Only the binary registers them. Signal regression execution remains
-pending FINALIZE; no new runtime evidence is claimed here.
+after listeners drop. The production binary and measurement wrapper register them; the
+library leaves signal ownership to its host. Signal regressions are included in the recorded
+complete C6 outcome; installed-service operation is not established.
 
 The reqwest archive checksum matches published registry metadata;
 its inspected client, chunked-response and retry sources match the archive. Its `json` and
@@ -88,7 +93,7 @@ The same checksum-verified reqwest archive confirms `Part::stream_with_length`,
 `Body::wrap_stream` and streaming multipart construction. The additional MIME and WASM-stream
 lock entries come from that archive's upstream lockfile, preserving existing pinned versions.
 Their locally provisioned archives match the committed lockfile checksums. This is source/API
-inspection; compilation and required-check evidence remain pending FINALIZE.
+inspection; the recorded C4–C6 and release-build outcomes cover the resulting locked source.
 
 Offline lock generation resolved the HTTP/TLS/platform dependency closure without changing
 previously locked versions. The manifest and lock additions accompany the adapter to preserve
@@ -144,8 +149,8 @@ Correlation uses fresh random IDs, never client-supplied IDs. Authorization, pro
 cookies and client correlation headers are removed before SDK dispatch. HTTP rejection text is
 static; JSON-RPC failures retain codes, IDs and structured negotiation data with safe messages.
 Binary diagnostics suppress rmcp targets, whose upstream logs can contain raw metadata;
-library embedders must retain this filter. New synthetic HTTP tests await FINALIZE; no named
-client compatibility or live Telegram behavior is claimed.
+library embedders must retain this filter. Synthetic HTTP tests are included in the recorded
+complete C6 outcome; no named-client compatibility or live Telegram behavior is claimed.
 
 ## MCP registration and outbound tools
 
@@ -173,8 +178,8 @@ and `details`, mirrored in text content. Length errors retain exact counts/guida
 errors retain byte limits/counts; Telegram rejections retain numeric code/retry delay.
 Uncertain delivery and confirmed-send bookkeeping failure remain distinct and explicitly
 forbid automatic resending. Supplied paths, keys, bodies and upstream descriptions are never
-included in errors. Synthetic MCP-to-mocked-Telegram tests await FINALIZE; no external client
-interoperability is claimed.
+included in errors. Synthetic MCP-to-mocked-Telegram tests are included in the recorded C6
+outcome; no named-client interoperability is claimed.
 
 ## MCP inbox resources and reply tools
 
@@ -201,7 +206,8 @@ The locked SDK also requires `Mcp-Name` to match `params.uri` on resource reads.
 pre-processing replies and never completes them. Preserve each reply ID and current token.
 `telegram_processing({session_key, reply_id, claim_token, active})` records the first start
 when active, or preserves ownership when inactive; neither operation acknowledges a reply.
-Typing remains pending. For explicit processing recovery, omit `active` and instead supply
+Confirmed start drives the [shared typing scheduler](#confirmed-processing-typing).
+For explicit processing recovery, omit `active` and instead supply
 `reconcile_request_id`: save a fresh random 1–64-byte request ID with the current token before
 dispatch. Exactly one action is required. The result returns the reply ID, current token and
 original first start. Save the rotated token; retry a lost response with the identical saved
@@ -210,8 +216,8 @@ request ID and prior token. Registration alone never rotates ownership.
 `telegram_ack({session_key, reply_id, claim_token})` removes the successfully handled payload
 through the existing bounded receipt transaction and returns `reply_id`/`acknowledged=true`.
 Identical valid-token retries succeed while the receipt remains valid; stale or wrong-session
-claims return `CLAIM_INVALID`. New MCP interaction tests await FINALIZE; named-client
-interoperability is not established by these resources.
+claims return `CLAIM_INVALID`. MCP interaction tests are included in the recorded C6 outcome;
+named-client interoperability is not established by these resources.
 
 ## MCP resource subscriptions
 
@@ -246,7 +252,7 @@ then sends one initial invalidation per accepted inbox to cover commits during t
 Clients read SQLite-backed resources or claim through `telegram_inbox`, including after
 reconnect/restart; signals are neither persistent nor replayed and never claim or acknowledge.
 There is no guarantee that a host wakes an idle LLM. Actual HTTP protocol tests are defined in
-[testing](TESTING.md); their execution remains pending FINALIZE. No named client or live
+[testing](TESTING.md) and included in the recorded C6 outcome. No named client or live
 Telegram interoperability is claimed.
 
 ## Bounded asks
@@ -271,7 +277,8 @@ acknowledges work, starts processing, interrupts agents or emits Telegram notice
 with responses recover under the existing lease. Post-send `ASK_WAIT_FAILED` includes committed
 outbound IDs and inbox recovery guidance, never permission to resend. Clients may need tool
 timeouts exceeding wait plus send time; the bridge cannot configure them or guarantee a new
-LLM turn. New tests in [testing](TESTING.md) remain pending FINALIZE.
+LLM turn. Synthetic ask/event tests are included in the recorded C6 outcome in
+[testing](TESTING.md).
 
 ## Outbound formatting
 
@@ -463,7 +470,7 @@ route transaction fails returns `SEND_BOOKKEEPING_FAILED`, explicitly warning th
 accepted it but reply routing could not be saved. Neither outcome authorizes automatic
 resending. Failures from detached work log only a static error code. Successful completion
 requires a committed route; reservations and task permits release on completion/failure.
-New service tests await execution in the dedicated Runner FINALIZE gate.
+Service tests are included in the recorded complete C6 outcome.
 
 ## Confined outbound files
 
@@ -515,8 +522,10 @@ with the existing five-second connect limit. Consistent 4xx rejection, ambiguous
 post-send bookkeeping failure retain the text service's distinct errors. Read failure,
 truncation or timeout during an attempted upload is conservatively uncertain; none authorizes
 automatic replay or a fabricated route. Caller cancellation leaves admitted work running to
-bookkeeping completion. Graceful daemon shutdown drains the same tracked work. New tests await
-FINALIZE; no live upload or runtime memory measurement is claimed.
+bookkeeping completion. Graceful daemon shutdown drains the same tracked work. Synthetic
+document tests are included in the recorded C6 outcome. The
+[HOST capture](MEASUREMENTS.md#workload-and-observed-resources) records a near-limit streamed
+upload through the probe and loopback mock; no live Telegram upload is claimed.
 
 ## Telegram HTTP client
 
@@ -758,7 +767,7 @@ Storage pressure uses the same bounded local backoff. Shutdown, loss of the supe
 sender or dropping the run future cancels HTTP and waits, releases the lease and preserves
 committed replies/cursor. The next consumer resumes from SQLite. Daemon supervision stops peer
 services on terminal poll failure, then drains already admitted sends before returning the failure.
-New poller tests await FINALIZE.
+Poller tests are included in the recorded complete C6 outcome.
 
 ## Runtime and ownership
 
@@ -817,8 +826,10 @@ The explicit `resource_probe` Cargo example links this same library composition 
 an already-bound matching MCP listener and reports readiness only after startup cleanup and
 service spawning. It shares production admission, streaming, supervision and shutdown draining;
 it adds no alternate daemon or file-copy path. Its current-thread wrapper installs shutdown
-signals and emits one readiness line, with no diagnostic subscriber. Mock/client driver memory
-must be measured separately, and probe overhead disclosed. Runtime measurements remain pending.
+signals and emits one readiness line, with no diagnostic subscriber. Mock and driver memory
+is measured separately in the [recorded HOST capture](MEASUREMENTS.md#recorded-host-capture),
+which discloses these probe differences and lifetime-high-water limitations. Production
+bootstrap and live Telegram were not measured.
 
 One Rust binary serves concurrent MCP clients at a loopback Streamable HTTP endpoint and
 owns one Telegram long-poll consumer, one reusable HTTP client and one embedded SQLite store.
@@ -870,13 +881,15 @@ cross-session consumption; a shared local bearer token is not strong isolation b
 mutually hostile local clients. [Setup](SETUP.md) documents this trust assumption, protected
 installation paths, webhook-safe migration and current client requirements; the
 [agent policy](AGENT_POLICY.md) includes the complete copyable specification policy and
-explicit processing-recovery guidance. Runtime measurements and host unit verification
-remain separate pending operational evidence.
+explicit processing-recovery guidance. The recorded mocked resource capture and failed HOST
+unit verification remain separate evidence; operational acceptance is pending successful
+unit verification and evidence-documentation gates.
 
 ## Protocol compatibility gate
 
-The supplied specification requests MCP `2026-07-28` semantics and compatible older clients.
-Verify official `rmcp` capabilities and current API behavior at implementation time. Record the actual
-negotiated version, supported subscription mechanisms and tested clients; explicitly document
-any unavailable upstream feature. Do not fabricate protocol support or silently replace
-event delivery with agent polling. See specification sections 5–6 and 18 for the source links.
+The implementation advertises only MCP `2026-07-28` through locked rmcp 3.8.0, including
+`subscriptions/listen`; legacy initialize-based clients are unsupported. The complete C6
+fixtures use synthetic HTTP clients, and the HOST driver confirms discovery/registration/file
+delivery against that same protocol. No named-client or live Telegram interoperability and
+no universal idle-host wake has been verified. See [client requirements](SETUP.md#connect-mcp-clients)
+and specification sections 5–6 and 18; agent polling is not a substitute for event delivery.

@@ -135,5 +135,10 @@ source/build/workload identity before capture. It may materialize unchanged offl
 artifacts in private temporary output only after those gates pass. Runtime capture and
 user-unit verification belong to the task's HOST boundary, after applicable tooling/release
 gates and verified quiescent ownership. They do not
-run inside implementation/review turns or replace required checks; quantitative evidence remains
-pending until observed and integrated through reviewed repository work.
+run inside implementation/review turns or replace required checks. The
+[recorded capture](MEASUREMENTS.md#recorded-host-capture) integrates actual mocked figures at
+commit `968802371f94f51eedab66998eff6031762db5ea` and prior public aggregate check receipts;
+later documentation changes do not relabel that source identity or inherit its check results.
+The separate HOST unit verification failed because the configured executable was absent, so
+operational acceptance remains pending. Preserve the failure; no installation or service
+activation is authorized by an evidence-integration task.

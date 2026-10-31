@@ -11,8 +11,8 @@ Keep implementation status explicit; requirements and intended structure are not
 | [Configuration](CONFIGURATION.md) | Settings, bounds and protected secret sources | Startup configuration or secret handling changes |
 | [Setup](SETUP.md) | Locked builds, Telegram setup, local secrets, MCP clients and optional user service | Installation or client requirements change |
 | [Agent operating policy](AGENT_POLICY.md) | Copyable section 14 policy and durable reply recovery instructions | Installed-agent interaction guidance changes |
-| [Resource measurements](MEASUREMENTS.md) | HOST controller, release probe, receipt/build prerequisites and runtime evidence boundaries | Measurement tooling or operational evidence changes |
-| [Testing](TESTING.md) | Required gates, test ownership and acceptance evidence | A check or verification boundary changes |
+| [Resource measurements](MEASUREMENTS.md) | Recorded HOST benchmark, user-unit verification outcome, release/build identities and capture prerequisites | Measurement tooling or operational evidence changes |
+| [Testing](TESTING.md) | Required gates, recorded validation provenance, specification acceptance/traceability and deliverable coverage | A check, receipt or verification boundary changes |
 | [Development](DEVELOPMENT.md) | Runner setup, task/plan/execution lifecycle and Git boundaries | Operator workflow or runner configuration changes |
 
 Root [README.md](../README.md) owns the short product entry and current availability;

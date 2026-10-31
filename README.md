@@ -19,8 +19,11 @@ guarantees and protocol limitations.
 
 SIGINT and SIGTERM trigger graceful shutdown, draining admitted sends and retiring service work.
 See the [setup guide](docs/SETUP.md) and [copyable agent policy](docs/AGENT_POLICY.md).
-Resource measurements and release acceptance remain pending; the implementation and synthetic
-HTTP tests do not establish complete MVP acceptance or live Telegram interoperability.
+The [recorded Linux x86_64 mocked capture](docs/MEASUREMENTS.md#recorded-host-capture) measured
+10.07 MB probe idle RSS and a 10.43 MB sampled upload peak for a 49,999,999-byte streamed file.
+These are library-composition figures with separate mock/driver accounting. Release acceptance
+remains pending: HOST user-unit verification failed because its configured executable was
+absent. Synthetic results do not establish live Telegram or named-client interoperability.
 The specification calls the product **Telegram MCP Bridge**; this repository and binary are
 named **telegram-mcp-relay**.
 

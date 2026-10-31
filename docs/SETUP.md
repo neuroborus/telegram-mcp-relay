@@ -3,8 +3,10 @@
 This guide describes the implemented daemon. The [specification](product/TECHNICAL_SPECIFICATION.md)
 also contains proposed settings and illustrative results; use the actual
 [example TOML](../config/relay.example.toml), [configuration reference](CONFIGURATION.md) and
-discovered tool schemas. Runtime measurements, host unit verification and named-client/live
-Telegram interoperability remain unverified. Setup instructions are not acceptance evidence.
+discovered tool schemas. The [mocked HOST capture](MEASUREMENTS.md#recorded-host-capture)
+records resource use for the library-linked probe. Separate host unit verification failed
+because the configured executable was absent; named-client/live Telegram interoperability
+remains unverified. Setup instructions are not acceptance evidence.
 
 ## Build and prepare private directories
 
@@ -226,7 +228,7 @@ Telegram/DNS and loopback MCP. Filesystem hardening in a user service requires u
 user namespaces; availability varies by host. Verify this prerequisite without relaxing the
 unit's protections to obtain a check pass. See the host's `systemd.exec(5)` documentation.
 
-Host unit verification is an explicit operational acceptance step, still pending:
+Host unit verification is an explicit operational acceptance step:
 
 ```bash
 systemd-analyze --user verify deploy/telegram-mcp-relay.service
@@ -234,8 +236,12 @@ systemd-analyze --user verify deploy/telegram-mcp-relay.service
 
 Verify on the deployment host before activation; for the current release workflow, this check
 belongs to the assigned quiescent HOST boundary. It does not enable/install the unit or prove
-runtime access. No resource figures have been measured here. SIGINT/SIGTERM close
-admission and drain accepted sends. The example allows 660 seconds before forced termination
-to accommodate the 600-second upload deadline and SQLite bookkeeping; reassess that margin
+runtime access. The [recorded HOST attempt](MEASUREMENTS.md#unit-verification-and-remaining-acceptance)
+returned 1 because `~/.local/bin/telegram-mcp-relay` was absent. Verification remains unresolved;
+no installation or activation was performed. A later operator must resolve the prerequisite
+under separate installation authorization and retain an actual successful verification receipt.
+Keep this failure in the release record; a mocked resource capture cannot replace it.
+SIGINT/SIGTERM close admission and drain accepted sends. The example allows 660 seconds before
+forced termination to accommodate the 600-second upload deadline and SQLite bookkeeping; reassess that margin
 for your host. SIGKILL, crashes or an external stop deadline can interrupt post-send persistence,
 so uncertain sends must never be blindly replayed. See [shutdown](ARCHITECTURE.md#runtime-and-ownership).

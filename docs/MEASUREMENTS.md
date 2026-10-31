@@ -1,8 +1,159 @@
 # Resource Measurements
 
-Quantitative acceptance remains pending. No startup, RSS, CPU, upload-peak or binary-size
-result is established by probe source or a successful build. The best-effort idle RSS target
-below approximately 30 MB needs an identified Linux x86_64 release workload and actual evidence.
+The [recorded HOST capture](#recorded-host-capture) measured the real library composition with
+synthetic loopback Telegram traffic: 10,067,968-byte idle RSS and a 10,428,416-byte sampled
+near-limit upload peak for the probe. The separate user-unit verification failed because its
+configured executable was absent. Operational/MVP acceptance remains pending; these results
+establish neither production-bootstrap measurements nor live Telegram interoperability.
+
+## Recorded HOST capture
+
+### Provenance and release identity
+
+The 2026-10-31 operator handoff records a successful completed capture (CLI exit 0, report
+`status: "success"`, `phase: "complete"`) at clean commit
+`968802371f94f51eedab66998eff6031762db5ea`, tree
+`5b5df98c3a71ba94af1d61f6921aa90514a916ff`. This is the capture identity, not a claim that later
+documentation commits were measured. This evidence-integration change alters documentation
+only; runtime, build and workload inputs remain those of the captured commit. Future changes
+to those inputs require new bound evidence.
+
+The durable summary below was reconciled with the existing ignored JSON artifacts, their
+hashes, canonical build/settings/workload binding and unchanged source inputs. The controller
+rechecked source, binaries, toolchain, dependency profiles, configuration and prerequisites
+around capture before publishing success. Its owned temporary binaries/configuration were
+removed after retirement; this documentation review did not rebuild or remeasure them.
+
+| Evidence | SHA-256 |
+| --- | --- |
+| Raw report, `LOCAL_ARTIFACTS/mvp-measurements.json` (116,509 bytes) | `a7da542f30b806b080b40c063887a7a62dba641f3083257a335ac44984af59c9` |
+| Prerequisite export, `LOCAL_ARTIFACTS/mvp-measurement-prerequisites.json` | `d92372456804101369ec81f56a3f207dac616270ef6e6da4e45faeaf04f5adf0` |
+| Operator handoff, `LOCAL_ARTIFACTS/mvp-measurement-host-receipt.json` | `d721dc381c1a63af3036eaa8b53e5c8c9993e3fc0fae68657087935a55633845` |
+| Canonical report build/settings/workload binding | `79bca46850c3c2e777621eedcb0baa9bb2d38571ffb667b892327e68b15e2358` |
+| `Cargo.toml` (2,061 bytes) | `e747e437083f51551f18fee16049cd53d98db79b526d444a53bd18c5d5227238` |
+| `Cargo.lock` (54,415 bytes) | `b4603b3738116ecf3458b805263a406357e19d9d907558528da834a0501e3b1c` |
+
+These local evidence files remain ignored; the tracked summary does not require their
+availability in a fresh checkout. The export records independent `plan-execution` run
+`5852c1b2-e9ae-4736-a7fd-c1a541cfacf9`: aggregate finalization revision 889, independent
+confirmation 898 and verified committed paused-idle boundary 948. At capture the coordinator
+reported idle execution, no lease owner and no process record. R1/R2 and applicable tooling
+gates were recorded successful before HOST. This is trusted operational provenance, not a
+cryptographic attestation or separate per-command logs/timings; see
+[recorded validation evidence](TESTING.md#recorded-validation-evidence).
+
+The operator's actual invocation was
+`env -u GIT_PAGER python3 tools/measure_resources.py --mock --output LOCAL_ARTIFACTS/mvp-measurements.json`.
+The nonpersistent removal of `GIT_PAGER` satisfied the controller's environment-override policy;
+the assigned Python arguments were unchanged. No exact wall-clock capture interval was
+exported; 2026-10-31 is the handoff date, and phase timing uses monotonic observations.
+
+| Build property | Recorded value |
+| --- | --- |
+| Native target | `x86_64-unknown-linux-gnu`, ELF64 machine 62 |
+| Rust | `rustc 1.96.0 (ac68faa20 2026-05-25)`, commit `ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96`, LLVM 22.1.2 |
+| Cargo / Python | `cargo 1.96.0 (30a34c682 2026-05-25)` / Python 3.12.3 |
+| Release | Thin LTO, one codegen unit, `strip = true`; locked offline private materialization after Runner gates |
+| Stripped daemon | 11,173,112 bytes; SHA-256 `b793295bf968523ce48aa3be654a0412fa0d6078699c5f454453ed947e0863a0` |
+| Stripped probe | 11,084,824 bytes; SHA-256 `39b01dc14236868e863f47b36b69011e01c3df5853f74f517c0bc3cc28f06308` |
+| Daemon dependency-feature profile SHA-256 | `27ea8c94436ced67916d4a4a3bc809ea6676a6487a339a0330d1060d113ba542` |
+| Probe dependency-feature profile SHA-256 | `70c7f6553a41a67ba4c552c64d9fc5d85541ad78245980b717dd9c1ca2b675cc` |
+
+Profile hashes cover the exact normalized UTF-8 `cargo tree` output described below, with
+local package locations replaced by `<local>`. Both profiles include rmcp 3.8.0 server/Streamable
+HTTP, reqwest 0.13.5 JSON/multipart/rustls/stream, rusqlite 0.32.1 bundled SQLite and Tokio 1.54.1
+current-thread `rt`, filesystem/I/O, network, signals, synchronization and time. The observed
+profile difference is Tokio `test-util` enabled for the probe through dev-feature unification;
+neither profile enables `rt-multi-thread`. Full profiles remain in the bound report; direct
+features are listed in [architecture](ARCHITECTURE.md#dependency-baseline).
+
+### Workload and observed resources
+
+One credential-free probe used numeric-loopback MCP `127.0.0.1:52117`, a separate mock at
+`127.0.0.1:40819`, synthetic chat `-101` and user `202` with explicit allowlists, and private
+database/export roots. Settings retained 45-second polling, 30-day TTLs, 64 MiB database cap,
+50,000,000-byte outbound limit, 65,536-byte upload buffer and default admission/retention
+bounds. Waiting, typing and both notice categories were enabled; no replies were injected to
+activate typing/notices. No token source or MCP bearer
+was configured. Generated TOML identity was 1,082 bytes, SHA-256
+`f3a667194179bef2e4210cccb262ad0335117c77b3d5e6c8ddbce66c6ab98a59`; private locations are
+represented by logical roles in the report.
+
+| Other effective synthetic settings | Value |
+| --- | --- |
+| Wait / processing grace / claim lease | 600 / 60 / 60 seconds |
+| Typing refresh / maximum | 4 / 600 seconds |
+| Cleanup interval / auth-token file creation | 24 hours / disabled |
+| Request / Telegram response bounds | 65,536 / 2,097,152 bytes |
+| Concurrent requests / background tasks / waiters | 32 / 64 / 16 |
+| Subscriptions / per-subscription queue | 64 / 16 |
+| Inbox items / per-reply bytes / total inbox bytes | 10,000 / 65,536 / 16,777,216 |
+| Metadata bytes / sessions / routes / receipts | 16,777,216 / 1,024 / 100,000 / 10,000 |
+
+The driver confirmed MCP 2026-07-28 discovery, registered external ID `resource-measurement-v1`
+with title `Resource measurement`, remained alive for the idle window, then called
+`telegram_send_file` once with a 49,999,999-byte sparse zero file under the allowed root.
+The normal streaming/committed-route path applied the caption
+`[Resource measurement]\nSynthetic near-limit upload.`. No file contents were loaded by the
+driver or retained by the mock, no production limit was changed, and no upload pacing was
+added. Final mock accounting records four requests, one document, exactly 49,999,999 drained
+document bytes and `failed: false`.
+
+| Timing / sampling | Observation |
+| --- | --- |
+| Probe launch to ready | 0.038482 seconds |
+| Probe launch to confirmed MCP response | 0.098521 seconds |
+| Requested idle window / cadence | 50 seconds / 0.5 seconds per process, covering a complete long poll |
+| Actual idle observations | 100 per process; first-to-last span approximately 49.5807 seconds |
+| Driver upload request interval | Monotonic 399952.843743039–399952.893711289; 0.049968 seconds |
+| Upload observation window | Two samples per process, priming through trailing observation; approximately 0.501 seconds |
+
+RSS values below are bytes. Idle mean/minimum/maximum were identical for each process. CPU is
+user+system time over the observed idle span as a percentage of one logical CPU, excluding
+children. The Python peers are separate measurement overhead, never added to the probe figure.
+
+| Role | PID / start ticks | Idle RSS | Idle CPU seconds / percent | Upload sampled peak RSS | Lifetime VmHWM before → after upload |
+| --- | --- | --- | --- | --- | --- |
+| Probe / daemon composition | 1017746 / 39990272 | 10,067,968 | 0.02 / 0.040338% | 10,428,416 | 10,424,320 → 10,690,560 |
+| Telegram mock | 1017745 / 39990267 | 14,618,624 | 0.01 / 0.020169% | 14,749,696 | 14,999,552 → 15,183,872 |
+| MCP driver | 1017748 / 39990276 | 20,242,432 | 0.01 / 0.020169% | 20,242,432 | 20,660,224 → 20,660,224 |
+
+The probe's approximately 10.07 MB idle RSS is below the best-effort approximately 30 MB target
+for this Linux x86_64 workload. Idle CPU was small but nonzero, including normal long-poll and
+timer work. No target deviation was observed in this capture; it establishes no cross-platform
+or production-bootstrap guarantee. The probe adds readiness/signal channels, omits production
+diagnostics and has the distinct feature profile above. The controller, inspection/build
+children and filesystem cache are excluded from peer accounting. Host hardware/kernel details
+were not exported.
+
+The upload completed between the two sampling ticks. Its sampled maximum can miss short
+spikes; the kernel's **process-lifetime** VmHWM includes startup and idle as well as upload.
+Neither the before/after readings nor their difference is a phase-only peak. The low observed
+RSS is consistent with the existing bounded-streaming proofs, rather than an exhaustive
+memory bound or a live-network throughput benchmark. Individual samples/timestamps and
+PID/start-tick identities are retained in the raw report.
+
+Both private build children (PIDs 1005868 and 1015245; no sampled start ticks) and all three
+peers exited 0; every owned group was recorded retired before workspace cleanup. The handoff's
+subsequent metadata-only PID checks found all five absent. This describes that completed
+capture, not the ownership state of a later documentation turn.
+
+### Unit verification and remaining acceptance
+
+The separate HOST command `systemd-analyze --user verify deploy/telegram-mcp-relay.service`
+returned **1**: the configured executable `<user-bin>/telegram-mcp-relay` was absent. The
+unchanged unit SHA-256 is
+`3f573a275e6ec9ef1da581a92e3ba0394f42ce91cee1eb74adb108e3c9b0e72b`.
+This is a failed operational check, not a successful unit validation. No installation,
+activation, relaxed hardening or repeat verification was performed for this record.
+
+Operational/MVP acceptance remains pending resolution of the installation prerequisite and
+a successful operator-owned verification receipt, plus the dedicated gates for the evidence
+documentation. Installation/service activation requires separate authorization. Keep the
+failed receipt and integrate any later verification through reviewed work. Live Telegram,
+named-client interoperability and universal idle-host wake remain unverified; optional incoming
+attachment downloading remains deferred. See the complete
+[acceptance and deliverable coverage](TESTING.md#specification-1619-coverage-map).
 
 ## Library-linked release probe
 
@@ -107,8 +258,9 @@ oversized/malformed input and exhausted worker/request budgets fail; failures re
 in the exit status. The mock does not implement incoming replies or live Telegram semantics.
 
 Controlled stream/event/server tests cover framing, bounded draining, cancellation and failure
-paths without binding sockets. Their execution belongs to P1/P2 in FINALIZE. Real HOST capture
-and quantitative release acceptance remain pending.
+paths without binding sockets. Their P1/P2 FINALIZE outcome is included in the
+[recorded validation evidence](TESTING.md#recorded-validation-evidence); runtime observations
+come from the separate HOST capture above.
 
 ## Synthetic MCP driver
 
@@ -180,7 +332,7 @@ FINALIZE; source and unit tests establish no real runtime/resource result.
 [measure_collectors.py](../tools/measure_collectors.py) provides standard-library Python 3.9+
 building blocks. It does not launch the probe, run a workload, build binaries or produce a
 runtime acceptance report. The controller below composes these collectors with the separate
-mock and driver. Indexed release evidence remains pending. Its interfaces are:
+mock and driver. The recorded capture above supplies runtime evidence. Its interfaces are:
 
 | Collector | Result and limits |
 | --- | --- |
@@ -240,8 +392,8 @@ systemd-analyze --user verify deploy/telegram-mcp-relay.service
 The CLI disables bytecode caching before local imports so startup preserves the clean source tree.
 
 The second command remains a separate operator action. Neither command runs in IMPLEMENT or
-review. Capture remains **Pending HOST**; no measured value or accepted unit verification is
-recorded here. Linux `/proc`, Python 3.9+, Git, a native supported Rust toolchain and a complete
+review. The recorded capture succeeded; separate unit verification failed as detailed above.
+Linux `/proc`, Python 3.9+, Git, a native supported Rust toolchain and a complete
 local locked dependency cache are prerequisites. Missing inputs fail without fetching/repair.
 
 Before capture, the coordinator must export actual successful public Runner receipts to the
