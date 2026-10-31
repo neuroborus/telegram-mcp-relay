@@ -45,9 +45,10 @@ target/release/telegram-mcp-relay "$HOME/.config/telegram-mcp-relay/config.toml"
 ```
 
 Connect capable clients to `http://127.0.0.1:8765/mcp` using Streamable HTTP and the configured
-bearer header. Current support is MCP **2026-07-28**, including `subscriptions/listen`;
-older initialize-based clients are unsupported. Named-client interoperability remains
-unverified; see [client requirements](docs/SETUP.md#connect-mcp-clients).
+bearer header. MCP **2025-06-18** supports initialization, the seven tools and read-only inbox
+resources on the same endpoint as **2026-07-28** discovery and `subscriptions/listen`.
+Older resource subscriptions are unavailable. Named-client interoperability remains pending
+HOST verification; see [client requirements](docs/SETUP.md#connect-mcp-clients).
 Optional [systemd user-service and environment examples](docs/SETUP.md#optional-systemd-user-service)
 are provided for operator review.
 

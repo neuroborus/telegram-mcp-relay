@@ -24,12 +24,15 @@ use crate::repositories::Database;
 mod ask;
 #[path = "inbox.rs"]
 mod inbox;
+#[path = "legacy.rs"]
+mod legacy;
 #[path = "subscriptions.rs"]
 mod subscriptions;
 #[path = "tools.rs"]
 mod tools;
 
 const VERSION: &str = "2026-07-28";
+const LEGACY_VERSION: &str = "2025-06-18";
 const TOKEN: &str = "synthetic-bearer-token-0123456789012345";
 
 fn message(method: &str) -> Value {
@@ -110,6 +113,7 @@ impl Fixture {
             stop,
             task,
             client: reqwest::Client::builder().no_proxy().build().unwrap(),
+            next_legacy_id: std::sync::atomic::AtomicU64::new(10),
         }
     }
 }
@@ -125,6 +129,7 @@ struct Http {
     stop: CancellationToken,
     task: JoinHandle<Result<(), AppError>>,
     client: reqwest::Client,
+    next_legacy_id: std::sync::atomic::AtomicU64,
 }
 
 impl Http {
@@ -191,7 +196,10 @@ async fn discovery_is_modern_stateless_and_accepts_native_and_same_origin_client
         assert!(response.headers().get("mcp-session-id").is_none());
         let body: Value = response.json().await.unwrap();
         assert_eq!(body["id"], 7);
-        assert_eq!(body["result"]["supportedVersions"], json!([VERSION]));
+        assert_eq!(
+            body["result"]["supportedVersions"],
+            json!([LEGACY_VERSION, VERSION])
+        );
         assert_eq!(body["result"]["cacheScope"], "private");
         assert_eq!(body["result"]["ttlMs"], 0);
         assert_eq!(
@@ -332,7 +340,10 @@ async fn protocol_errors_keep_codes_and_ids_without_echoing_parser_or_header_inp
     let response = http.client.execute(request).await.unwrap();
     let result: Value = response.json().await.unwrap();
     assert_eq!(result["error"]["code"], -32022);
-    assert_eq!(result["error"]["data"]["supported"], json!([VERSION]));
+    assert_eq!(
+        result["error"]["data"]["supported"],
+        json!([LEGACY_VERSION, VERSION])
+    );
 }
 
 #[tokio::test]
@@ -510,30 +521,38 @@ async fn shared_factory_metadata_and_long_requests_preserve_admission_and_cancel
 #[tokio::test]
 async fn shutdown_cancels_an_admitted_incomplete_body() {
     let fixture = Fixture::new();
-    let stop = CancellationToken::new();
-    let endpoint =
-        McpEndpoint::new(&fixture.config, None, fixture.state.clone(), stop.clone()).unwrap();
-    let reading = Arc::new(tokio::sync::Notify::new());
-    let signal = reading.clone();
-    let body = http_body_util::StreamBody::new(futures_util::stream::poll_fn(move |_| {
-        signal.notify_one();
-        Poll::<Option<Result<Frame<Bytes>, Infallible>>>::Pending
-    }));
-    let request = Request::builder()
-        .method("POST")
-        .uri("/mcp")
-        .header(header::HOST, fixture.config.server.listen.to_string())
-        .header(header::ACCEPT, "application/json, text/event-stream")
-        .header(header::CONTENT_TYPE, "application/json")
-        .header("mcp-protocol-version", VERSION)
-        .header("mcp-method", "server/discover")
-        .body(body)
-        .unwrap();
-    let pending = tokio::spawn(async move { endpoint.handle(request).await });
-    reading.notified().await;
-    stop.cancel();
-    assert_eq!(
-        pending.await.unwrap().status(),
-        StatusCode::SERVICE_UNAVAILABLE
-    );
+    for session in [None, Some("synthetic-session")] {
+        let stop = CancellationToken::new();
+        let endpoint =
+            McpEndpoint::new(&fixture.config, None, fixture.state.clone(), stop.clone()).unwrap();
+        let reading = Arc::new(tokio::sync::Notify::new());
+        let signal = reading.clone();
+        let body = http_body_util::StreamBody::new(futures_util::stream::poll_fn(move |_| {
+            signal.notify_one();
+            Poll::<Option<Result<Frame<Bytes>, Infallible>>>::Pending
+        }));
+        let mut request = Request::builder()
+            .method("POST")
+            .uri("/mcp")
+            .header(header::HOST, fixture.config.server.listen.to_string())
+            .header(header::ACCEPT, "application/json, text/event-stream")
+            .header(header::CONTENT_TYPE, "application/json");
+        request = if let Some(session) = session {
+            request
+                .header("mcp-session-id", session)
+                .header("mcp-protocol-version", LEGACY_VERSION)
+        } else {
+            request
+                .header("mcp-protocol-version", VERSION)
+                .header("mcp-method", "server/discover")
+        };
+        let request = request.body(body).unwrap();
+        let pending = tokio::spawn(async move { endpoint.handle(request).await });
+        reading.notified().await;
+        stop.cancel();
+        assert_eq!(
+            pending.await.unwrap().status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+    }
 }

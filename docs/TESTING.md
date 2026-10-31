@@ -235,6 +235,25 @@ admission, disconnect release and transport shutdown using explicit gates/contro
 Fixtures are private, randomized and TMPDIR-aware. These transport probes do not establish
 named-client compatibility.
 
+`routes::tests::legacy` defines synthetic 2025-06-18 HTTP initialization and fallback
+negotiation, SSE results, initialized notification/session reuse, exact seven-tool discovery,
+explicit application registration shared with modern calls, read-only resource listings,
+templates/reads and explicit transport termination. It checks capability separation,
+unavailable legacy subscription APIs, bearer/Host/Origin checks on session operations,
+unknown sessions, duplicate/conflicting version/session declarations, malformed input,
+inclusive initialization body bounds and retained strict modern request metadata.
+Additional regressions reject complete matching inline metadata with live, unknown and
+terminated session IDs without registration effects, preserve partial legacy metadata,
+and exercise session-owned cancellation/DELETE with controlled handler signals. The preflight
+retains inclusive declared/chunked body bounds and shutdown cancellation during a partial body.
+Supplied `Mcp-Method` initialization cases follow the SDK's legacy/modern header semantics.
+These new cases are authored for the dedicated FINALIZE gate; no execution result or
+named-client success is asserted here. The prior modern-only version-list assertion is
+intentionally expanded to the two supported versions; independent unsupported-version
+and security assertions remain. Mixed-client delivery/recovery acceptance is later planned
+work. The historical benchmark at `968802371f94f51eedab66998eff6031762db5ea` and its hashes
+and figures remain unchanged and do not measure the new runtime.
+
 `routes::tests::tools` exercises the real shared handler through separate modern MCP HTTP
 requests and a separate synthetic Bot API. It covers typed input/output discovery, stable
 tool listings, normalized registration, external-ID/saved-handle resume through a new handler,
@@ -529,7 +548,7 @@ mark the unchanged product specification accepted or establish named-client/live
 | One native daemon, one poller, no vendor adapters/agent management, external database, broker, Node.js or Docker requirement; no public HTTPS/webhook needed (§§1–3, 13, 16, 19) | [Application](../src/app.rs), application/poller tests and [architecture](ARCHITECTURE.md) define and exercise the composition; [setup](SETUP.md) documents locked builds and optional user deployment. [HOST record](MEASUREMENTS.md#recorded-host-capture) preserves the resource result and initial failed/later successful static unit verification |
 | Concise agent text/file policy; no periodic agent polling and no universal LLM wake promise (§§2, 6, 14, 16, 19) | Complete copyable section 14 [agent policy](AGENT_POLICY.md), token/reconciliation instructions and [client timeout guidance](SETUP.md#connect-mcp-clients); existing [contributor policy](../AGENTS.md) is preserved |
 | Telegram at-most-24-hour unconsumed backlog, independent TTLs and reconnect limitations explained to users (§§10–11, 16, 19) | [Setup/recovery](SETUP.md#recovery-and-retention), [README](../README.md), [architecture](ARCHITECTURE.md) and [configuration](CONFIGURATION.md) explain the independent limits and webhook-safe setup |
-| Protocol support and actual client capabilities (§§5–6, 16–19) | [Subscription](../src/routes/subscriptions.rs), transport and daemon recovery fixtures exercise locked rmcp 3.8.0 with synthetic MCP 2026-07-28 HTTP clients. [Client requirements](SETUP.md#connect-mcp-clients) distinguish this from unsupported older revisions and unverified named-client interoperability, live Telegram and automatic host wake |
+| Protocol support and actual client capabilities (§§5–6, 16–19) | [Subscription](../src/routes/subscriptions.rs), transport and daemon recovery fixtures cover synthetic MCP 2026-07-28 clients. New [legacy HTTP fixtures](../src/routes/legacy.rs) add 2025-06-18 negotiation/tools/read-only resources; execution awaits FINALIZE. [Client requirements](SETUP.md#connect-mcp-clients) retain the older-event limitation and pending HOST named-client acceptance, live Telegram and automatic host wake boundaries |
 | Near-zero idle CPU, best-effort idle RSS below approximately 30 MB, startup, near-limit upload peak RSS, stripped locked release size and dependency profile (§§3, 9, 16–19) | [Recorded HOST benchmark](MEASUREMENTS.md#workload-and-observed-resources) gives actual probe/mock/driver figures, startup and sampled/lifetime limits; [build identity](MEASUREMENTS.md#provenance-and-release-identity) records stripped daemon/probe sizes and distinct profiles. Unit tests retain bounded-read/idle-scheduler proofs without asserting resource targets |
 
 ## Section 17 deliverable coverage
@@ -542,7 +561,7 @@ from current documentation finalization and full operational acceptance.
 | 1. Minimal working Rust source | [Architecture](ARCHITECTURE.md), `src/`, recorded complete C4–C6 and mocked daemon interactions |
 | 2. Lock, reproducible release instructions, sample configuration | [Cargo.lock](../Cargo.lock), [setup](SETUP.md), [sample TOML](../config/relay.example.toml), recorded R1/R2 and bound offline HOST materialization |
 | 3. SQLite initialization/migrations, cleanup, restart-safe cursor | [Repositories](../src/repositories.rs), storage/retention/maintenance/ingress/poller suites above |
-| 4. MCP tools/resources/subscriptions with tested current protocol | Transport/tools/inbox/subscription/ask and daemon recovery suites above; MCP 2026-07-28 synthetic clients only |
+| 4. MCP tools/resources/subscriptions with tested current protocol | Existing modern transport/tools/inbox/subscription/ask and daemon recovery suites; new 2025-06-18 HTTP fixtures await FINALIZE and do not advertise older resource events |
 | 5. Single poller, strict final text/caption limits, safe documents | Client, domain, file and outbound suites above; HOST near-limit normal-path upload; live Telegram unverified |
 | 6. Unit/integration tests using mock Telegram | Recorded complete unfiltered C6 and controlled P1/P2; no real messages or credentials used |
 | 7. README/setup covering bot, allowlists, URL, secrets, registration, wait caveat, notices | [README](../README.md), [setup/client guidance](SETUP.md), [configuration](CONFIGURATION.md); named-client compatibility remains unverified |

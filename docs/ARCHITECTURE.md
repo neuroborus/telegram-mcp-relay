@@ -129,19 +129,44 @@ lifecycle and the subscription API below. No external client interoperability is
 `routes::McpEndpoint` serves only the configured loopback listener and fixed `/mcp` path.
 The SDK owns parsing, negotiation, dispatch and SSE. Each factory call clones one shared
 `handlers::McpHandler`, including its SQLite handle; HTTP identity never creates an agent session.
-The checksum-verified locked rmcp 3.8.0 sources confirm `server/discover`, HTTP request parts
-in context extensions and modern stateless negotiation. Only MCP 2026-07-28 is advertised:
-requests require matching `Mcp-Method` and `MCP-Protocol-Version` headers and `_meta`
-protocolVersion plus clientCapabilities entries. Tool calls also require `Mcp-Name` to match
-`params.name`; the SDK rejects missing or mismatched headers before handler dispatch.
-Legacy initialize sessions are unsupported.
-Discovery advertises tools and resources with `subscribe=true`.
+The checksum-verified locked rmcp 3.8.0 sources provide negotiation and both HTTP lifecycles.
+Exactly MCP 2025-06-18 and 2026-07-28 are advertised. Modern requests retain matching
+`Mcp-Method` and `MCP-Protocol-Version` headers and `_meta` protocolVersion/clientCapabilities;
+`Mcp-Name` must match the tool name or resource URI. The SDK rejects missing or mismatched
+modern metadata before dispatch. Modern discovery advertises tools and resources with
+`subscribe=true`; `subscriptions/listen` and resource notifications retain their existing path.
+
+Legacy `initialize` uses the bounded SDK session manager. The first request may omit the
+protocol header; a present header must match `params.protocolVersion`. The SDK negotiates
+2025-06-18, including its initialization fallback for unsupported requested versions or a
+modern version sent through the old handshake. `McpHandler::initialize` uses the SDK's
+`negotiate_initialize` hook and removes resource subscription capability from that response:
+legacy clients get tools and read-only resources, without `resources/subscribe` events.
+Initialization never calls application registration. Subsequent requests and
+`notifications/initialized` carry the returned `Mcp-Session-Id` plus the negotiated
+`MCP-Protocol-Version: 2025-06-18`; modern-only headers and per-request metadata are unnecessary.
+The SDK ignores `Mcp-Method` for legacy declarations (including an initialization without
+a protocol header); a supplied method is validated when declaring the modern version.
+The SDK returns initialization and request results as SSE, even with JSON response preference;
+notifications and DELETE termination return 202. Unknown/terminated session reads/calls return
+404. A transport close leaves durable application identities and replies untouched.
 
 Host must be the configured numeric authority or `localhost`, including its port. Present
 Origin must use HTTP with either authority; missing Origin supports native clients. Duplicate
 Host/Origin values and unapproved absolute authorities fail closed. Configured bearer auth
-requires exactly one matching Authorization header before SDK dispatch. Request bodies are
-bounded incrementally by the SDK, including chunked bodies. Admission lasts through response
+requires exactly one matching Authorization header before SDK dispatch, including initialization,
+session POST, GET and DELETE. Duplicate protocol/session/method/name headers, invalid session
+tokens and session/version declarations outside the supported handshake set fail closed.
+A missing version header on a session request implies unsupported 2025-03-26 and is rejected;
+a modern version with a legacy session ID is rejected rather than silently dropping that ID.
+Session-bearing POSTs also reject complete matching inline lifecycle metadata with HTTP 400,
+for live, unknown and terminated sessions alike. Otherwise rmcp would select stateless routing
+and discard the supplied session ID. This preflight uses SDK message/metadata types, reads
+at most `limits.request_bytes` under HTTP admission and shutdown cancellation, and passes
+the original bytes unchanged to the SDK. Partial legacy metadata and the SDK's version-mismatch
+errors retain their existing behavior. Ordinary session calls remain under bounded session
+work admission, cancellation and DELETE ownership.
+Request bodies are bounded incrementally, including chunked bodies. Admission lasts through response
 completion/drop, including SSE; saturation returns 503. Connections are limited to twice request
 admission, with 32 headers, 16 KiB header/buffer bounds and a ten-second header deadline. There
 is no global call timeout. Shutdown closes admission, connections and pending body reads before
@@ -151,15 +176,16 @@ Correlation uses fresh random IDs, never client-supplied IDs. Authorization, pro
 cookies and client correlation headers are removed before SDK dispatch. HTTP rejection text is
 static; JSON-RPC failures retain codes, IDs and structured negotiation data with safe messages.
 Binary diagnostics suppress rmcp targets, whose upstream logs can contain raw metadata;
-library embedders must retain this filter. Synthetic HTTP tests are included in the recorded
-complete C6 outcome; no named-client compatibility or live Telegram behavior is claimed.
+library embedders must retain this filter. Earlier recorded C6 outcomes cover their original
+snapshots; new legacy HTTP coverage awaits the dedicated FINALIZE gate. No named-client
+compatibility or live Telegram behavior is claimed.
 
 ### SDK transport session bounds
 
 `routes::sessions::BoundedSessions` wraps rmcp's `create_local_session`,
-`LocalSessionHandle` and `WorkerTransport` APIs. Legacy HTTP routing remains disabled;
-this adapter prepares bounded ownership without changing advertised protocol support.
-It shares the existing handler and database and never registers application identities.
+`LocalSessionHandle` and `WorkerTransport` APIs. Legacy HTTP routing uses this adapter;
+modern stateless routing remains SDK-owned. Both share the existing handler and database
+and never register application identities during transport setup.
 
 Transport admission and outstanding request/stream admission each use
 `limits.concurrent_requests`, independently of HTTP response admission. One additional
@@ -925,9 +951,14 @@ activation, live Telegram or named-client operation.
 
 ## Protocol compatibility gate
 
-The implementation advertises only MCP `2026-07-28` through locked rmcp 3.8.0, including
-`subscriptions/listen`; legacy initialize-based clients are unsupported. The complete C6
-fixtures use synthetic HTTP clients, and the HOST driver confirms discovery/registration/file
-delivery against that same protocol. No named-client or live Telegram interoperability and
-no universal idle-host wake has been verified. See [client requirements](SETUP.md#connect-mcp-clients)
-and specification sections 5–6 and 18; agent polling is not a substitute for event delivery.
+The implementation advertises MCP `2025-06-18` initialization/tools/read-only resources and
+`2026-07-28` discovery/tools/resources/`subscriptions/listen` through locked rmcp 3.8.0.
+[Legacy HTTP fixtures](../src/routes/legacy.rs) define negotiation, security and shared-handler
+regressions; their execution is pending the dedicated FINALIZE gate. Existing modern event
+proofs remain in place. Named-client acceptance requires later HOST discovery of all seven
+tools; no named-client, live Telegram or universal idle-host wake success is claimed.
+See [client requirements](SETUP.md#connect-mcp-clients) and specification sections 5–6 and 18.
+
+The historical [HOST benchmark](MEASUREMENTS.md#recorded-host-capture) remains tied to
+`968802371f94f51eedab66998eff6031762db5ea` and its original hashes/figures. Its modern driver
+observations and resource figures are not new measurements of this changed runtime.

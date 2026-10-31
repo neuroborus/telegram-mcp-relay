@@ -81,7 +81,8 @@ lifetimes are ten seconds for initialization/control operations, five minutes fo
 sessions, and thirty seconds for abandoned calls, with a one-second reclamation interval.
 Attached long-running calls retain their service deadlines. These are centralized constants,
 not new TOML settings, and do not change `limits.sessions` or durable retention.
-Legacy HTTP routing remains disabled in this preparatory change. See
+Legacy HTTP routing is enabled for MCP 2025-06-18 and uses these bounds independently
+of modern stateless HTTP admission. Transport IDs do not replace durable application keys. See
 [SDK session ownership](ARCHITECTURE.md#sdk-transport-session-bounds) for reclamation and shutdown.
 Library resource subscriptions enforce `limits.subscriptions` (default 64) for both active
 listeners and URI entries per request, and `limits.subscription_queue` (default 16) per listener.

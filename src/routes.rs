@@ -13,7 +13,7 @@ use http::{
     Request, Response, StatusCode,
     header::{self, HeaderValue},
 };
-use http_body_util::{BodyExt, Full, Limited, combinators::BoxBody};
+use http_body_util::{BodyExt, Full, LengthLimitError, Limited, combinators::BoxBody};
 use hyper::{
     body::{Body, Bytes, Frame, SizeHint},
     server::conn::http1,
@@ -22,6 +22,7 @@ use hyper::{
 use hyper_util::rt::{TokioIo, TokioTimer};
 use rmcp::{
     ServerHandler,
+    model::{ClientJsonRpcMessage, ClientRequest, GetMeta, ProtocolVersion},
     transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService},
 };
 use tokio::{
@@ -67,6 +68,7 @@ struct Endpoint<S> {
     admission: Arc<Semaphore>,
     concurrency: usize,
     request_bytes: usize,
+    versions: Vec<ProtocolVersion>,
     shutdown: CancellationToken,
 }
 
@@ -80,7 +82,7 @@ impl<S> Clone for McpEndpoint<S> {
 
 impl<S: ServerHandler> McpEndpoint<S> {
     /// Supply resolved secrets and one shared handler, never a connection-local registry.
-    /// The production handler advertises only the modern per-request lifecycle.
+    /// SDK transport sessions remain separate from explicit application identities.
     pub fn new(
         config: &Config,
         auth: Option<&Secret>,
@@ -111,7 +113,7 @@ impl<S: ServerHandler> McpEndpoint<S> {
             .transpose()?;
         let hosts = [listen.to_string(), format!("localhost:{}", listen.port())];
         let sdk_config = StreamableHttpServerConfig::default()
-            .with_legacy_session_mode(false)
+            .with_legacy_session_mode(true)
             .with_stateless_protocol_metadata_required(true)
             .with_json_response(true)
             .with_allowed_hosts(hosts.clone())
@@ -122,6 +124,7 @@ impl<S: ServerHandler> McpEndpoint<S> {
             config.limits.concurrent_requests as usize,
             shutdown.clone(),
         ));
+        let versions = handler.supported_protocol_versions().into_owned();
         Ok(Self {
             inner: Arc::new(Endpoint {
                 sdk: StreamableHttpService::new(
@@ -136,6 +139,7 @@ impl<S: ServerHandler> McpEndpoint<S> {
                 admission: Arc::new(Semaphore::new(config.limits.concurrent_requests as usize)),
                 concurrency: config.limits.concurrent_requests as usize,
                 request_bytes: config.limits.request_bytes as usize,
+                versions,
                 shutdown,
             }),
         })
@@ -224,6 +228,9 @@ impl<S: ServerHandler> McpEndpoint<S> {
                 .insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Bearer"));
             return response;
         }
+        if !self.valid_protocol_headers(&request) {
+            return rejection(StatusCode::BAD_REQUEST);
+        }
         let Ok(permit) = self.inner.admission.clone().try_acquire_owned() else {
             return rejection(StatusCode::SERVICE_UNAVAILABLE);
         };
@@ -246,7 +253,7 @@ impl<S: ServerHandler> McpEndpoint<S> {
         let response = tokio::select! {
             biased;
             _ = self.inner.shutdown.cancelled() => return rejection(StatusCode::SERVICE_UNAVAILABLE),
-            response = self.inner.sdk.handle(request)
+            response = self.dispatch(request)
                 .instrument(tracing::info_span!("mcp_request", request_id = correlation.as_str())) => response,
         };
         let mut response = safe_response(response, self.inner.request_bytes).await;
@@ -266,6 +273,92 @@ impl<S: ServerHandler> McpEndpoint<S> {
             }
             .boxed()
         })
+    }
+
+    /// rmcp's complete inline metadata selects stateless routing even with a
+    /// legacy version and session header. Reject that ambiguity before dispatch;
+    /// leave the original bytes and SDK negotiation/validation unchanged.
+    async fn dispatch<B>(&self, request: Request<B>) -> Response<ResponseBody>
+    where
+        B: Body<Data = Bytes> + Send + 'static,
+        B::Error: std::fmt::Display,
+    {
+        if request.method() != http::Method::POST
+            || !request.headers().contains_key("mcp-session-id")
+        {
+            return self.inner.sdk.handle(request).await;
+        }
+        let (parts, body) = request.into_parts();
+        let body = body.map_err(|_| std::io::Error::other("MCP request body unavailable"));
+        let bytes = match Limited::new(body, self.inner.request_bytes).collect().await {
+            Ok(body) => body.to_bytes(),
+            Err(error) => {
+                return rejection(if error.is::<LengthLimitError>() {
+                    StatusCode::PAYLOAD_TOO_LARGE
+                } else {
+                    StatusCode::INTERNAL_SERVER_ERROR
+                });
+            }
+        };
+        if let Ok(ClientJsonRpcMessage::Request(rpc)) = serde_json::from_slice(&bytes) {
+            let meta = rpc.request.get_meta();
+            // Mismatched versions already fail in the SDK before lifecycle routing.
+            let matching_version = meta.protocol_version().is_some_and(|version| {
+                parts
+                    .headers
+                    .get("mcp-protocol-version")
+                    .is_some_and(|header| header.as_bytes() == version.as_str().as_bytes())
+            });
+            if !matches!(rpc.request, ClientRequest::InitializeRequest(_))
+                && matching_version
+                && meta
+                    .missing_required_keys(&ProtocolVersion::V_2026_07_28)
+                    .is_empty()
+            {
+                return rejection(StatusCode::BAD_REQUEST);
+            }
+        }
+        self.inner
+            .sdk
+            .handle(Request::from_parts(parts, Full::new(bytes)))
+            .await
+    }
+
+    /// The SDK reads a single header value. Reject ambiguous declarations before
+    /// routing, and do not let a modern declaration silently ignore a session ID.
+    fn valid_protocol_headers<B>(&self, request: &Request<B>) -> bool {
+        let headers = request.headers();
+        for name in [
+            "mcp-protocol-version",
+            "mcp-session-id",
+            "mcp-method",
+            "mcp-name",
+        ] {
+            if headers.get_all(name).iter().count() > 1 {
+                return false;
+            }
+        }
+        for name in ["mcp-protocol-version", "mcp-session-id"] {
+            if headers.get(name).is_some_and(|value| {
+                value.is_empty()
+                    || value
+                        .as_bytes()
+                        .iter()
+                        .any(|b| !(0x21..=0x7e).contains(b) || *b == b',')
+            }) {
+                return false;
+            }
+        }
+        if headers.contains_key("mcp-session-id") {
+            // Subsequent legacy requests carry their negotiated version. A missing
+            // header defaults to unsupported 2025-03-26 in the HTTP specification.
+            return headers.get("mcp-protocol-version").is_some_and(|value| {
+                self.inner.versions.iter().any(|version| {
+                    version.has_initialize() && value.as_bytes() == version.as_str().as_bytes()
+                })
+            });
+        }
+        true
     }
 
     fn valid_headers<B>(&self, request: &Request<B>) -> bool {

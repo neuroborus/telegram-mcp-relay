@@ -9,9 +9,10 @@ use rmcp::{
     ErrorData, RoleServer, ServerHandler,
     model::{
         CacheScope, CallToolRequestParams, CallToolResponse, CallToolResult, Implementation,
-        ListResourceTemplatesResult, ListResourcesResult, ListToolsResult, PaginatedRequestParams,
-        ProtocolVersion, ReadResourceRequestParams, ReadResourceResponse, ResourceTemplate,
-        ServerCapabilities, ServerConfig, SubscriptionFilter, Tool,
+        InitializeRequestParams, InitializeResult, ListResourceTemplatesResult,
+        ListResourcesResult, ListToolsResult, PaginatedRequestParams, ProtocolVersion,
+        ReadResourceRequestParams, ReadResourceResponse, ResourceTemplate, ServerCapabilities,
+        ServerConfig, SubscriptionFilter, Tool,
     },
     service::{RequestContext, SubscriptionContext},
 };
@@ -182,7 +183,22 @@ impl ServerHandler for McpHandler {
     }
 
     fn supported_protocol_versions(&self) -> Cow<'static, [ProtocolVersion]> {
-        Cow::Borrowed(&[ProtocolVersion::V_2026_07_28])
+        Cow::Borrowed(&[ProtocolVersion::V_2025_06_18, ProtocolVersion::V_2026_07_28])
+    }
+
+    async fn initialize(
+        &self,
+        request: InitializeRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<InitializeResult, ErrorData> {
+        context.peer.set_peer_info(request.clone());
+        // The SDK selects a supported handshake version, including fallback.
+        // Legacy resource subscriptions are not implemented by this handler.
+        let mut info = self.negotiate_initialize(&request)?;
+        if let Some(resources) = &mut info.capabilities.resources {
+            resources.subscribe = None;
+        }
+        Ok(info)
     }
 
     fn accepted_subscription_filter(

@@ -142,9 +142,10 @@ configured numeric authority or `localhost`, including the port. Host has the sa
 restriction. A shared bearer and opaque session handles assume **trusted local clients**;
 they do not isolate hostile agents or users with access to your process/files.
 
-The locked SDK is rmcp 3.8.0. Only MCP **2026-07-28** is supported, including discovery and
-subscriptions. A capable client must send matching `MCP-Protocol-Version` and `Mcp-Method`
-headers and `params._meta` protocolVersion/clientCapabilities metadata; `Mcp-Name` must match
+The locked SDK is rmcp 3.8.0. MCP **2025-06-18** and **2026-07-28** share this endpoint,
+handler and SQLite store. For modern discovery and subscriptions, send matching
+`MCP-Protocol-Version` and `Mcp-Method` headers and `params._meta`
+protocolVersion/clientCapabilities metadata; `Mcp-Name` must match
 the tool name for calls or URI for resource reads. See
 [transport details](ARCHITECTURE.md#protected-mcp-transport) and the
 [HTTP fixtures](../src/routes/tests.rs). A minimal discovery body is:
@@ -155,19 +156,51 @@ the tool name for calls or URI for resource reads. See
 
 For that body, set `Mcp-Method: server/discover`, `MCP-Protocol-Version: 2026-07-28`,
 `Content-Type: application/json` and `Accept: application/json, text/event-stream`, plus bearer
-authorization. Older initialize-based revisions and legacy `resources/subscribe` are unsupported.
-Do not assume a client works merely because it advertises Streamable HTTP.
+authorization.
+
+For 2025-06-18, start with ordinary initialization (no modern `_meta`, `Mcp-Method` or
+`Mcp-Name` is required):
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"example-client","version":"1"}}}
+```
+
+Use the same Content-Type, Accept and bearer headers. The initial protocol header may be
+omitted; if supplied it must match the body. Parse the SSE initialization result and save
+the returned `Mcp-Session-Id`. Send `notifications/initialized` within ten seconds, then reuse
+that ID with `MCP-Protocol-Version: 2025-06-18` on all session requests, including GET/DELETE.
+Requests such as `tools/list`, `tools/call` and `resources/read` need no modern metadata and
+return SSE; notifications and DELETE return 202. Do not combine a session ID with complete
+inline protocolVersion/clientCapabilities metadata: that selects a different SDK lifecycle
+and is rejected with HTTP 400. A missing subsequent version header implies
+unsupported 2025-03-26, so it is rejected. The SDK may answer initialization requesting a
+different revision with 2025-06-18; the client must accept that negotiated version before use.
+Only the two advertised revisions are supported for ordinary requests.
+
+Transport sessions are bounded and expire after five idle minutes; abandoned initialization
+or disconnected work is reclaimed. A 404 on a terminated/expired transport requires fresh
+initialization. Preserve the independent application `session_key` to resume registration;
+an SDK transport ID cannot substitute for it. Use DELETE to close a transport explicitly.
+There is no SSE replay store: reconnect and read durable inbox state. See
+[session bounds](ARCHITECTURE.md#sdk-transport-session-bounds).
+
+Legacy initialization advertises tools/resources without subscription support;
+`resources/subscribe` and `resources/unsubscribe` return method-not-found. Modern clients
+retain resource events. Older clients can use bounded `telegram_ask` and startup/resume
+inbox recovery, without periodic agent polling. Do not assume a named client works merely
+because it advertises Streamable HTTP; actual HOST acceptance remains pending.
 
 | Capability | Evidence and limitation |
 | --- | --- |
-| Discovery, seven typed tools, private inbox reads | Synthetic rmcp 3.8.0 / MCP 2026-07-28 fixtures in [transport tests](../src/routes/tests.rs) and [daemon scenarios](../src/app/tests/recovery.rs); see the [coverage map](TESTING.md#specification-1619-coverage-map) for evidence boundaries |
+| Legacy initialization, seven-tool listing, calls and private inbox reads | New [2025-06-18 HTTP fixtures](../src/routes/legacy.rs) define synthetic coverage; execution awaits FINALIZE, named-client discovery awaits HOST |
+| Modern discovery, seven typed tools, private inbox reads | Existing rmcp 3.8.0 / MCP 2026-07-28 fixtures in [transport tests](../src/routes/tests.rs) and [daemon scenarios](../src/app/tests/recovery.rs); see the [coverage map](TESTING.md#specification-1619-coverage-map) for evidence boundaries |
 | Resource events | POST SSE `subscriptions/listen`, accepted `notifications.resourceSubscriptions` filters and `notifications/resources/updated` are covered by [subscription fixtures](../src/routes/subscriptions.rs); older subscription APIs are unsupported |
 | Concurrent asks/inbox/events and reconnect recovery | Synthetic [daemon recovery](../src/app/tests/recovery.rs) and [ask fixtures](../src/routes/ask.rs); no live client certification implied |
 | Named agent clients, live Telegram, automatic idle-host wake | Unverified; no named-client or automatic wake guarantee |
 
 Register/resume using a stable external ID and accurate title; save the returned session key
-and inbox URI. Subscribe to that concrete canonical URI (no template or query page) using
-`params.notifications.resourceSubscriptions` in `subscriptions/listen`, and inspect the accepted
+and inbox URI. On modern clients, subscribe to that concrete canonical URI (no template or
+query page) using `params.notifications.resourceSubscriptions` in `subscriptions/listen`, and inspect the accepted
 filter. Read/claim on start, resume and notifications, without periodic agent polling. Resources
 are read-only and never claim. Events are invalidations, not durable payload delivery: after a
 disconnect, restart or slow-listener closure, reconnect and read SQLite-backed state.
