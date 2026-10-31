@@ -25,6 +25,7 @@ and lockfile. Root workspace checks do not cover it; see [testing](TESTING.md).
 | `config/` | Nonsecret example configuration |
 | `deploy/` | Example `systemd --user` unit and protected secret-file guidance |
 | `tools/` | Small justified development/measurement helpers |
+| `tools/measure_collectors.py`, `tools/tests/test_measure*.py` | Bounded Linux resource/build evidence collectors and deterministic Python tests; mock orchestration is separate |
 
 These are ownership slots, not a demand to create empty modules. Collapse trivial layers into
 focused files until separation improves clarity. MCP SDK handlers may live together when the

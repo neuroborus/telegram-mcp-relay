@@ -127,8 +127,11 @@ and private writable output. The standalone helper still has exactly the six mod
 probe introduction adds no helper mode, dependency or selected trusted command.
 Do not infer release-build success from development compilation or a HOST measurement.
 
-Future collectors and mock orchestration must disclose prerequisites and source/build/workload
-identity before capture. Runtime capture and user-unit verification belong to the task's HOST
-boundary, after applicable tooling/release gates and verified quiescent ownership. They do not
+[Bounded Python collectors](MEASUREMENTS.md#bounded-collectors) inspect existing artifacts and
+Linux samples without building or orchestrating a workload. Their P1/P2 source/unit gates are
+Native FINALIZE obligations; no Python lint gate is added. Future mock orchestration must
+disclose prerequisites and source/build/workload identity before capture. Runtime capture and
+user-unit verification belong to the task's HOST boundary, after applicable tooling/release
+gates and verified quiescent ownership. They do not
 run inside implementation/review turns or replace required checks; quantitative evidence remains
 pending until observed and integrated through reviewed repository work.

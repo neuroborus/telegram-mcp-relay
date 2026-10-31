@@ -84,6 +84,25 @@ H1–H4 above apply when that separate helper changes; this probe does not exten
 HOST capture requires both release gates plus the applicable tooling gates and a verified
 quiescent ownership boundary. See [probe interface and evidence limits](MEASUREMENTS.md).
 
+## Python measurement tooling gates
+
+The standard-library [collectors](../tools/measure_collectors.py) and their
+[controlled tests](../tools/tests/test_measure_collectors.py) use this Native FINALIZE inventory:
+
+```text
+P1: python3 -B -c "import ast,pathlib; [ast.parse(p.read_text(encoding='utf-8'), filename=str(p)) for p in pathlib.Path('tools').rglob('*.py')]"
+P2: python3 -B -m unittest discover -s tools/tests -p 'test_measure*.py'
+```
+
+`-B` prevents checkout bytecode writes. No additional Python lint gate is established.
+Tests cover Linux counter parsing/units, sampled RSS and CPU aggregation, process identity and
+time/counter rejection, kernel lifetime high water, bounded observation windows, startup timing,
+ELF stripping/hash/size and mutation checks, clean source/build/feature identities, stale or
+tampered settings/workload bindings, missing commands, output/deadline failures and private
+TMPDIR-aware cleanup. Clocks, proc files, binaries and command processes are controlled synthetic
+substitutes; these tests bind no sockets, invoke no Cargo/Git commands and measure no real daemon.
+Execution remains pending FINALIZE. Source/unit gates never replace the assigned HOST workload.
+
 ## Behavioral acceptance
 
 `app::tests::probe` exercises explicit loopback construction against the separate HTTP mock:
@@ -473,8 +492,9 @@ Release acceptance records Linux target/toolchain, stripped locked release binar
 dependency profile, startup time, idle RSS/CPU and peak RSS during a near-limit streamed upload.
 Use an identified reproducible workload and state whether Telegram is mocked. The sub-30 MB
 idle target is best effort, not an unmeasured guarantee or a brittle unit-test assertion.
-The [measurement document](MEASUREMENTS.md) owns the implemented release probe interface and
-pending collector/orchestrator work; source/build checks do not attest runtime measurements.
+The [measurement document](MEASUREMENTS.md) owns the implemented release probe and bounded Python
+collectors, with orchestration/evidence still pending; source/build checks do not attest runtime
+measurements.
 
 Native Runner commands use the accepted staging-independent inventory and
 [Runner finalization](../.agents/skills/finalization/agent-runner.md). Staged inspection belongs
