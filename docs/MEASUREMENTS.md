@@ -2,9 +2,10 @@
 
 The [recorded HOST capture](#recorded-host-capture) measured the real library composition with
 synthetic loopback Telegram traffic: 10,067,968-byte idle RSS and a 10,428,416-byte sampled
-near-limit upload peak for the probe. The separate user-unit verification failed because its
-configured executable was absent. Operational/MVP acceptance remains pending; these results
-establish neither production-bootstrap measurements nor live Telegram interoperability.
+near-limit upload peak for the probe. Separate user-unit verification initially failed because
+its executable was absent, then passed after authorized binary installation as recorded below.
+These results cover the disclosed mocked composition and static verification; they establish
+neither production-bootstrap measurements, service activation nor live Telegram interoperability.
 
 ## Recorded HOST capture
 
@@ -141,18 +142,28 @@ capture, not the ownership state of a later documentation turn.
 ### Unit verification and remaining acceptance
 
 The separate HOST command `systemd-analyze --user verify deploy/telegram-mcp-relay.service`
-returned **1**: the configured executable `<user-bin>/telegram-mcp-relay` was absent. The
-unchanged unit SHA-256 is
+initially returned **1** because `<user-bin>/telegram-mcp-relay` was absent. That historical
+failure remains in the unchanged prerequisite and HOST completion receipts above. The unit
+SHA-256 remains
 `3f573a275e6ec9ef1da581a92e3ba0394f42ce91cee1eb74adb108e3c9b0e72b`.
-This is a failed operational check, not a successful unit validation. No installation,
-activation, relaxed hardening or repeat verification was performed for this record.
 
-Operational/MVP acceptance remains pending resolution of the installation prerequisite and
-a successful operator-owned verification receipt, plus the dedicated gates for the evidence
-documentation. Installation/service activation requires separate authorization. Keep the
-failed receipt and integrate any later verification through reviewed work. Live Telegram,
-named-client interoperability and universal idle-host wake remain unverified; optional incoming
-attachment downloading remains deferred. See the complete
+On **2026-10-31**, following explicit local-installation authorization, the operator installed
+the existing measured daemon release binary at `<user-bin>/telegram-mcp-relay`, mode `0755`,
+size **11,173,112 bytes**, SHA-256
+`b793295bf968523ce48aa3be654a0412fa0d6078699c5f454453ed947e0863a0`.
+It was copied without rebuilding or overwriting an existing file. The same static unit
+verification command then returned **0**, with empty stdout and stderr, against the unchanged
+unit. The later receipt `LOCAL_ARTIFACTS/mvp-unit-verification-after-install.json` has SHA-256
+`f52bf49e536167b2103db202901aafc0d1885dab85fa437a407c7fd64ef0dde6`
+and binds then-current HEAD `14b147de13fe17be7fbe999021dba6639c8a9a89`. It references the original
+capture at `968802371f94f51eedab66998eff6031762db5ea`; no runtime/build input or capture identity
+was changed or relabeled.
+
+The executable-absence blocker is resolved. Binary installation and static unit verification
+do not mean that the service unit was installed, enabled or started; none of those actions was
+performed. Service sandbox access, live Telegram, named-client interoperability and universal
+idle-host wake remain unverified. Optional incoming attachment downloading remains deferred.
+Preserve both the original failure and later success. See the complete
 [acceptance and deliverable coverage](TESTING.md#specification-1619-coverage-map).
 
 ## Library-linked release probe
@@ -392,7 +403,8 @@ systemd-analyze --user verify deploy/telegram-mcp-relay.service
 The CLI disables bytecode caching before local imports so startup preserves the clean source tree.
 
 The second command remains a separate operator action. Neither command runs in IMPLEMENT or
-review. The recorded capture succeeded; separate unit verification failed as detailed above.
+review. The recorded capture succeeded; the original unit failure and later successful static
+verification are preserved above.
 Linux `/proc`, Python 3.9+, Git, a native supported Rust toolchain and a complete
 local locked dependency cache are prerequisites. Missing inputs fail without fetching/repair.
 

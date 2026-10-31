@@ -4,9 +4,11 @@ This guide describes the implemented daemon. The [specification](product/TECHNIC
 also contains proposed settings and illustrative results; use the actual
 [example TOML](../config/relay.example.toml), [configuration reference](CONFIGURATION.md) and
 discovered tool schemas. The [mocked HOST capture](MEASUREMENTS.md#recorded-host-capture)
-records resource use for the library-linked probe. Separate host unit verification failed
-because the configured executable was absent; named-client/live Telegram interoperability
-remains unverified. Setup instructions are not acceptance evidence.
+records resource use for the library-linked probe. Separate host unit verification initially
+failed because its executable was absent, then passed after authorized binary installation,
+as [recorded below](#optional-systemd-user-service). The service unit was not installed,
+enabled or started; named-client/live Telegram interoperability remains unverified.
+Setup instructions are not acceptance evidence.
 
 ## Build and prepare private directories
 
@@ -212,8 +214,8 @@ incoming text, names, metadata and attachments as untrusted input, not executabl
 ## Optional systemd user service
 
 Review the [user unit](../deploy/telegram-mcp-relay.service) and
-[environment template](../deploy/relay.env.example). They are examples only; this change does
-not install, start, enable or configure a service. If choosing this deployment later, place
+[environment template](../deploy/relay.env.example). The committed examples do not configure
+or activate a service. For a new installation, place
 the built executable at `~/.local/bin/telegram-mcp-relay`, the unit in your user-unit search
 path, and the private configuration/environment files at the paths used above. Match every
 path before activation; no root privileges are needed. Do not run a foreground copy alongside it.
@@ -236,11 +238,12 @@ systemd-analyze --user verify deploy/telegram-mcp-relay.service
 
 Verify on the deployment host before activation; for the current release workflow, this check
 belongs to the assigned quiescent HOST boundary. It does not enable/install the unit or prove
-runtime access. The [recorded HOST attempt](MEASUREMENTS.md#unit-verification-and-remaining-acceptance)
-returned 1 because `~/.local/bin/telegram-mcp-relay` was absent. Verification remains unresolved;
-no installation or activation was performed. A later operator must resolve the prerequisite
-under separate installation authorization and retain an actual successful verification receipt.
-Keep this failure in the release record; a mocked resource capture cannot replace it.
+runtime access. The [verification history](MEASUREMENTS.md#unit-verification-and-remaining-acceptance)
+retains the original exit-1 attempt caused by the absent executable. On 2026-10-31, the operator
+installed the matching prebuilt release binary at `~/.local/bin/telegram-mcp-relay`; the same
+verification command then returned 0 with empty output against the unchanged unit. This resolves
+the executable prerequisite. No service unit was installed, enabled or started, and static
+verification does not test runtime access to protected settings, Telegram or MCP clients.
 SIGINT/SIGTERM close admission and drain accepted sends. The example allows 660 seconds before
 forced termination to accommodate the 600-second upload deadline and SQLite bookkeeping; reassess that margin
 for your host. SIGKILL, crashes or an external stop deadline can interrupt post-send persistence,

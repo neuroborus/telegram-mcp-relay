@@ -147,15 +147,16 @@ cryptographic attestation, per-test counts or separate per-command logs/timings.
 | R1 daemon and R2 probe locked release builds | Successful Native FINALIZE before HOST, aggregate revision 889 |
 | P1 Python source and P2 complete measurement unit suite | Successful Native FINALIZE, aggregate revision 889 |
 | HOST mocked capture | CLI exit 0 and report success/complete; separate process and workload accounting in measurements |
-| HOST user-unit verification | Failed, exit 1: configured executable absent; retained as unresolved operational evidence |
+| HOST user-unit verification | Initial exit 1 for absent executable retained; later exit 0 after authorized binary installation, with the unchanged unit and separate receipt [recorded here](MEASUREMENTS.md#unit-verification-and-remaining-acceptance) |
 | Current evidence-documentation changes | C1/C2 remain for their dedicated FINALIZE; the earlier receipts do not validate these edits |
 
 The exported persisted step-3 IDs C7/C8 denote R1/R2 and C9/C10 denote P1/P2. They do not
 renumber the frozen global fourteen-row catalog or change conditional helper H1–H4 applicability
 and selected trusted routes. No helper change or new helper-gate receipt is claimed here.
 The report and receipt identities, release profile, separate daemon/probe feature profiles
-and HOST retirement provenance are retained in the measurement record. Full MVP acceptance
-remains pending; live Telegram, named-client compatibility and idle-host wake are unverified.
+and HOST retirement provenance are retained in the measurement record. The later static unit
+verification passed after binary installation. No service-unit installation or activation,
+live Telegram, named-client compatibility or idle-host wake test is established by these records.
 
 ## Behavioral acceptance
 
@@ -505,8 +506,8 @@ without skips. Earlier Native attempts failed before HTTP requests at loopback `
 
 This maps every mandatory section 16 criterion and section 19 requirement group to its
 behavioral proof or evidence owner. The recorded validation section above supplies the prior
-complete C6 outcome; the measurement record supplies the separate HOST result and failed unit
-verification. Focused proofs remain in their owning suites; conversation/recovery scenarios
+complete C6 outcome; the measurement record supplies the separate HOST result and the initial
+failed and later successful static unit verification. Focused proofs remain in their owning suites; conversation/recovery scenarios
 add full-daemon interactions without repeating boundary cases. This coverage map does not
 mark the unchanged product specification accepted or establish named-client/live behavior.
 
@@ -525,7 +526,7 @@ mark the unchanged product specification accepted or establish named-client/live
 | Confirmed capped typing, no idle refresh, factual once-only notices without loops (§§7–8, 16, 19) | [Typing tests](../src/services/typing/tests.rs), [notice storage tests](../tests/notices.rs) and [notice dispatch tests](../src/services/notices/tests.rs) |
 | Independent TTLs, bounded cleanup and physical reclamation without losing valid replies (§§10–11, 16, 19) | [Retention](../tests/retention.rs), [maintenance](../tests/maintenance.rs) and [cleanup scheduler tests](../src/services/cleanup/tests.rs) |
 | Protected secrets/roots, loopback defaults and secure MCP transport (§§12–13, 16, 19) | [Configuration tests](../src/config.rs), [secret tests](../src/config/secrets.rs), [storage tests](../tests/storage.rs), file tests above and [HTTP transport tests](../src/routes/tests.rs) cover authorization, Host/Origin, redaction, body/concurrency bounds |
-| One native daemon, one poller, no vendor adapters/agent management, external database, broker, Node.js or Docker requirement; no public HTTPS/webhook needed (§§1–3, 13, 16, 19) | [Application](../src/app.rs), application/poller tests and [architecture](ARCHITECTURE.md) define and exercise the composition; [setup](SETUP.md) documents locked builds and optional user deployment. [HOST record](MEASUREMENTS.md#recorded-host-capture) preserves the resource result and failed unit verification |
+| One native daemon, one poller, no vendor adapters/agent management, external database, broker, Node.js or Docker requirement; no public HTTPS/webhook needed (§§1–3, 13, 16, 19) | [Application](../src/app.rs), application/poller tests and [architecture](ARCHITECTURE.md) define and exercise the composition; [setup](SETUP.md) documents locked builds and optional user deployment. [HOST record](MEASUREMENTS.md#recorded-host-capture) preserves the resource result and initial failed/later successful static unit verification |
 | Concise agent text/file policy; no periodic agent polling and no universal LLM wake promise (§§2, 6, 14, 16, 19) | Complete copyable section 14 [agent policy](AGENT_POLICY.md), token/reconciliation instructions and [client timeout guidance](SETUP.md#connect-mcp-clients); existing [contributor policy](../AGENTS.md) is preserved |
 | Telegram at-most-24-hour unconsumed backlog, independent TTLs and reconnect limitations explained to users (§§10–11, 16, 19) | [Setup/recovery](SETUP.md#recovery-and-retention), [README](../README.md), [architecture](ARCHITECTURE.md) and [configuration](CONFIGURATION.md) explain the independent limits and webhook-safe setup |
 | Protocol support and actual client capabilities (§§5–6, 16–19) | [Subscription](../src/routes/subscriptions.rs), transport and daemon recovery fixtures exercise locked rmcp 3.8.0 with synthetic MCP 2026-07-28 HTTP clients. [Client requirements](SETUP.md#connect-mcp-clients) distinguish this from unsupported older revisions and unverified named-client interoperability, live Telegram and automatic host wake |
@@ -546,7 +547,7 @@ from current documentation finalization and full operational acceptance.
 | 6. Unit/integration tests using mock Telegram | Recorded complete unfiltered C6 and controlled P1/P2; no real messages or credentials used |
 | 7. README/setup covering bot, allowlists, URL, secrets, registration, wait caveat, notices | [README](../README.md), [setup/client guidance](SETUP.md), [configuration](CONFIGURATION.md); named-client compatibility remains unverified |
 | 8. Contributor or copyable section 14 agent policy | Preserved [AGENTS.md](../AGENTS.md) and complete copyable [agent policy](AGENT_POLICY.md), including file reports, no periodic inbox polling and explicit completion |
-| 9. Example user unit and protected environment-file approach | [Unit](../deploy/telegram-mcp-relay.service), [environment template](../deploy/relay.env.example), [setup](SETUP.md#optional-systemd-user-service); actual HOST verification failed for absent executable; no deployment performed |
+| 9. Example user unit and protected environment-file approach | [Unit](../deploy/telegram-mcp-relay.service), [environment template](../deploy/relay.env.example), [setup](SETUP.md#optional-systemd-user-service); initial verification failed for absent executable, then passed after binary installation; no service unit was installed, enabled or started |
 | 10. Benchmark target, RSS/CPU, file-upload peak and binary size | [Recorded HOST capture](MEASUREMENTS.md#recorded-host-capture), with separate process overhead and sampled/lifetime limits; production bootstrap was not measured |
 
 ## Measurements and check ownership
@@ -562,7 +563,9 @@ PID identity, artifact changes, retirement and exclusive failure reporting. It o
 sockets or Cargo build processes. These tests belong to the existing P1/P2 FINALIZE gates;
 their prior successful outcome is recorded above. Actual resource values come from the
 separate bound HOST capture. Source/build checks do not attest runtime measurements; existing
-complete C6 owns actual HTTP/routing proofs. The failed unit verification remains unresolved.
+complete C6 owns actual HTTP/routing proofs. The original unit failure is historical; later
+verification passed after binary installation as [recorded](MEASUREMENTS.md#unit-verification-and-remaining-acceptance).
+Service activation and live behavior were not exercised.
 
 Native Runner commands use the accepted staging-independent inventory and
 [Runner finalization](../.agents/skills/finalization/agent-runner.md). Staged inspection belongs

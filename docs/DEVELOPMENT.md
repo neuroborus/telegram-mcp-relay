@@ -139,6 +139,7 @@ run inside implementation/review turns or replace required checks. The
 [recorded capture](MEASUREMENTS.md#recorded-host-capture) integrates actual mocked figures at
 commit `968802371f94f51eedab66998eff6031762db5ea` and prior public aggregate check receipts;
 later documentation changes do not relabel that source identity or inherit its check results.
-The separate HOST unit verification failed because the configured executable was absent, so
-operational acceptance remains pending. Preserve the failure; no installation or service
-activation is authorized by an evidence-integration task.
+The initial HOST unit verification failure remains preserved. A
+[later successful verification](MEASUREMENTS.md#unit-verification-and-remaining-acceptance)
+followed explicitly authorized installation of the matching prebuilt binary. No service unit
+was installed, enabled or started, and no live Telegram or named-client test was performed.

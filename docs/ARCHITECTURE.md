@@ -12,8 +12,10 @@ The coordinator's [recorded validation evidence](TESTING.md#recorded-validation-
 reports successful complete workspace tests, including composition, shutdown and protocol
 fixtures, at captured commit `968802371f94f51eedab66998eff6031762db5ea`. The
 [mocked HOST benchmark](MEASUREMENTS.md#recorded-host-capture) measures the library-linked probe
-with separate mock/driver accounting. User-unit verification failed because the configured
-executable was absent; operational acceptance remains pending.
+with separate mock/driver accounting. User-unit verification initially failed because the
+configured executable was absent, then
+[passed after binary installation](MEASUREMENTS.md#unit-verification-and-remaining-acceptance).
+The service unit was not installed, enabled or started; live operation remains unverified.
 Reply ingestion authorizes input and commits replies/dispositions with the cursor.
 A cancellable single-consumer long poller drives it.
 Bounded library inbox snapshots, pre-processing claims, durable processing-start,
@@ -881,9 +883,10 @@ cross-session consumption; a shared local bearer token is not strong isolation b
 mutually hostile local clients. [Setup](SETUP.md) documents this trust assumption, protected
 installation paths, webhook-safe migration and current client requirements; the
 [agent policy](AGENT_POLICY.md) includes the complete copyable specification policy and
-explicit processing-recovery guidance. The recorded mocked resource capture and failed HOST
-unit verification remain separate evidence; operational acceptance is pending successful
-unit verification and evidence-documentation gates.
+explicit processing-recovery guidance. The recorded mocked capture and static HOST unit
+verification remain separate evidence. The initial absent-executable failure was resolved by
+later binary installation and successful verification. These records establish no service
+activation, live Telegram or named-client operation.
 
 ## Protocol compatibility gate
 
