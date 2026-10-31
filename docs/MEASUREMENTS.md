@@ -71,12 +71,51 @@ Cargo examples also enable existing dev-dependency features, including Tokio's `
 record the probe's feature profile separately from the production binary's profile.
 The production locked release build remains independently required.
 
+## Bounded loopback Telegram mock
+
+[measure_mock.py](../tools/measure_mock.py) is the standard-library Python 3.9+ peer for the
+probe's `/botSynthetic/` requests. It runs in one separate process, binds only numeric loopback
+addresses and never forwards requests. Its subordinate interface for the future orchestrator is:
+
+```text
+python3 tools/measure_mock.py --listen 127.0.0.1 --port 0
+```
+
+Port zero selects a kernel-assigned port. Stdout emits a bounded JSON `ready` record with
+`mock_address` (bracketed for IPv6). A final `stopped` record reports requests, documents,
+drained document bytes and failure status; neither record includes content, filenames or private
+paths. SIGINT/SIGTERM cancels long polls and reads; workers retire before the final record.
+This interface does not establish probe readiness or MCP responsiveness.
+
+The mock implements `getWebhookInfo`, `getUpdates`, `sendMessage`, `sendDocument` and
+`sendChatAction`. Empty updates wait for the requested 1–50 seconds (45 by default), with one
+outstanding poll. Text/document response dates use current Unix seconds so committed routes
+retain their normal lifetime; request deadlines use a separate monotonic clock.
+Document forms follow the probe's length-delimited, ordered `chat_id`,
+`caption`, `document` parts. The mock incrementally discards document bytes and returns their
+actual drained count as `document.file_size`. It applies the unchanged 50,000,000-byte limit and
+1,000-scalar/1,024-UTF-16-unit caption bounds. There is no artificial upload pacing.
+
+Work is capped at four workers, a listen backlog of four, 256 admitted requests and a 900-second
+process lifetime. Each connection serves one request, then closes. Header payloads are limited
+to 8 KiB, JSON to 8 KiB, part headers to 2 KiB, text fields to 4 KiB and multipart bodies to the
+document limit plus 16 KiB. Reads request at most 64 KiB; no document is buffered in full.
+Header/JSON reads have a ten-second absolute deadline, document processing 120 seconds and
+response writes five seconds. Shutdown interrupts reads within their half-second socket wait;
+retirement also awaits bounded response writes. Unsupported framing (including chunked bodies),
+oversized/malformed input and exhausted worker/request budgets fail; failures remain reflected
+in the exit status. The mock does not implement incoming replies or live Telegram semantics.
+
+Controlled stream/event/server tests cover framing, bounded draining, cancellation and failure
+paths without binding sockets. Their execution belongs to P1/P2 in FINALIZE. The synthetic MCP
+driver, orchestration, real HOST capture and quantitative release acceptance remain pending.
+
 ## Bounded collectors
 
 [measure_collectors.py](../tools/measure_collectors.py) provides standard-library Python 3.9+
 building blocks. It does not launch the probe, run a workload, build binaries or produce a
-runtime acceptance report. The separate mock/orchestrator and indexed release evidence remain
-subsequent planned work. Its interfaces are:
+runtime acceptance report. The separate mock above is implemented; driver/orchestration and
+indexed release evidence remain subsequent planned work. Its interfaces are:
 
 | Collector | Result and limits |
 | --- | --- |

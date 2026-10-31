@@ -86,8 +86,9 @@ quiescent ownership boundary. See [probe interface and evidence limits](MEASUREM
 
 ## Python measurement tooling gates
 
-The standard-library [collectors](../tools/measure_collectors.py) and their
-[controlled tests](../tools/tests/test_measure_collectors.py) use this Native FINALIZE inventory:
+The standard-library [collectors](../tools/measure_collectors.py),
+[loopback mock](../tools/measure_mock.py) and their controlled tests under `tools/tests/`
+use this Native FINALIZE inventory:
 
 ```text
 P1: python3 -B -c "import ast,pathlib; [ast.parse(p.read_text(encoding='utf-8'), filename=str(p)) for p in pathlib.Path('tools').rglob('*.py')]"
@@ -102,6 +103,16 @@ tampered settings/workload bindings, missing commands, output/deadline failures 
 TMPDIR-aware cleanup. Clocks, proc files, binaries and command processes are controlled synthetic
 substitutes; these tests bind no sockets, invoke no Cargo/Git commands and measure no real daemon.
 Execution remains pending FINALIZE. Source/unit gates never replace the assigned HOST workload.
+
+[Mock tests](../tools/tests/test_measure_mock.py) use split input streams, generated near-limit
+zero runs, substituted clocks/events and server lifecycle substitutes. They cover exact binary
+document-byte accounting with bounded reads, malformed/oversized HTTP and multipart framing,
+JSON/result construction, controlled Unix response timestamps, caption bounds,
+45-second long-poll cancellation, deadline expiry,
+loopback binding policy, worker/request caps and shutdown-before-close on failure. They bind
+no sockets, install no signal handlers and establish no real resource measurements. Actual
+probe/Telegram HTTP and routing assertions remain owned by the complete C6 suite; the Python
+tests do not duplicate those proofs. Mock execution and quantitative HOST evidence remain pending.
 
 ## Behavioral acceptance
 
