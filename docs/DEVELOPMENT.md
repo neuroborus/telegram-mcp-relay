@@ -117,3 +117,18 @@ starting a run that needs different command declarations. Do not weaken isolatio
 synthetic capability probes as evidence that product assertions passed. Selected commands
 run only in FINALIZE through their frozen vectors, followed by independent confirmation and
 Runner-owned HANDOFF. Pending HTTP execution claims remain pending until genuine results.
+
+## Release probe ownership
+
+The explicit [library-linked release probe](MEASUREMENTS.md) is a root Cargo example, not a
+new runtime service or production endpoint setting. Its R1/R2 release builds remain mandatory
+Runner-managed FINALIZE checks on the declared Native route, with locked dependency inputs
+and private writable output. The standalone helper still has exactly the six modes above;
+probe introduction adds no helper mode, dependency or selected trusted command.
+Do not infer release-build success from development compilation or a HOST measurement.
+
+Future collectors and mock orchestration must disclose prerequisites and source/build/workload
+identity before capture. Runtime capture and user-unit verification belong to the task's HOST
+boundary, after applicable tooling/release gates and verified quiescent ownership. They do not
+run inside implementation/review turns or replace required checks; quantitative evidence remains
+pending until observed and integrated through reviewed repository work.

@@ -26,6 +26,7 @@ use crate::{
 };
 
 mod conversations;
+mod probe;
 mod recovery;
 
 struct Fixture {
@@ -220,6 +221,7 @@ impl TelegramRequest {
 }
 
 struct Mock {
+    address: SocketAddr,
     client: TelegramClient,
     requests: mpsc::Receiver<TelegramRequest>,
     task: JoinHandle<()>,
@@ -228,11 +230,9 @@ struct Mock {
 impl Mock {
     async fn new(config: &Config) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let client = TelegramClient::for_test(
-            config,
-            format!("http://{}/botSynthetic/", listener.local_addr().unwrap()),
-        )
-        .unwrap();
+        let address = listener.local_addr().unwrap();
+        let client =
+            TelegramClient::for_test(config, format!("http://{address}/botSynthetic/")).unwrap();
         let (send, requests) = mpsc::channel(8);
         let task = tokio::spawn(async move {
             let mut connections = JoinSet::new();
@@ -271,6 +271,7 @@ impl Mock {
             }
         });
         Self {
+            address,
             client,
             requests,
             task,

@@ -64,7 +64,34 @@ During implementation/review, use source inspection and appropriate no-run compi
 do not execute or attest the established check inventory or selected logical commands.
 See [development](DEVELOPMENT.md#read-only-cargo-validation) for provisioning and isolation.
 
+## Release build and probe gates
+
+The explicit root example `resource_probe` lives under `tools/` and links the real application
+library. Its `test = true` target includes argument tests in the complete unfiltered C6 suite;
+C4's `--all-targets` also covers it. Root Cargo changes introduce no new dependency resolution.
+The mandatory release gates retain these exact identities:
+
+```text
+R1: cargo build --locked --release --bin telegram-mcp-relay
+R2: cargo build --locked --release --example resource_probe
+```
+
+These are Runner-managed FINALIZE obligations, not implementation-turn commands or HOST
+measurements. Keep their declared Native route; the standalone helper remains unchanged with
+only its six closed clippy/doc/test modes. Actual build results and runtime capability evidence
+must come from their execution, not source inspection or no-run development compilation.
+H1–H4 above apply when that separate helper changes; this probe does not extend it.
+HOST capture requires both release gates plus the applicable tooling gates and a verified
+quiescent ownership boundary. See [probe interface and evidence limits](MEASUREMENTS.md).
+
 ## Behavioral acceptance
+
+`app::tests::probe` exercises explicit loopback construction against the separate HTTP mock:
+readiness followed by real MCP registration/send, caller cancellation and accepted-route
+draining/reopen, plus credential/remote-peer/listener rejection before storage or Telegram
+effects and failed cleanup without readiness. The example's pure argument tests reject DNS,
+remote/unspecified/zero-port peers and extra/missing arguments. These new tests await C6 in
+FINALIZE; no probe runtime capture or live Telegram acceptance is claimed.
 
 Binary tests in `src/main.rs` launch isolated test subprocesses using the binary's shutdown
 signal registration. They send actual SIGINT and SIGTERM after a readiness gate, hold synthetic
@@ -446,7 +473,8 @@ Release acceptance records Linux target/toolchain, stripped locked release binar
 dependency profile, startup time, idle RSS/CPU and peak RSS during a near-limit streamed upload.
 Use an identified reproducible workload and state whether Telegram is mocked. The sub-30 MB
 idle target is best effort, not an unmeasured guarantee or a brittle unit-test assertion.
-Add the measurement command and owning document when the implementation provides them.
+The [measurement document](MEASUREMENTS.md) owns the implemented release probe interface and
+pending collector/orchestrator work; source/build checks do not attest runtime measurements.
 
 Native Runner commands use the accepted staging-independent inventory and
 [Runner finalization](../.agents/skills/finalization/agent-runner.md). Staged inspection belongs

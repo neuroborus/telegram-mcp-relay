@@ -523,7 +523,9 @@ FINALIZE; no live upload or runtime memory measurement is claimed.
 `clients::telegram::TelegramClient` owns one reusable reqwest/rustls pool; clones share it.
 The production constructor fixes `https://api.telegram.org`, disables proxy discovery,
 redirects and reqwest retries, and retains no transport errors or Telegram descriptions.
-Only crate tests can construct a mock endpoint; TOML has no API override. Production
+Crate tests and the explicit [resource probe](MEASUREMENTS.md) can construct a mock endpoint;
+the probe accepts only a numeric loopback address and sends a fixed synthetic token path.
+TOML has no API override. Production
 startup shares that client across polling, delivery, typing and notices. The delivery service
 owns title formatting,
 destination authorization, capacity reservations and durable routes for text/document sends.
@@ -809,6 +811,14 @@ bookkeeping to finish before an external service-manager deadline. SIGKILL, proc
 forced termination can bypass draining and interrupt bookkeeping after Telegram accepts a send;
 they do not justify automatically resending. Composition tests use the same private constructor
 with a mocked client; production exposes no endpoint override.
+
+The explicit `resource_probe` Cargo example links this same library composition through
+`app::probe::run_until`. It rejects credential sources, uses a separate loopback mock, transfers
+an already-bound matching MCP listener and reports readiness only after startup cleanup and
+service spawning. It shares production admission, streaming, supervision and shutdown draining;
+it adds no alternate daemon or file-copy path. Its current-thread wrapper installs shutdown
+signals and emits one readiness line, with no diagnostic subscriber. Mock/client driver memory
+must be measured separately, and probe overhead disclosed. Runtime measurements remain pending.
 
 One Rust binary serves concurrent MCP clients at a loopback Streamable HTTP endpoint and
 owns one Telegram long-poll consumer, one reusable HTTP client and one embedded SQLite store.

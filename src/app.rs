@@ -26,6 +26,8 @@ use crate::{
     },
 };
 
+pub mod probe;
+
 /// Load validated settings/secrets and run until a supervised service fails.
 /// No process-wide handlers are installed; the binary uses `run_until` with OS signals.
 pub async fn run(config_path: &Path) -> Result<(), AppError> {
@@ -89,6 +91,15 @@ impl Application {
         listener: TcpListener,
         shutdown: impl Future<Output = ()>,
     ) -> Result<(), AppError> {
+        self.serve_ready(listener, shutdown, None).await
+    }
+
+    async fn serve_ready(
+        self,
+        listener: TcpListener,
+        shutdown: impl Future<Output = ()>,
+        ready: Option<oneshot::Sender<()>>,
+    ) -> Result<(), AppError> {
         let Self {
             handler,
             endpoint,
@@ -102,11 +113,11 @@ impl Application {
         let _cancel = stop.clone().drop_guard();
         let _admission = StopAdmission(handler.clone());
         let (stopping, receive) = watch::channel(false);
-        let (ready, startup) = oneshot::channel();
+        let (cleanup_ready, startup) = oneshot::channel();
         let mut workers = JoinSet::new();
         let cleanup_stop = receive.clone();
         workers.spawn(async move {
-            let result = cleanup.run_ready(cleanup_stop, Some(ready)).await;
+            let result = cleanup.run_ready(cleanup_stop, Some(cleanup_ready)).await;
             ("cleanup", result)
         });
         tokio::pin!(shutdown);
@@ -135,6 +146,9 @@ impl Application {
                 )
             });
             tracing::info!(version = env!("CARGO_PKG_VERSION"), "Relay started");
+            if let Some(ready) = ready {
+                let _ = ready.send(());
+            }
             tokio::select! {
                 biased;
                 _ = &mut shutdown => Ok(()),

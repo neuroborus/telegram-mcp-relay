@@ -6,6 +6,11 @@ rust-version = "1.89"
 publish = false
 description = "A shared local MCP relay for Telegram agent sessions"
 
+[[example]]
+name = "resource_probe"
+path = "tools/resource_probe.rs"
+test = true
+
 [dependencies]
 futures-util = { version = "0.3.34", default-features = false, features = ["std"] }
 getrandom = { version = "0.4.3", default-features = false }

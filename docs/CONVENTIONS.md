@@ -13,6 +13,7 @@ and lockfile. Root workspace checks do not cover it; see [testing](TESTING.md).
 | --- | --- |
 | `src/main.rs`, `src/lib.rs` | Binary bootstrap and testable library surface |
 | `src/app.rs`, `src/state.rs` | Router/runtime composition and shared handles |
+| `src/app/probe.rs`, `tools/resource_probe.rs` | Credential-free loopback probe construction and explicit library-linked release example |
 | `src/config.rs`, `src/error.rs` | Validated configuration and typed application errors |
 | `src/dto.rs` | Typed MCP tool requests/results and their SDK-generated schemas |
 | `src/handlers.rs`, `src/handlers/`, `src/routes.rs`, `src/routes/` | Shared SDK handler state, thin typed tools/read-only inbox resources, bounded modern subscriptions, protected HTTP transport and its tests |

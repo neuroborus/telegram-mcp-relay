@@ -1,6 +1,6 @@
 //! One reusable HTTPS Bot API client, bounded decoding and conservative send uncertainty.
 
-use std::{fmt, time::Duration};
+use std::{fmt, net::SocketAddr, time::Duration};
 
 use reqwest::{Client, StatusCode, redirect::Policy};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -55,7 +55,15 @@ impl TelegramClient {
         Self::build(config, endpoint, false)
     }
 
-    /// Uses only Telegram's cloud endpoint. Mock URLs exist only in crate tests.
+    /// Credential-free loopback construction, confined to the explicit library probe.
+    pub(crate) fn for_probe(config: &Config, address: SocketAddr) -> Result<Self, AppError> {
+        if !address.ip().is_loopback() || address.port() == 0 {
+            return Err(AppError::InvalidConfig("probe mock address"));
+        }
+        Self::build(config, format!("http://{address}/botSynthetic/"), false)
+    }
+
+    /// Uses only Telegram's cloud endpoint; production accepts no endpoint override.
     pub fn new(config: &Config, token: &Secret) -> Result<Self, AppError> {
         Self::build(
             config,
