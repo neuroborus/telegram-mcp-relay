@@ -138,6 +138,44 @@ No new configuration setting is required. See
 filesystem bounds and limitations.
 See [architecture](ARCHITECTURE.md#session-and-route-persistence).
 
+## Opt-in history storage
+
+The v8 storage foundation adds `[history]`; capture and shared-read/download tools are not yet
+connected. `enabled=false` is the default. Opt-in requires a configured MCP bearer source and
+an actually resolved bearer at daemon construction. Library callers use `Database::open_with_history`
+with the same explicit authentication requirement; `Database::open` keeps shared capture disabled.
+Stored bodies, captions and display metadata are private conversation data readable by the
+trusted local operator. Opt-in does not grant claim/processing authority to other sessions.
+Disabling stops capture/shared reads; retained records expire normally rather than being wiped.
+
+| History setting | Default | Accepted positive range |
+| --- | --- | --- |
+| `retention_days` | 30 | 1–3,650 |
+| `max_records`, `max_attachments` | 10,000 each | 1–100,000 each |
+| `max_record_bytes` | 65,536 | 1–1,048,576 |
+| `max_body_bytes` | 8,388,608 | 1–1,073,741,824 |
+| `max_metadata_bytes` | 4,194,304 | 1–1,073,741,824 |
+| `page_limit` | 50 | 1–100 |
+| `response_bytes` | 65,536 | 1–1,048,576 |
+| `query_bytes` | 256 | 1–4,096 |
+| `scan_records` | 1,000 | 1–10,000 |
+
+Page/response/query/scan settings reserve the future read contract; no history tool is exposed
+yet. A record's body/display UTF-8 bytes fit `max_record_bytes`, which cannot exceed either
+aggregate body or metadata budget. Query bytes fit response bytes; page size fits scan work.
+When enabled, aggregate history body/metadata plus inbox payload/metadata budgets must fit
+strictly below the main-file cap. No history body space is reserved when disabled. Attachment
+provenance still has finite count/metadata bounds independently of shared capture.
+
+History metadata charges include conservative fixed row/index charges (512 bytes per message
+or attachment, 256 per lazy session-display mapping) plus bounded UTF-8 display/file identifiers.
+Admission preserves unused inbox payload/metadata budgets as physical live-page headroom and
+counts in-flight route reservations. SQLite overhead may still cause capacity errors; nothing
+silently evicts valid replies or advances an ingress cursor on failure. The existing main-file
+cap, DELETE journal durability and bounded reclamation remain in force. Disk snapshots now
+account separately for protected journal/WAL/SHM lengths and allocated blocks; normally WAL/SHM
+are absent. This is observation, not a filesystem quota or peak sidecar measurement.
+
 The binary registers SIGINT and SIGTERM before service startup; either signal stops admission
 and drains accepted sends and route bookkeeping before exit. Registration failure logs
 `SHUTDOWN_SIGNAL_UNAVAILABLE` and exits unsuccessfully before starting services. No shutdown

@@ -329,6 +329,24 @@ There is no guarantee that a host wakes an idle LLM. Actual HTTP protocol tests 
 [testing](TESTING.md) and included in the recorded C6 outcome. No named client or live
 Telegram interoperability is claimed.
 
+## Bounded observation storage
+
+The separately bounded history storage foundation uses protected transactional schema v8.
+Journal rows hold source identity, bounded text/display snapshots, nonsecret session display
+IDs and opaque message handles. Raw attachment adapter IDs live only in private provenance
+rows with opaque handles; there are no credential, recovery-token, local-path or file-byte
+fields in the shared record. Lazy display mappings are private and expire with sessions;
+stored display snapshots survive without pinning private recovery identities.
+
+Own-reply provenance requires a retained matching reply even when history is disabled;
+shared provenance requires an enabled retained matching journal source. Foreign keys clear
+expired/deleted source references independently, and indexed cleanup retires expired/orphaned
+provenance in bounded batches. Journal pressure rolls back without consuming inbox quotas or
+evicting valid replies. Coverage starts at actual observation, not migration; restart marks
+possible gaps and cannot reconstruct older bodies. Capture wiring and public read/download
+tools remain pending; storage fixtures define behavior but await FINALIZE execution. See
+[history settings and privacy](CONFIGURATION.md#opt-in-history-storage).
+
 ## Bounded asks
 
 `telegram_ask` shares `telegram_send`'s `session_key`/`text` schema,

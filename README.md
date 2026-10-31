@@ -61,6 +61,10 @@ to 600 seconds and returns `reply_received`, `wait_timeout` or `disabled`, with 
 Unknown, foreign or expired targets return `WAIT_TARGET_INVALID`. Timeout/cancellation leave
 routes and replies recoverable and grant no permission. See [client deadlines and concurrency](docs/SETUP.md#connect-mcp-clients).
 
+The bounded history/attachment storage foundation is present; automatic capture and public
+history/download tools remain pending. History defaults off and requires authenticated opt-in.
+Read the [stored-body privacy and limits](docs/CONFIGURATION.md#opt-in-history-storage) before enabling it.
+
 Startup failures return a safe error code and nonzero exit status. No directories, services or
 webhook resets are installed automatically. The binary registers shutdown signals before starting services
 and awaits accepted send bookkeeping before exit. Library hosts supply cancellation and await

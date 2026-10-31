@@ -21,6 +21,15 @@ late-reply restart recovery. Saturated HTTP and legacy work retain processing/ac
 forged headers cannot send through the recovery lane. Existing ask/event arming-race proofs
 exercise the shared wait loop. These new cases await FINALIZE; no live acceptance is claimed.
 
+## History storage regressions
+
+History storage fixtures in `tests/history.rs` define authenticated opt-in, stable opaque
+handles/display snapshots, redaction, deduplication/restart, independent expiry, source
+provenance after disabling/acknowledgment, admission rollback and bounded cleanup/reclamation.
+Storage migration coverage now preserves v1–v7 recovery data through v8 and checks transactional
+rollback of a failed v7 migration. Configuration tests reject unsafe/inconsistent history
+budgets. These cases await FINALIZE; capture and public history/download tools remain pending.
+
 ## Repository gates
 
 Run `just check-repo` (or `python3 tools/check_repository.py`) after documentation, skills,

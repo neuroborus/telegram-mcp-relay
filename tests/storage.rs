@@ -85,7 +85,7 @@ fn initializes_private_database_and_reopens_without_resetting_state() {
     let fixture = Fixture::new();
     let settings = fixture.settings();
     let database = Database::open(&settings, &Limits::default()).unwrap();
-    assert_eq!(database.schema_version().unwrap(), 7);
+    assert_eq!(database.schema_version().unwrap(), 8);
     assert_eq!(
         fs::metadata(&settings.path).unwrap().permissions().mode() & 0o777,
         0o600
@@ -131,11 +131,17 @@ fn initializes_private_database_and_reopens_without_resetting_state() {
     drop(connection);
     drop(database);
     // Recreate each accepted older shape, preserving its records through migration.
-    for version in [1, 2, 3, 4, 5, 6] {
+    for version in [1, 2, 3, 4, 5, 6, 7] {
         let connection = fixture.connect();
         connection
-            .execute_batch("ALTER TABLE sessions DROP COLUMN directory_label")
+            .execute_batch("DROP TABLE attachment_records; DROP TABLE journal_records;
+                DROP TABLE session_displays; DROP TABLE history_usage; DROP TABLE history_coverage;")
             .unwrap();
+        if version < 7 {
+            connection
+                .execute_batch("ALTER TABLE sessions DROP COLUMN directory_label")
+                .unwrap();
+        }
         if version < 6 {
             connection
                 .execute_batch(
@@ -184,7 +190,7 @@ fn initializes_private_database_and_reopens_without_resetting_state() {
             .pragma_update(None, "user_version", version)
             .unwrap();
         let reopened = Database::open(&settings, &Limits::default()).unwrap();
-        assert_eq!(reopened.schema_version().unwrap(), 7);
+        assert_eq!(reopened.schema_version().unwrap(), 8);
         assert_eq!(reopened.session("a").unwrap().directory_label, None);
         assert_eq!(
             reopened.inbox_snapshot("a", None, 1, 150).unwrap().replies[0].processing_started_at,

@@ -81,6 +81,7 @@ pub enum AppError {
     SendCapacity,
     WaitCapacity,
     InvalidWaitTarget,
+    HistoryDisabled,
     AskWaitFailed {
         telegram_chat_id: i64,
         outbound_message_id: i64,
@@ -120,6 +121,7 @@ impl AppError {
             Self::SendCapacity => "SEND_CAPACITY",
             Self::WaitCapacity => "WAIT_CAPACITY",
             Self::InvalidWaitTarget => "WAIT_TARGET_INVALID",
+            Self::HistoryDisabled => "HISTORY_DISABLED",
             Self::AskWaitFailed { .. } => "ASK_WAIT_FAILED",
             Self::SendBookkeepingFailed => "SEND_BOOKKEEPING_FAILED",
             Self::RandomUnavailable => "RANDOM_UNAVAILABLE",
@@ -146,6 +148,7 @@ impl fmt::Display for AppError {
             }
             Self::EmptyText => write!(f, "{}: outgoing text must not be empty", self.code()),
             Self::InvalidRequest(field) => write!(f, "{}: invalid {field}", self.code()),
+            Self::HistoryDisabled => write!(f, "{}: shared history is disabled", self.code()),
             Self::FileUnavailable => write!(
                 f,
                 "{}: expected a readable regular file beneath an approved root without symlinks or traversal",

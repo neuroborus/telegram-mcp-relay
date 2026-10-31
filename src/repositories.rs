@@ -16,7 +16,7 @@ use rustix::{
 use tokio::sync::Semaphore;
 
 use crate::{
-    config::{Limits, Storage},
+    config::{History, Limits, Storage},
     error::AppError,
 };
 
@@ -39,8 +39,13 @@ pub use retention::{CleanupBatch, CleanupSweep};
 mod maintenance;
 pub use maintenance::DiskUsage;
 pub(crate) use maintenance::RECLAIM_PAGES;
+mod history;
+pub use history::{
+    AttachmentInput, AttachmentKind, HistoryCoverage, HistoryUsage, JournalInput, MessageDirection,
+    MessageSource, StoredMessage,
+};
 
-const SCHEMA_VERSION: i64 = 7;
+const SCHEMA_VERSION: i64 = 8;
 const APPLICATION_ID: i64 = 0x544d4352; // TMCR
 
 /// One private connection; services will expose narrowly scoped transactions, not raw SQL.
@@ -49,6 +54,7 @@ pub struct Database {
     files: maintenance::DatabaseFiles,
     main_file_limit_bytes: u64,
     registry: registry::RegistryPolicy,
+    history: History,
     reserved_routes: Arc<registry::ReservedRoutes>,
     pending_routes: Vec<Weak<String>>,
     pub(crate) poll_admission: Arc<Semaphore>,
@@ -61,6 +67,17 @@ impl Database {
     /// Open in an existing private owned directory, initializing only an empty database.
     /// Ancestor directories must be trusted; existing permissions are never repaired.
     pub fn open(settings: &Storage, limits: &Limits) -> Result<Self, AppError> {
+        Self::open_with_history(settings, limits, &History::default(), false)
+    }
+
+    /// Authenticated opt-in is checked again for library callers, before opening storage.
+    pub fn open_with_history(
+        settings: &Storage,
+        limits: &Limits,
+        history: &History,
+        authenticated: bool,
+    ) -> Result<Self, AppError> {
+        history.validate(settings, limits, authenticated)?;
         let registry = registry::RegistryPolicy::new(settings, limits)?;
         let inbox_notifications = InboxNotifications::new(limits)?;
         if !(1_048_576..=1_073_741_824).contains(&settings.max_database_bytes) {
@@ -109,11 +126,17 @@ impl Database {
             return Err(AppError::StorageCapacity);
         }
         initialize(&mut connection)?;
+        // A restart cannot prove continuous observation, even when capture stays enabled.
+        connection.execute(
+            "UPDATE history_coverage SET has_gaps = 1 WHERE observed_from IS NOT NULL",
+            [],
+        )?;
         Ok(Self {
             connection,
             files,
             main_file_limit_bytes: u64::from(pages) * u64::from(page_size),
             registry,
+            history: history.clone(),
             reserved_routes: Arc::default(),
             pending_routes: Vec::new(),
             poll_admission: Arc::new(Semaphore::new(1)),
@@ -175,6 +198,9 @@ fn initialize(connection: &mut Connection) -> Result<(), AppError> {
     if version < 7 {
         transaction.execute_batch(include_str!("repositories/presentation.sql"))?;
     }
+    if version < 8 {
+        transaction.execute_batch(include_str!("repositories/history.sql"))?;
+    }
     transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     let vacuum: i64 = transaction.pragma_query_value(None, "auto_vacuum", |r| r.get(0))?;
     if vacuum != 2 {
@@ -229,10 +255,16 @@ fn protected_file(path: &Path) -> Result<maintenance::DatabaseFiles, AppError> {
     }
     let mut journal_name = name.to_os_string();
     journal_name.push("-journal");
+    let mut wal_name = name.to_os_string();
+    wal_name.push("-wal");
+    let mut shm_name = name.to_os_string();
+    shm_name.push("-shm");
     Ok(maintenance::DatabaseFiles {
         database: file,
         directory: parent,
         journal_name,
+        wal_name,
+        shm_name,
     })
 }
 
@@ -392,7 +424,7 @@ mod tests {
     }
 
     #[test]
-    fn disk_accounting_rejects_unsafe_journal_instead_of_reporting_zero() {
+    fn disk_accounting_rejects_unsafe_sidecars_instead_of_reporting_zero() {
         use std::os::unix::fs::{PermissionsExt, symlink};
 
         let directory = Directory::new();
@@ -401,10 +433,13 @@ mod tests {
             ..Storage::default()
         };
         let database = Database::open(&settings, &Limits::default()).unwrap();
+        for name in ["test.sqlite-journal", "test.sqlite-wal", "test.sqlite-shm"] {
+            let sidecar = directory.0.join(name);
+            symlink(&settings.path, &sidecar).unwrap();
+            assert_eq!(database.disk_usage(), Err(AppError::StorageUnavailable));
+            std::fs::remove_file(&sidecar).unwrap();
+        }
         let journal = directory.0.join("test.sqlite-journal");
-        symlink(&settings.path, &journal).unwrap();
-        assert_eq!(database.disk_usage(), Err(AppError::StorageUnavailable));
-        std::fs::remove_file(&journal).unwrap();
         File::create(&journal)
             .unwrap()
             .set_permissions(std::fs::Permissions::from_mode(0o644))

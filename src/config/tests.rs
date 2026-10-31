@@ -19,6 +19,7 @@ fn defaults_and_example_are_safe_and_independent() {
     assert!(config.server.listen.ip().is_loopback());
     assert!(config.delivery.wait_fallback_enabled && config.activity.typing_enabled);
     assert_eq!(config.delivery.wait_timeout_seconds, 600);
+    assert!(!config.history.enabled);
     assert_eq!(config.activity.typing_max_duration_seconds, 600);
     let storage = &config.storage;
     assert_eq!(storage.session_ttl_days, 30);
@@ -60,6 +61,17 @@ fn rejects_invalid_settings_before_resolving_secrets() {
         "[storage]\nroute_ttl_days=3651",
         "[storage]\nmax_database_bytes=1024",
         "[storage]\ncleanup_interval_hours=0",
+        "[history]\nenabled=true",
+        "[history]\nretention_days=0",
+        "[history]\nmax_records=100001",
+        "[history]\nmax_attachments=0",
+        "[history]\nmax_record_bytes=8388609",
+        "[history]\nmax_body_bytes=1",
+        "[history]\nmax_metadata_bytes=0",
+        "[history]\npage_limit=101",
+        "[history]\nresponse_bytes=0",
+        "[history]\nquery_bytes=4097",
+        "[history]\nscan_records=1",
         "[limits]\nconcurrent_requests=0",
         "[limits]\nwaiters=33",
         "[limits]\nreply_bytes=16777217",
@@ -96,6 +108,18 @@ fn rejects_invalid_settings_before_resolving_secrets() {
         )
         .is_err()
     );
+}
+
+#[test]
+fn history_opt_in_requires_authentication_and_fits_the_separate_storage_budget() {
+    let config = parse("[server]\nauth_token_env='AUTH'\n[history]\nenabled=true").unwrap();
+    assert!(config.history.enabled);
+    assert!(
+        parse("[server]\nauth_token_env='AUTH'\n[history]\nenabled=true\nmax_body_bytes=67108864")
+            .is_err()
+    );
+    // No archive budget is reserved when capture is disabled.
+    assert!(parse("[storage]\nmax_database_bytes=34603008").is_ok());
 }
 
 struct Fixture(PathBuf);

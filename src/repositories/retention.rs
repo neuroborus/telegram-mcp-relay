@@ -72,7 +72,14 @@ impl Database {
         };
         let mut removed = changed.len();
         let mut more_children = changed.len() == BATCH;
+        let mut expired_attachments = 0;
         for (table, key, columns) in [
+            ("journal_records", "message_handle", "message_handle"),
+            (
+                "attachment_records",
+                "attachment_handle",
+                "attachment_handle",
+            ),
             ("acknowledgment_receipts", "reply_id", "reply_id"),
             (
                 "notice_attempts",
@@ -101,7 +108,18 @@ impl Database {
             )?;
             removed += count;
             more_children |= count == BATCH;
+            if table == "attachment_records" {
+                expired_attachments = count;
+            }
         }
+        let orphans = transaction.execute(
+            "DELETE FROM attachment_records WHERE attachment_handle IN (
+                SELECT attachment_handle FROM attachment_records
+                WHERE reply_id IS NULL AND message_handle IS NULL LIMIT ?1)",
+            [BATCH - expired_attachments],
+        )?;
+        removed += orphans;
+        more_children |= expired_attachments + orphans == BATCH;
         let mut after = sweep.after.clone();
         let mut complete = false;
         if !more_children {

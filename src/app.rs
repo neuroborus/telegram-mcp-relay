@@ -66,7 +66,12 @@ impl Application {
         telegram: TelegramClient,
         auth: Option<&Secret>,
     ) -> Result<Self, AppError> {
-        let database = Arc::new(Mutex::new(Database::open(&config.storage, &config.limits)?));
+        let database = Arc::new(Mutex::new(Database::open_with_history(
+            &config.storage,
+            &config.limits,
+            &config.history,
+            auth.is_some(),
+        )?));
         let handler = Arc::new(McpHandler::new(database.clone(), telegram.clone(), config)?);
         let typing = handler.typing();
         let cleanup =

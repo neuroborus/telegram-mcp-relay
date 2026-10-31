@@ -16,6 +16,8 @@ pub(super) struct DatabaseFiles {
     pub database: File,
     pub directory: File,
     pub journal_name: OsString,
+    pub wal_name: OsString,
+    pub shm_name: OsString,
 }
 
 /// A point-in-time snapshot, not a filesystem quota or a peak-transaction measurement.
@@ -26,6 +28,10 @@ pub struct DiskUsage {
     pub database_allocated_bytes: u64,
     pub journal_bytes: u64,
     pub journal_allocated_bytes: u64,
+    pub wal_bytes: u64,
+    pub wal_allocated_bytes: u64,
+    pub shm_bytes: u64,
+    pub shm_allocated_bytes: u64,
     /// Zero: temp_store=MEMORY covers query work and statement subjournals; no full VACUUM,
     /// attached databases or outbound file copies are used. The rollback journal is separate.
     pub temporary_disk_bytes: u64,
@@ -36,8 +42,8 @@ pub struct DiskUsage {
 }
 
 impl Database {
-    /// Account only for the pinned main file and its protected, descriptor-relative journal.
-    /// A missing DELETE journal counts as zero; inaccessible/unsafe sidecars are errors.
+    /// Account for the pinned main file and protected, descriptor-relative sidecars.
+    /// Missing DELETE/WAL/SHM files count as zero; inaccessible/unsafe sidecars are errors.
     /// Same-user replacement and external writers are outside the trusted single-owner model.
     pub fn disk_usage(&self) -> Result<DiskUsage, AppError> {
         let database = self
@@ -45,28 +51,37 @@ impl Database {
             .database
             .metadata()
             .map_err(|_| AppError::StorageUnavailable)?;
-        let (journal_bytes, journal_allocated_bytes) = match openat(
-            &self.files.directory,
-            &self.files.journal_name,
-            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
-            Mode::empty(),
-        ) {
-            Ok(fd) => {
-                let journal = File::from(fd);
-                check_file(&journal)?;
-                let metadata = journal
-                    .metadata()
-                    .map_err(|_| AppError::StorageUnavailable)?;
-                (metadata.len(), metadata.blocks() * 512)
+        let sidecar = |name: &OsString| -> Result<(u64, u64), AppError> {
+            match openat(
+                &self.files.directory,
+                name,
+                OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
+                Mode::empty(),
+            ) {
+                Ok(fd) => {
+                    let journal = File::from(fd);
+                    check_file(&journal)?;
+                    let metadata = journal
+                        .metadata()
+                        .map_err(|_| AppError::StorageUnavailable)?;
+                    Ok((metadata.len(), metadata.blocks() * 512))
+                }
+                Err(rustix::io::Errno::NOENT) => Ok((0, 0)),
+                Err(_) => Err(AppError::StorageUnavailable),
             }
-            Err(rustix::io::Errno::NOENT) => (0, 0),
-            Err(_) => return Err(AppError::StorageUnavailable),
         };
+        let (journal_bytes, journal_allocated_bytes) = sidecar(&self.files.journal_name)?;
+        let (wal_bytes, wal_allocated_bytes) = sidecar(&self.files.wal_name)?;
+        let (shm_bytes, shm_allocated_bytes) = sidecar(&self.files.shm_name)?;
         Ok(DiskUsage {
             database_bytes: database.len(),
             database_allocated_bytes: database.blocks() * 512,
             journal_bytes,
             journal_allocated_bytes,
+            wal_bytes,
+            wal_allocated_bytes,
+            shm_bytes,
+            shm_allocated_bytes,
             temporary_disk_bytes: 0,
             page_size: self
                 .connection

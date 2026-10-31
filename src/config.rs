@@ -34,6 +34,7 @@ pub struct Config {
     pub delivery: Delivery,
     pub activity: Activity,
     pub storage: Storage,
+    pub history: History,
     pub notifications: Notifications,
     pub files: Files,
     pub limits: Limits,
@@ -48,7 +49,7 @@ impl fmt::Debug for Config {
 // Keep each setting's type and default together; every section rejects unknown keys.
 macro_rules! settings {
     ($name:ident { $($field:ident: $kind:ty = $default:expr),* $(,)? }) => {
-        #[derive(Deserialize)]
+        #[derive(Clone, Deserialize)]
         #[serde(default, deny_unknown_fields)]
         pub struct $name { $(pub $field: $kind,)* }
         impl Default for $name {
@@ -94,6 +95,60 @@ settings!(Notifications {
     notify_unconfirmed_processing: bool = true,
     notify_unroutable: bool = true,
 });
+settings!(History {
+    enabled: bool = false,
+    retention_days: u64 = 30,
+    max_records: u32 = 10_000,
+    max_attachments: u32 = 10_000,
+    max_record_bytes: u32 = 65_536,
+    max_body_bytes: u32 = 8_388_608,
+    max_metadata_bytes: u32 = 4_194_304,
+    page_limit: u32 = 50,
+    response_bytes: u32 = 65_536,
+    query_bytes: u32 = 256,
+    scan_records: u32 = 1_000,
+});
+
+impl History {
+    pub(crate) fn validate(
+        &self,
+        storage: &Storage,
+        limits: &Limits,
+        authenticated: bool,
+    ) -> Result<(), AppError> {
+        for (value, max) in [
+            (self.retention_days, 3_650),
+            (u64::from(self.max_records), 100_000),
+            (u64::from(self.max_attachments), 100_000),
+            (u64::from(self.max_record_bytes), 1_048_576),
+            (u64::from(self.max_body_bytes), 1_073_741_824),
+            (u64::from(self.max_metadata_bytes), 1_073_741_824),
+            (u64::from(self.page_limit), 100),
+            (u64::from(self.response_bytes), 1_048_576),
+            (u64::from(self.query_bytes), 4_096),
+            (u64::from(self.scan_records), 10_000),
+        ] {
+            require(value > 0 && value <= max, "history budgets")?;
+        }
+        require(!self.enabled || authenticated, "history authentication")?;
+        require(
+            !self.enabled
+                || u64::from(limits.inbox_bytes)
+                    + u64::from(limits.metadata_bytes)
+                    + u64::from(self.max_body_bytes)
+                    + u64::from(self.max_metadata_bytes)
+                    < u64::from(storage.max_database_bytes),
+            "history storage budget",
+        )?;
+        require(
+            self.max_record_bytes <= self.max_body_bytes
+                && self.max_record_bytes <= self.max_metadata_bytes
+                && self.query_bytes <= self.response_bytes
+                && self.page_limit <= self.scan_records,
+            "history budgets",
+        )
+    }
+}
 settings!(Files {
     allowed_roots: Vec<PathBuf> = Vec::new(),
     max_outbound_mb: u32 = 50,
@@ -159,6 +214,11 @@ impl Config {
             &self.telegram.bot_token_env,
             &self.telegram.bot_token_file,
             "telegram.bot_token",
+        )?;
+        self.history.validate(
+            &self.storage,
+            &self.limits,
+            self.server.auth_token_env.is_some() || self.server.auth_token_file.is_some(),
         )?;
         require(
             !self.server.create_auth_token_file || self.server.auth_token_file.is_some(),
