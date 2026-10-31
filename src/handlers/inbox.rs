@@ -19,15 +19,7 @@ impl McpHandler {
             unix_millis()?,
         )?;
         Ok(InboxResult {
-            replies: claims
-                .into_iter()
-                .map(|claim| {
-                    Ok(ClaimedReplyResult {
-                        reply: reply(claim.reply)?,
-                        claim_token: claim.claim_token,
-                    })
-                })
-                .collect::<Result<_, AppError>>()?,
+            replies: claims.into_iter().map(claim).collect::<Result<_, _>>()?,
         })
     }
 
@@ -115,6 +107,15 @@ impl McpHandler {
         .with_ttl_ms(0)
         .with_cache_scope(CacheScope::Private))
     }
+}
+
+pub(super) fn claim(
+    claim: crate::repositories::ClaimedReply,
+) -> Result<ClaimedReplyResult, AppError> {
+    Ok(ClaimedReplyResult {
+        reply: reply(claim.reply)?,
+        claim_token: claim.claim_token,
+    })
 }
 
 pub(super) fn reply(reply: InboxReply) -> Result<Reply, AppError> {

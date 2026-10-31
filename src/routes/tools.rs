@@ -41,6 +41,10 @@ pub(super) struct Telegram {
 }
 
 impl Telegram {
+    pub(super) fn request_count(&self) -> usize {
+        self.requests.lock().unwrap().len()
+    }
+
     pub(super) async fn new(config: &Config, responses: Vec<(u16, Value)>) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let client = TelegramClient::for_test(
@@ -174,7 +178,8 @@ async fn tools_have_typed_schemas_and_registration_survives_separate_requests_an
             "telegram_inbox",
             "telegram_processing",
             "telegram_ack",
-            "telegram_ask"
+            "telegram_ask",
+            "telegram_wait"
         ]
     );
     for (tool, required) in tools.iter().zip([
@@ -185,6 +190,7 @@ async fn tools_have_typed_schemas_and_registration_survives_separate_requests_an
         json!(["session_key", "reply_id", "claim_token"]),
         json!(["session_key", "reply_id", "claim_token"]),
         json!(["session_key", "text"]),
+        json!(["session_key", "outbound_message_id"]),
     ]) {
         assert_eq!(tool["inputSchema"]["type"], "object");
         assert_eq!(tool["inputSchema"]["additionalProperties"], false);

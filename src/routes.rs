@@ -22,7 +22,7 @@ use hyper::{
 use hyper_util::rt::{TokioIo, TokioTimer};
 use rmcp::{
     ServerHandler,
-    model::{ClientJsonRpcMessage, ClientRequest, GetMeta, ProtocolVersion},
+    model::{ClientJsonRpcMessage, ClientNotification, ClientRequest, GetMeta, ProtocolVersion},
     transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService},
 };
 use tokio::{
@@ -34,7 +34,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
 
 use crate::{
-    config::{Config, Secret},
+    config::{Config, MCP_CONTROL_REQUESTS, Secret},
     error::AppError,
     handlers::McpHandler,
 };
@@ -66,6 +66,7 @@ struct Endpoint<S> {
     hosts: [String; 2],
     auth: Option<HeaderValue>,
     admission: Arc<Semaphore>,
+    recovery: Arc<Semaphore>,
     concurrency: usize,
     request_bytes: usize,
     versions: Vec<ProtocolVersion>,
@@ -137,6 +138,7 @@ impl<S: ServerHandler> McpEndpoint<S> {
                 hosts,
                 auth,
                 admission: Arc::new(Semaphore::new(config.limits.concurrent_requests as usize)),
+                recovery: Arc::new(Semaphore::new(MCP_CONTROL_REQUESTS)),
                 concurrency: config.limits.concurrent_requests as usize,
                 request_bytes: config.limits.request_bytes as usize,
                 versions,
@@ -231,8 +233,12 @@ impl<S: ServerHandler> McpEndpoint<S> {
         if !self.valid_protocol_headers(&request) {
             return rejection(StatusCode::BAD_REQUEST);
         }
-        let Ok(permit) = self.inner.admission.clone().try_acquire_owned() else {
-            return rejection(StatusCode::SERVICE_UNAVAILABLE);
+        let (permit, control_only) = match self.inner.admission.clone().try_acquire_owned() {
+            Ok(permit) => (permit, false),
+            Err(_) => match self.inner.recovery.clone().try_acquire_owned() {
+                Ok(permit) => (permit, true),
+                Err(_) => return rejection(StatusCode::SERVICE_UNAVAILABLE),
+            },
         };
         let mut random = [0; 16];
         if getrandom::fill(&mut random).is_err() {
@@ -253,7 +259,7 @@ impl<S: ServerHandler> McpEndpoint<S> {
         let response = tokio::select! {
             biased;
             _ = self.inner.shutdown.cancelled() => return rejection(StatusCode::SERVICE_UNAVAILABLE),
-            response = self.dispatch(request)
+            response = self.dispatch(request, control_only)
                 .instrument(tracing::info_span!("mcp_request", request_id = correlation.as_str())) => response,
         };
         let mut response = safe_response(response, self.inner.request_bytes).await;
@@ -278,15 +284,20 @@ impl<S: ServerHandler> McpEndpoint<S> {
     /// rmcp's complete inline metadata selects stateless routing even with a
     /// legacy version and session header. Reject that ambiguity before dispatch;
     /// leave the original bytes and SDK negotiation/validation unchanged.
-    async fn dispatch<B>(&self, request: Request<B>) -> Response<ResponseBody>
+    async fn dispatch<B>(&self, request: Request<B>, control_only: bool) -> Response<ResponseBody>
     where
         B: Body<Data = Bytes> + Send + 'static,
         B::Error: std::fmt::Display,
     {
-        if request.method() != http::Method::POST
-            || !request.headers().contains_key("mcp-session-id")
-        {
+        let session = request.headers().contains_key("mcp-session-id");
+        if control_only && session && request.method() == http::Method::DELETE {
             return self.inner.sdk.handle(request).await;
+        }
+        if !control_only && (request.method() != http::Method::POST || !session) {
+            return self.inner.sdk.handle(request).await;
+        }
+        if request.method() != http::Method::POST {
+            return rejection(StatusCode::SERVICE_UNAVAILABLE);
         }
         let (parts, body) = request.into_parts();
         let body = body.map_err(|_| std::io::Error::other("MCP request body unavailable"));
@@ -300,7 +311,16 @@ impl<S: ServerHandler> McpEndpoint<S> {
                 });
             }
         };
-        if let Ok(ClientJsonRpcMessage::Request(rpc)) = serde_json::from_slice(&bytes) {
+        let message = serde_json::from_slice::<ClientJsonRpcMessage>(&bytes).ok();
+        // Classify the parsed body, never client-controlled method/name headers.
+        if control_only
+            && message
+                .as_ref()
+                .is_none_or(|message| !control_message(message))
+        {
+            return rejection(StatusCode::SERVICE_UNAVAILABLE);
+        }
+        if session && let Some(ClientJsonRpcMessage::Request(rpc)) = &message {
             let meta = rpc.request.get_meta();
             // Mismatched versions already fail in the SDK before lifecycle routing.
             let matching_version = meta.protocol_version().is_some_and(|version| {
@@ -390,6 +410,29 @@ impl<S: ServerHandler> McpEndpoint<S> {
                     .and_then(|value| value.strip_prefix("http://"))
                     .is_some_and(allowed_host)
             })
+    }
+}
+
+fn control_request(request: &ClientRequest) -> bool {
+    match request {
+        ClientRequest::CallToolRequest(call) => matches!(
+            call.params.name.as_ref(),
+            "telegram_register" | "telegram_inbox" | "telegram_processing" | "telegram_ack"
+        ),
+        ClientRequest::ReadResourceRequest(_) | ClientRequest::PingRequest(_) => true,
+        _ => false,
+    }
+}
+
+fn control_message(message: &ClientJsonRpcMessage) -> bool {
+    match message {
+        ClientJsonRpcMessage::Request(rpc) => control_request(&rpc.request),
+        ClientJsonRpcMessage::Notification(n) => matches!(
+            n.notification,
+            ClientNotification::CancelledNotification(_)
+                | ClientNotification::InitializedNotification(_)
+        ),
+        _ => false,
     }
 }
 

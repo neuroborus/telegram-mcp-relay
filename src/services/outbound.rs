@@ -70,6 +70,10 @@ impl OutboundService {
         self.typing.clone()
     }
 
+    pub(crate) fn chat_id(&self) -> i64 {
+        self.chat_id
+    }
+
     pub(crate) fn close(&self) {
         self.admission.close();
         self.tasks.close();

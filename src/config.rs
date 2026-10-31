@@ -23,6 +23,7 @@ pub(crate) const MCP_SESSION_INIT: std::time::Duration = std::time::Duration::fr
 pub(crate) const MCP_SESSION_ABANDONED: std::time::Duration = std::time::Duration::from_secs(30);
 pub(crate) const MCP_SESSION_SWEEP: std::time::Duration = std::time::Duration::from_secs(1);
 pub(crate) const MCP_SESSION_QUEUE: usize = 16;
+pub(crate) const MCP_CONTROL_REQUESTS: usize = 1;
 const CONFIG_BYTES: usize = 65_536;
 
 #[derive(Default, Deserialize)]

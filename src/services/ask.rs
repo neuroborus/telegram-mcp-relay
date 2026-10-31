@@ -1,4 +1,4 @@
-//! Bounded question waits; durable replies and subscriptions outlive every wait.
+//! Shared bounded ask/after-send waits; durable replies outlive every wait.
 
 use std::{
     sync::{Arc, Mutex},
@@ -28,6 +28,12 @@ pub struct AskedQuestion {
     pub sent: SentMessage,
     pub reply: Option<ClaimedReply>,
     /// False means waiting was disabled; true with no reply means the wait expired.
+    pub waited: bool,
+}
+
+pub struct WaitedReply {
+    pub target: ReplyTarget,
+    pub reply: Option<ClaimedReply>,
     pub waited: bool,
 }
 
@@ -90,6 +96,45 @@ impl AskService {
         };
         Ok(AskedQuestion {
             sent,
+            reply,
+            waited: self.timeout.is_some(),
+        })
+    }
+
+    /// Authorize and arm an existing text/document route without sending anything.
+    /// Disabled waiting still validates the target, but never registers or claims.
+    pub async fn wait_for_reply(
+        &self,
+        session_key: &str,
+        outbound_message_id: i64,
+    ) -> Result<WaitedReply, AppError> {
+        let target = ReplyTarget {
+            chat_id: self.outbound.chat_id(),
+            message_id: outbound_message_id,
+        };
+        let subscription = {
+            let database = self.database.lock().map_err(|_| AppError::StorageFailure)?;
+            database.session(session_key)?;
+            if target.message_id <= 0
+                || database
+                    .route(target.chat_id, target.message_id, unix_millis()?)?
+                    .is_none_or(|route| route.session_key != session_key)
+            {
+                return Err(AppError::InvalidWaitTarget);
+            }
+            // Serialize authorization/arming with ingress, then query durable state.
+            self.timeout
+                .map(|_| self.notifications.waiter(session_key.to_owned()))
+                .transpose()?
+        };
+        let reply = if let (Some(subscription), Some(timeout)) = (subscription, self.timeout) {
+            self.wait(session_key, target, subscription, timeout)
+                .await?
+        } else {
+            None
+        };
+        Ok(WaitedReply {
+            target,
             reply,
             waited: self.timeout.is_some(),
         })

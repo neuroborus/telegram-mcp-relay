@@ -24,9 +24,9 @@ use crate::{
     clients::telegram::TelegramClient,
     config::Config,
     dto::{
-        AckRequest, AckResult, AskResult, AskStatus, ClaimedReplyResult, InboxRequest, InboxResult,
-        ProcessingRequest, ProcessingResult, RegisterRequest, RegisterResult, SendFileRequest,
-        SendRequest, SendResult,
+        AckRequest, AckResult, AskResult, AskStatus, InboxRequest, InboxResult, ProcessingRequest,
+        ProcessingResult, RegisterRequest, RegisterResult, SendFileRequest, SendRequest,
+        SendResult, WaitRequest, WaitResult, WaitStatus,
     },
     error::{AppError, TelegramError},
     repositories::{Database, InboxNotifications},
@@ -159,15 +159,27 @@ impl McpHandler {
             telegram_chat_id: asked.sent.chat.id,
             outbound_message_id: asked.sent.message_id,
             status,
-            reply: asked
-                .reply
-                .map(|claim| -> Result<_, AppError> {
-                    Ok(ClaimedReplyResult {
-                        reply: inbox::reply(claim.reply)?,
-                        claim_token: claim.claim_token,
-                    })
-                })
-                .transpose()?,
+            reply: asked.reply.map(inbox::claim).transpose()?,
+        })
+    }
+
+    async fn wait(&self, request: WaitRequest) -> Result<WaitResult, AppError> {
+        let waited = self
+            .asks
+            .wait_for_reply(&request.session_key, request.outbound_message_id)
+            .await?;
+        let status = if waited.reply.is_some() {
+            WaitStatus::ReplyReceived
+        } else if waited.waited {
+            WaitStatus::WaitTimeout
+        } else {
+            WaitStatus::Disabled
+        };
+        Ok(WaitResult {
+            telegram_chat_id: waited.target.chat_id,
+            outbound_message_id: waited.target.message_id,
+            status,
+            reply: waited.reply.map(inbox::claim).transpose()?,
         })
     }
 }
@@ -292,6 +304,14 @@ impl ServerHandler for McpHandler {
                     result = self.ask(request) => tool_result(result),
                 }
             }
+            "telegram_wait" => {
+                let request = arguments(&request)?;
+                tokio::select! {
+                    biased;
+                    _ = context.ct.cancelled() => return Err(ErrorData::internal_error("Request cancelled", None)),
+                    result = self.wait(request) => tool_result(result),
+                }
+            }
             "telegram_inbox" => tool_result(self.claim_inbox(arguments(&request)?)),
             "telegram_processing" => tool_result(self.processing(arguments(&request)?)),
             "telegram_ack" => tool_result(self.acknowledge(arguments(&request)?)),
@@ -305,9 +325,9 @@ fn tools() -> Vec<Tool> {
     vec![
         Tool::new("telegram_register", "Register or resume a stable conversation; preserve the returned session key. Use the real host title when available, otherwise an honest fallback. Optional directory_label is display context only, not file authority; avoid personal paths. The server owns native bold/italic headers.", serde_json::Map::new())
             .with_input_schema::<RegisterRequest>().with_output_schema::<RegisterResult>(),
-        Tool::new("telegram_send", "Send a concise literal body with a durable reply route. The server adds native bold/italic headers; do not reproduce them or supply markup for formatting. Complete visible text must fit 1,000 Unicode scalars. Never automatically retry an uncertain send.", serde_json::Map::new())
+        Tool::new("telegram_send", "Send a concise literal body with a durable reply route; this does not arm waiting. Use telegram_wait with the successful outbound ID without resending. The server adds native bold/italic headers; do not reproduce them or supply markup for formatting. Complete visible text must fit 1,000 Unicode scalars. Never automatically retry an uncertain send.", serde_json::Map::new())
             .with_input_schema::<SendRequest>().with_output_schema::<SendResult>(),
-        Tool::new("telegram_send_file", "Stream an existing approved local file with a short literal caption and durable reply route. The server adds native bold/italic headers; do not reproduce them. Complete captions must fit 1,000 scalars and 1,024 UTF-16 units. Never automatically retry an uncertain send.", serde_json::Map::new())
+        Tool::new("telegram_send_file", "Stream an existing approved local file with a short literal caption and durable reply route; this does not arm waiting. Use telegram_wait with the successful outbound ID without uploading again. The server adds native bold/italic headers; do not reproduce them. Complete captions must fit 1,000 scalars and 1,024 UTF-16 units. Never automatically retry an uncertain send.", serde_json::Map::new())
             .with_input_schema::<SendFileRequest>().with_output_schema::<SendResult>(),
         Tool::new("telegram_inbox", "Atomically claim eligible replies on startup, resume or notification; preserve reply IDs and tokens. Never poll periodically. Read resources for snapshots without claiming.", serde_json::Map::new())
             .with_input_schema::<InboxRequest>().with_output_schema::<InboxResult>(),
@@ -317,6 +337,8 @@ fn tools() -> Vec<Tool> {
             .with_input_schema::<AckRequest>().with_output_schema::<AckResult>(),
         Tool::new("telegram_ask", "Send a concise literal question body; the server adds native bold/italic headers. When enabled, wait for a matching reply up to the server timeout. Events stay active. Preserve the reply ID and token; confirm processing and acknowledge separately. Timeout grants no permission and later replies remain valid. Never automatically retry an uncertain send.", serde_json::Map::new())
             .with_input_schema::<SendRequest>().with_output_schema::<AskResult>(),
+        Tool::new("telegram_wait", "Wait for one reply to your saved successful text/document send in the configured chat, without resending. Sending alone does not arm waiting. Default enabled wait is 600 seconds; disabled waiting never claims. Events stay active. Preserve the returned reply ID/current token and process/ack separately. Timeout or cancellation grants no permission and preserves later inbox recovery. Use concurrent work only when your host supports it.", serde_json::Map::new())
+            .with_input_schema::<WaitRequest>().with_output_schema::<WaitResult>(),
     ]
 }
 

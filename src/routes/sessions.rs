@@ -33,7 +33,8 @@ use tokio::{
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 
 use crate::config::{
-    MCP_SESSION_ABANDONED, MCP_SESSION_IDLE, MCP_SESSION_INIT, MCP_SESSION_QUEUE, MCP_SESSION_SWEEP,
+    MCP_CONTROL_REQUESTS, MCP_SESSION_ABANDONED, MCP_SESSION_IDLE, MCP_SESSION_INIT,
+    MCP_SESSION_QUEUE, MCP_SESSION_SWEEP,
 };
 
 /// Errors deliberately omit SDK session IDs, event IDs and parser input.
@@ -52,6 +53,7 @@ pub(super) struct BoundedSessions {
     admission: Arc<Semaphore>,
     work: Arc<Semaphore>,
     control: Arc<Semaphore>,
+    recovery: Arc<Semaphore>,
     tasks: TaskTracker,
     shutdown: CancellationToken,
     queue: usize,
@@ -106,7 +108,8 @@ impl BoundedSessions {
             sessions: Arc::default(),
             admission: Arc::new(Semaphore::new(capacity)),
             work: Arc::new(Semaphore::new(capacity)),
-            control: Arc::new(Semaphore::new(1)),
+            control: Arc::new(Semaphore::new(MCP_CONTROL_REQUESTS)),
+            recovery: Arc::new(Semaphore::new(MCP_CONTROL_REQUESTS)),
             tasks: TaskTracker::new(),
             shutdown,
             queue: capacity.clamp(2, MCP_SESSION_QUEUE),
@@ -133,6 +136,7 @@ impl BoundedSessions {
         session: &Session,
         request: Option<RequestId>,
         control: bool,
+        recovery: bool,
     ) -> Result<Arc<Usage>, SessionError> {
         // Reserve notification capacity so cancellation remains admissible when calls
         // consume the work budget; notifications cannot create an unbounded SDK backlog.
@@ -140,6 +144,13 @@ impl BoundedSessions {
         let permit = admission
             .clone()
             .try_acquire_owned()
+            .or_else(|error| {
+                if recovery {
+                    self.recovery.clone().try_acquire_owned()
+                } else {
+                    Err(error)
+                }
+            })
             .map_err(|_| SessionError)?;
         let mut state = lock(&session.state);
         if session.stop.is_cancelled()
@@ -418,7 +429,12 @@ impl SessionManager for BoundedSessions {
         let ClientJsonRpcMessage::Request(request) = &mut message else {
             return Err(SessionError);
         };
-        let usage = self.admit(&session, Some(request.id.clone()), false)?;
+        let usage = self.admit(
+            &session,
+            Some(request.id.clone()),
+            false,
+            super::control_request(&request.request),
+        )?;
         request.request.extensions_mut().insert(usage.clone());
         // A single cancellation guard spans both SDK operations.
         session
@@ -444,7 +460,7 @@ impl SessionManager for BoundedSessions {
             notification
                 .notification
                 .extensions_mut()
-                .insert(self.admit(&session, None, true)?);
+                .insert(self.admit(&session, None, true, false)?);
         } else {
             return Err(SessionError);
         }
@@ -463,7 +479,7 @@ impl SessionManager for BoundedSessions {
         id: &SessionId,
     ) -> Result<impl Stream<Item = ServerSseMessage> + Send + Sync + 'static, SessionError> {
         let session = self.session(id)?;
-        let usage = self.admit(&session, None, false)?;
+        let usage = self.admit(&session, None, false, false)?;
         let receiver = session
             .operation(session.handle.establish_common_channel())
             .await?;

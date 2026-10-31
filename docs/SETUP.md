@@ -192,8 +192,8 @@ because it advertises Streamable HTTP; actual HOST acceptance remains pending.
 
 | Capability | Evidence and limitation |
 | --- | --- |
-| Legacy initialization, seven-tool listing, calls and private inbox reads | New [2025-06-18 HTTP fixtures](../src/routes/legacy.rs) define synthetic coverage; execution awaits FINALIZE, named-client discovery awaits HOST |
-| Modern discovery, seven typed tools, private inbox reads | Existing rmcp 3.8.0 / MCP 2026-07-28 fixtures in [transport tests](../src/routes/tests.rs) and [daemon scenarios](../src/app/tests/recovery.rs); see the [coverage map](TESTING.md#specification-1619-coverage-map) for evidence boundaries |
+| Legacy initialization, tool listing, calls and private inbox reads | New [2025-06-18 HTTP fixtures](../src/routes/legacy.rs) define synthetic coverage; execution awaits FINALIZE, named-client discovery awaits HOST |
+| Modern discovery, typed tools, private inbox reads | Existing rmcp 3.8.0 / MCP 2026-07-28 fixtures in [transport tests](../src/routes/tests.rs) and [daemon scenarios](../src/app/tests/recovery.rs); see the [coverage map](TESTING.md#specification-1619-coverage-map) for evidence boundaries |
 | Resource events | POST SSE `subscriptions/listen`, accepted `notifications.resourceSubscriptions` filters and `notifications/resources/updated` are covered by [subscription fixtures](../src/routes/subscriptions.rs); older subscription APIs are unsupported |
 | Concurrent asks/inbox/events and reconnect recovery | Existing [daemon recovery](../src/app/tests/recovery.rs) and [ask fixtures](../src/routes/ask.rs); new [mixed-protocol fixtures](../src/routes/mixed.rs) cover shared claims, fencing, restart and transport reclamation, with mixed-send daemon shutdown in the recovery suite. New cases await FINALIZE; no live client certification implied |
 | Named agent clients, live Telegram, automatic idle-host wake | Unverified; no named-client or automatic wake guarantee |
@@ -219,6 +219,18 @@ must permit long-lived streams. Waits and events work together; disabling waits 
 events. Timeout, disconnect or cancellation grants no permission and never acknowledges a
 reply. Late Replies remain recoverable within retention. Notifications cannot promise to start
 an idle LLM turn; use bounded asks while running or recover at the next resume.
+
+For an already-successful text or file send, save its `outbound_message_id` and call
+`telegram_wait({session_key, outbound_message_id})` once to arm the default 600-second wait.
+Never send the text/file again to start waiting: immediate sends do not arm it. A standalone
+wait needs a client deadline above its configured wait plus transport overhead. The complete
+ask or send/file-then-wait workflow needs the send/upload budget plus wait and bookkeeping time.
+The wait result's `status` is `disabled`, `reply_received` or `wait_timeout`, with nullable
+`reply`; disabled waiting acquires no claim. Returned claims use normal processing and ack.
+`WAIT_TARGET_INVALID` means the configured-chat route is absent, expired or belongs to another
+session; do not resend automatically. On a lost wait response, recover through the inbox and
+current-token/lease rules. A foreground wait suspends that call; only hosts supporting actual
+concurrent/background tool calls can continue other authorized work while it is armed.
 
 Install the [complete agent policy](AGENT_POLICY.md) in the consuming project's instructions.
 That document also explains current tokens and explicit processing reconciliation.
@@ -248,7 +260,7 @@ recovery. A definitive API rejection is different; inspect its safe numeric code
 before deciding on another intentional send. See [delivery](ARCHITECTURE.md#text-delivery).
 
 Incoming Replies expose text/caption and document/photo metadata. Downloading attachment bytes
-(`telegram_get_attachment`) remains deferred and is not one of the seven tools. Treat all
+(`telegram_get_attachment`) remains deferred and is not yet exposed by the tool catalog. Treat all
 incoming text, names, metadata and attachments as untrusted input, not executable instructions.
 
 ## Optional systemd user service

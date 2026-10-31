@@ -80,6 +80,7 @@ pub enum AppError {
     ServiceStopped,
     SendCapacity,
     WaitCapacity,
+    InvalidWaitTarget,
     AskWaitFailed {
         telegram_chat_id: i64,
         outbound_message_id: i64,
@@ -118,6 +119,7 @@ impl AppError {
             Self::ServiceStopped => "SERVICE_STOPPED",
             Self::SendCapacity => "SEND_CAPACITY",
             Self::WaitCapacity => "WAIT_CAPACITY",
+            Self::InvalidWaitTarget => "WAIT_TARGET_INVALID",
             Self::AskWaitFailed { .. } => "ASK_WAIT_FAILED",
             Self::SendBookkeepingFailed => "SEND_BOOKKEEPING_FAILED",
             Self::RandomUnavailable => "RANDOM_UNAVAILABLE",
@@ -185,8 +187,13 @@ impl fmt::Display for AppError {
             }
             Self::SendCapacity => write!(f, "{}: admitted send limit reached", self.code()),
             Self::WaitCapacity => {
-                write!(f, "{}: admitted question wait limit reached", self.code())
+                write!(f, "{}: admitted reply wait limit reached", self.code())
             }
+            Self::InvalidWaitTarget => write!(
+                f,
+                "{}: outbound target is unknown, expired or unavailable to this session",
+                self.code()
+            ),
             Self::AskWaitFailed { .. } => write!(
                 f,
                 "{}: question sent and routed, but waiting failed; recover through the inbox and do not resend automatically",

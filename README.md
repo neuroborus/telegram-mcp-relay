@@ -11,8 +11,9 @@ completes startup retention cleanup and serves one protected loopback MCP endpoi
 one Telegram poller, factual notices and shared confirmed-processing typing.
 
 MCP provides typed registration, text/document sends, durable inbox resources, fenced reply
-processing/acknowledgment, modern resource subscriptions and bounded asks. Replies and the
-update cursor commit atomically; post-commit signals serve subscribers and waiters without
+processing/acknowledgment, modern resource subscriptions, bounded asks and explicit after-send
+waits. Replies and the update cursor commit atomically; post-commit signals serve subscribers
+and waiters without
 consuming durable replies. Bounded periodic cleanup and incremental disk reclamation preserve
 valid replies and recovery identities. See [architecture](docs/ARCHITECTURE.md) for implemented
 guarantees and protocol limitations.
@@ -45,12 +46,20 @@ target/release/telegram-mcp-relay "$HOME/.config/telegram-mcp-relay/config.toml"
 ```
 
 Connect capable clients to `http://127.0.0.1:8765/mcp` using Streamable HTTP and the configured
-bearer header. MCP **2025-06-18** supports initialization, the seven tools and read-only inbox
+bearer header. MCP **2025-06-18** supports initialization, tools and read-only inbox
 resources on the same endpoint as **2026-07-28** discovery and `subscriptions/listen`.
 Older resource subscriptions are unavailable. Named-client interoperability remains pending
 HOST verification; see [client requirements](docs/SETUP.md#connect-mcp-clients).
 Optional [systemd user-service and environment examples](docs/SETUP.md#optional-systemd-user-service)
 are provided for operator review.
+
+`telegram_send` and `telegram_send_file` return after acceptance and route commit; they do not
+arm waiting. Save their `outbound_message_id`, then call
+`telegram_wait({session_key, outbound_message_id})` without sending again. Waiting defaults
+to 600 seconds and returns `reply_received`, `wait_timeout` or `disabled`, with a nullable
+`reply`. A returned claim still requires current-token processing and explicit acknowledgment.
+Unknown, foreign or expired targets return `WAIT_TARGET_INVALID`. Timeout/cancellation leave
+routes and replies recoverable and grant no permission. See [client deadlines and concurrency](docs/SETUP.md#connect-mcp-clients).
 
 Startup failures return a safe error code and nonzero exit status. No directories, services or
 webhook resets are installed automatically. The binary registers shutdown signals before starting services

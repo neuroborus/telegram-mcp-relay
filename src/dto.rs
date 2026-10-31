@@ -84,6 +84,34 @@ pub struct AskResult {
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[schemars(crate = "rmcp::schemars")]
+pub struct WaitRequest {
+    pub session_key: String,
+    /// Saved successful text/document send in the configured chat. Never resend to wait.
+    pub outbound_message_id: i64,
+}
+
+#[derive(Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[schemars(crate = "rmcp::schemars")]
+pub enum WaitStatus {
+    Disabled,
+    ReplyReceived,
+    WaitTimeout,
+}
+
+#[derive(Serialize, JsonSchema)]
+#[schemars(crate = "rmcp::schemars")]
+pub struct WaitResult {
+    pub telegram_chat_id: i64,
+    pub outbound_message_id: i64,
+    pub status: WaitStatus,
+    /// Disabled waiting acquires no claim. Returned claims require processing/ack separately.
+    pub reply: Option<ClaimedReplyResult>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(crate = "rmcp::schemars")]
 pub struct InboxRequest {
     pub session_key: String,
     /// Claim 1–100 eligible replies, within the configured payload budget. Default: 100.

@@ -101,13 +101,17 @@ impl Mock {
             .unwrap()
     }
 
-    fn asks(&self, fixture: &Fixture, database: Arc<Mutex<Database>>) -> AskService {
+    pub(super) fn asks(&self, fixture: &Fixture, database: Arc<Mutex<Database>>) -> AskService {
         AskService::new(
             database.clone(),
             OutboundService::new(database, self.client.clone(), &fixture.config).unwrap(),
             &fixture.config.delivery,
         )
         .unwrap()
+    }
+
+    pub(super) fn assert_idle(&mut self) {
+        assert!(self.requests.try_recv().is_err());
     }
 }
 

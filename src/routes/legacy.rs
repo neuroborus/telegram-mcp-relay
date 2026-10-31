@@ -123,7 +123,7 @@ async fn initialization_negotiates_supported_handshake_and_fallback_without_regi
             listed["result"]["tools"],
             http.rpc("tools/list", json!({})).await["result"]["tools"]
         );
-        assert_eq!(listed["result"]["tools"].as_array().unwrap().len(), 7);
+        assert_eq!(listed["result"]["tools"].as_array().unwrap().len(), 8);
         sessions.push(session);
     }
     // Initialization is allowed to supply its matching version header too.
@@ -283,7 +283,7 @@ async fn all_legacy_session_operations_require_bearer_and_safe_authority() {
             .as_array()
             .unwrap()
             .len(),
-        7
+        8
     );
     for request in [
         http.legacy_post(listing, Some("synthetic-unknown-session")),
@@ -395,7 +395,7 @@ async fn ambiguous_headers_and_conflicting_initialization_fail_before_session_cr
             .as_array()
             .unwrap()
             .len(),
-        7
+        8
     );
     http.finish().await;
 }
@@ -460,7 +460,7 @@ async fn matching_inline_metadata_cannot_discard_live_unknown_or_terminated_sess
         "io.modelcontextprotocol/protocolVersion":LEGACY_VERSION}}),
         )
         .await;
-    assert_eq!(listed["result"]["tools"].as_array().unwrap().len(), 7);
+    assert_eq!(listed["result"]["tools"].as_array().unwrap().len(), 8);
     assert_eq!(
         status(http.session_operation(http::Method::DELETE, &session)).await,
         StatusCode::ACCEPTED
@@ -653,7 +653,7 @@ async fn session_lifecycle_preflight_preserves_declared_and_chunked_body_bounds(
             .as_array()
             .unwrap()
             .len(),
-        7
+        8
     );
     http.finish().await;
 }
@@ -742,7 +742,7 @@ async fn modern_tools_still_require_per_request_metadata_and_headers() {
             .as_array()
             .unwrap()
             .len(),
-        7
+        8
     );
     http.finish().await;
 }

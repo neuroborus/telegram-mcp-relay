@@ -81,7 +81,7 @@ fn start_legacy_tool(
 }
 
 #[tokio::test]
-async fn both_protocols_share_seven_tools_resources_and_durable_routes() {
+async fn both_protocols_share_tools_resources_and_durable_routes() {
     let mut fixture = Fixture::new();
     fixture.config.delivery.wait_fallback_enabled = false;
     let telegram = Telegram::new(&fixture.config, (7..13).map(sent).collect()).await;
@@ -114,7 +114,8 @@ async fn both_protocols_share_seven_tools_resources_and_durable_routes() {
                 "telegram_inbox",
                 "telegram_processing",
                 "telegram_ack",
-                "telegram_ask"
+                "telegram_ask",
+                "telegram_wait"
             ]
         );
         let args = json!({"title":"Same", "external_session_id":format!("mixed-{index}")});

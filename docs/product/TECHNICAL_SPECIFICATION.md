@@ -15,8 +15,8 @@ The owner authorized revisions for identity/presentation, after-send waiting, sh
 incoming attachments, agent guidance and their configuration, security and acceptance contracts.
 Other requirements remain in force. These are accepted requirements, **not proof of implemented
 or validated features**. Native headers have an implementation pending validation;
-`telegram_wait`, the shared journal/history tool, attachment downloads and `telegram_guidance`
-await their implementation and validation commits.
+`telegram_wait` also has an implementation pending validation. The shared journal/history tool,
+attachment downloads and `telegram_guidance` await their implementation and validation commits.
 The unchecked acceptance criteria below describe obligations, not observed test results.
 See [architecture](../ARCHITECTURE.md) for implementation status and
 [testing](../TESTING.md) for separately recorded validation evidence. Historical measurements
@@ -245,8 +245,8 @@ Use clear JSON Schemas, structured results, and stable error codes. The followin
 | `telegram_get_attachment` (new) | Resolve an authorized retained opaque `attachment_handle` for the caller's `session_key`; lazily download to a confined private daemon-local path, with bounded byte count, expiry and display metadata. |
 | `telegram_guidance` (new) | No session required; return versioned, self-contained instructions and actual inventory plus nonsecret effective capabilities/limits. |
 
-The newly required tools above remain pending implementation at this revision. History is
-disabled by default; downloads require explicitly configured private storage. Disabled
+`telegram_wait` has an implementation pending validation; the other new tools above remain
+pending implementation. History is disabled by default; downloads require explicitly configured private storage. Disabled
 capabilities must fail predictably without effects. Guidance must report their effective state.
 
 ### 5.1 Logical request/result examples

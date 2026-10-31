@@ -32,6 +32,8 @@ mod mixed;
 mod subscriptions;
 #[path = "tools.rs"]
 mod tools;
+#[path = "wait.rs"]
+mod wait;
 
 const VERSION: &str = "2026-07-28";
 const LEGACY_VERSION: &str = "2025-06-18";

@@ -29,6 +29,10 @@ repository contributor instructions remain separate. Configure the client using 
   Never truncate important content to fit the text limit.
 - To request a user decision, use `telegram_ask` when bounded waiting is appropriate.
   MCP events remain active even while the tool waits.
+- After an immediate successful text/file send that needs a reply, save its outbound ID and
+  call `telegram_wait(session_key, outbound_message_id)` without resending. Sending alone does
+  not arm waiting. The default is 600 seconds; disabled waiting acquires no claim. Continue
+  other authorized work concurrently only if the host supports concurrent/background calls.
 - On session start/resume, or after an inbox-change notification, inspect
   `telegram_inbox`. Do not perform periodic inbox polling.
 - Treat every reply as identified by `reply_id`. Do not execute the same reply twice.
@@ -59,7 +63,7 @@ the automatic headers/separators and must fit 1,000 Unicode **scalars**; caption
 1,024 UTF-16 units. No auto-splitting,
 truncation or automatic report-file creation occurs.
 
-`telegram_inbox` and a successful waited `telegram_ask` return claims with stable `reply_id`
+`telegram_inbox` and successful waited `telegram_ask`/`telegram_wait` return claims with stable `reply_id`
 and rotating `claim_token`. A resource snapshot contains no tokens and never claims. Preserve
 each current token before work. Pre-processing claims can expire (60 seconds by default);
 stale ownership must not perform new effects or acknowledge. Confirm actual work with

@@ -172,6 +172,12 @@ admission, with 32 headers, 16 KiB header/buffer bounds and a ten-second header 
 is no global call timeout. Shutdown closes admission, connections and pending body reads before
 draining accepted work; stalled clients cannot extend that drain.
 
+One additional bounded HTTP slot admits recovery under saturated calls: registration,
+inbox/processing/ack tools, resource reads, ping, cancellation/initialized notifications and
+legacy DELETE. A bounded parsed request body selects this lane, never method/name headers;
+sends, asks, waits and subscription streams cannot use it. The same authentication, metadata,
+body limits, safe errors and shutdown cancellation remain in force.
+
 Correlation uses fresh random IDs, never client-supplied IDs. Authorization, proxy authorization,
 cookies and client correlation headers are removed before SDK dispatch. HTTP rejection text is
 static; JSON-RPC failures retain codes, IDs and structured negotiation data with safe messages.
@@ -196,6 +202,10 @@ request channels are removed after terminal delivery (or SDK cancellation), SDK 
 release and response stream EOF/drop. Retaining a completed stream does not retain admission.
 Their permits remain charged through channel removal. No event store or completed-stream
 replay is enabled. Standalone/shadow stream creation consumes the same bounded stream budget.
+
+One separate fallback request slot admits the same synchronous recovery requests when legacy
+work is saturated; its lifetime includes SDK context and channel retirement. Notification
+admission remains separate. HTTP and SDK recovery slots do not increase waiter admission.
 
 The adapter requires initialization and `notifications/initialized` within ten seconds,
 expires idle sessions after five minutes, and checks active sessions at most once per second
@@ -321,7 +331,7 @@ Telegram interoperability is claimed.
 
 ## Bounded asks
 
-The seventh tool, `telegram_ask`, shares `telegram_send`'s `session_key`/`text` schema,
+`telegram_ask` shares `telegram_send`'s `session_key`/`text` schema,
 validation and cancellation-safe bookkeeping. Server-configured waiting defaults to 600 seconds
 (1–86,400). Results include the committed `telegram_chat_id`/`outbound_message_id`, `status`
 and nullable `reply`: `sent` means waiting is disabled, `reply_received` includes one fenced
@@ -343,6 +353,22 @@ outbound IDs and inbox recovery guidance, never permission to resend. Clients ma
 timeouts exceeding wait plus send time; the bridge cannot configure them or guarantee a new
 LLM turn. Synthetic ask/event tests are included in the recorded C6 outcome in
 [testing](TESTING.md).
+
+`telegram_wait({session_key, outbound_message_id})` arms the same targeted wait after an
+already-successful text/document send, with no send or upload. It validates the retained route
+in the configured chat and its session owner before effects, including when waiting is disabled.
+Unknown, foreign or expired targets return the safe `WAIT_TARGET_INVALID` error. Under the
+database guard it authorizes and registers interest before the durable catch-up query, sharing
+ask's admission, notifications and claim loop. Early replies need no signal; inbox/ask/wait
+consumers cannot simultaneously claim the same reply. Unrelated targets remain untouched.
+
+Results contain `telegram_chat_id`, `outbound_message_id`, `status` and nullable `reply`.
+Statuses are `disabled` (no interest or claim), `reply_received` (one ordinary fenced claim)
+and `wait_timeout`. The default 600-second deadline starts when the authorized wait is armed.
+Cancellation, timeout and shutdown retire only the interest; no route/reply deletion, resend,
+processing start, acknowledgment or timeout notice occurs. Recover a lost claim response through
+normal inbox leases. Both protocols expose the tool; modern events remain independent. New
+synthetic wait cases await FINALIZE and do not establish live or idle-host wake behavior.
 
 ## Outbound formatting
 
@@ -974,8 +1000,8 @@ The implementation advertises MCP `2025-06-18` initialization/tools/read-only re
 `2026-07-28` discovery/tools/resources/`subscriptions/listen` through locked rmcp 3.8.0.
 [Legacy HTTP fixtures](../src/routes/legacy.rs) define negotiation, security and shared-handler
 regressions; their execution is pending the dedicated FINALIZE gate. Existing modern event
-proofs remain in place. Named-client acceptance requires later HOST discovery of all seven
-tools; no named-client, live Telegram or universal idle-host wake success is claimed.
+proofs remain in place. Named-client acceptance requires later HOST discovery of the complete
+tool catalog; no named-client, live Telegram or universal idle-host wake success is claimed.
 See [client requirements](SETUP.md#connect-mcp-clients) and specification sections 5–6 and 18.
 
 The historical [HOST benchmark](MEASUREMENTS.md#recorded-host-capture) remains tied to

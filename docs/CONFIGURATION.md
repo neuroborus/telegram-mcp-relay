@@ -54,9 +54,11 @@ and shares one typing scheduler between processing, sends and retention deletion
 
 `telegram_ask` honors `delivery.wait_fallback_enabled` (default true) and
 `delivery.wait_timeout_seconds` (default 600), starting its deadline after send bookkeeping.
-`limits.waiters` (default 16, at most `limits.concurrent_requests`) reserves armed asks before
-sending, independently of subscriptions. Disabled waits return immediately after sending;
-events and inbox recovery remain active. See [bounded asks](ARCHITECTURE.md#bounded-asks)
+`telegram_wait` uses the same settings and shared `limits.waiters` budget (default 16, at most
+`limits.concurrent_requests`). Asks reserve before sending; after-send waits authorize and arm
+the retained target before querying replies, independently of subscriptions. Disabled asks
+return after sending; disabled after-send waits validate the route but never send or claim.
+Events and inbox recovery remain active. See [bounded asks](ARCHITECTURE.md#bounded-asks)
 for cancellation, errors and client timeout requirements.
 
 Uploads accept 1–50 decimal MB, with an inclusive ceiling of 50,000,000 bytes or the lower
@@ -84,6 +86,11 @@ lifetimes are ten seconds for initialization/control operations, five minutes fo
 sessions, and thirty seconds for abandoned calls, with a one-second reclamation interval.
 Attached long-running calls retain their service deadlines. These are centralized constants,
 not new TOML settings, and do not change `limits.sessions` or durable retention.
+
+At saturated HTTP/request-work admission, one additional bounded recovery slot at each layer
+keeps registration, inbox/processing/ack, resource reads and ping usable. HTTP also accepts
+legacy DELETE and cancellation/initialized notifications; SDK notification admission remains
+separate. Parsed bodies select the recovery lane; sends, waits and subscriptions cannot use it.
 Legacy HTTP routing is enabled for MCP 2025-06-18 and uses these bounds independently
 of modern stateless HTTP admission. Transport IDs do not replace durable application keys. See
 [SDK session ownership](ARCHITECTURE.md#sdk-transport-session-bounds) for reclamation and shutdown.
