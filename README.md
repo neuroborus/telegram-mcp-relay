@@ -47,9 +47,9 @@ argument; it is not part of the field name. Examples below show tool arguments, 
 | --- | --- | --- |
 | `telegram_guidance` | `{}` | `GuidanceResult`: current policy, inventory, capabilities and effective limits |
 | `telegram_register` | `title`, `external_session_id?`, `session_key?`, `directory_label?` | `{session_key, title, directory_label, inbox_uri}`; directory is nullable |
-| `telegram_send` | `session_key`, `text` | `SendResult`: `{telegram_chat_id, outbound_message_id}` after acceptance **and** route commit |
-| `telegram_send_file` | `session_key`, `path`, `caption?` (default empty) | `SendResult`; absolute daemon-local path beneath an approved outbound root |
-| `telegram_ask` | `session_key`, `text` | `{telegram_chat_id, outbound_message_id, status, reply}`; `status` is `sent` when waiting is disabled, otherwise `reply_received` or `wait_timeout`; `reply` is a nullable `ClaimedReplyResult` |
+| `telegram_send` | `session_key`, `text`, `entities?` | `SendResult`: `{telegram_chat_id, outbound_message_id}` after acceptance **and** route commit |
+| `telegram_send_file` | `session_key`, `path`, `caption?` (default empty), `caption_entities?` | `SendResult`; absolute daemon-local path beneath an approved outbound root |
+| `telegram_ask` | `session_key`, `text`, `entities?` | `{telegram_chat_id, outbound_message_id, status, reply}`; `status` is `sent` when waiting is disabled, otherwise `reply_received` or `wait_timeout`; `reply` is a nullable `ClaimedReplyResult` |
 | `telegram_wait` | `session_key`, `outbound_message_id` | Same fields as ask; `status` is `disabled`, `reply_received` or `wait_timeout`; validates the caller's retained configured-chat route even when disabled |
 | `telegram_inbox` | `session_key`, `limit?` (default 100, 1–100 within payload budget) | `{replies: [ClaimedReplyResult]}`; claims eligible pending or lease-expired unstarted replies |
 | `telegram_processing` | `session_key`, `reply_id`, `claim_token`, exactly one of `active` or `reconcile_request_id` | `{reply_id, claim_token, processing_started_at}`; start time is nullable; preserve the returned current token |
@@ -75,7 +75,7 @@ session keys, fences, raw Telegram file IDs and file bytes. Own-reply `attachmen
 remains legacy-compatible JSON; use the additive safe `attachments` handles for downloads,
 never adapter identifiers from that metadata.
 
-`GuidanceResult` contains `version` (currently 1), `tools: [{name, description}]`,
+`GuidanceResult` contains `version` (currently 2), `tools: [{name, description}]`,
 `capabilities`, `limits` and `instructions: [string]`. The tools match actual registration;
 full schemas come from `tools/list`. Capabilities include `protocols: [{version,
 resource_subscriptions}]`, `wait_enabled`, `history_enabled`, `attachment_downloads_enabled`,
@@ -179,8 +179,31 @@ background calls. Allow client deadlines above 15 seconds of text-send network t
 ask's wait, or 600 seconds for an upload followed by the separate wait, with filesystem/SQLite/
 scheduling margin. Server admission budgets do not establish host support or automatic idle wake.
 
-Use literal bodies/captions: the server adds native bold title and optional italic directory
-entities, without Markdown/HTML parsing. The entire visible text/question/caption must fit
+Supply verbatim bodies/captions: the server adds native bold title and optional italic directory
+entities, with one newline before a nonempty body. No Markdown/HTML is parsed. Request rich
+formatting using optional `entities` on send/ask or `caption_entities` on send_file; omitted or
+empty arrays preserve literal behavior on both protocols. For example:
+
+```json
+{"session_key":"SAVED_KEY","text":"😀 Ready","entities":[{"type":"bold","offset":3,"length":5}]}
+```
+
+Pass that object to `telegram_send` (or `telegram_ask` for a question). Entity offsets/positive
+lengths count **UTF-16 units in the supplied body/caption only**, excluding automatic headers.
+Each list accepts at most 100 entities. Supported `type` values are `bold`, `italic`, `underline`,
+`strikethrough`, `spoiler`, `code`, `pre`, `text_link`, `blockquote` and `expandable_blockquote`.
+Only `pre` accepts optional `language` (1–64 bytes, no whitespace/controls). Only `text_link`
+requires `url`: an absolute http/https/tg/mailto/tel URL, at most 2,048 bytes, without whitespace
+or controls. Metadata for other kinds and unknown fields are rejected. Ranges must stay inside
+the body and start/end on Unicode scalar boundaries. Overlaps require full containment with at least
+one bold/italic/underline/strikethrough/spoiler span; `code`/`pre` cannot overlap anything.
+Quotes cannot nest, and other non-style entities cannot contain each other. Unsupported special
+types are `mention`, `hashtag`, `cashtag`, `bot_command`, `url`, `email`, `phone_number`,
+`text_mention`, `custom_emoji` and `date_time`; literal text may still contain links or mentions.
+Invalid shapes/types return safe MCP invalid-params errors; invalid ranges/metadata/nesting
+return structured `REQUEST_INVALID`, before sends, routes, journaling or activity changes.
+
+The entire visible text/question/caption must fit
 **1,000 Unicode scalars**, including framing, separators and cues; captions also fit
 **1,024 UTF-16 units**. Every server service notice begins with exact `🔧 `.
 Optional cues are ❓ question, ⏳ waiting, 🔄 progress, ✅ success, ⚠️ warning, ❌ error, 📎 file.

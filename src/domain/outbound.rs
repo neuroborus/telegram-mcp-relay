@@ -1,9 +1,12 @@
-//! Literal outbound text, native header entities and final Unicode limits.
+//! Verbatim outbound text, isolated native header/body entities and final Unicode limits.
 
 use std::fmt;
 
-use serde::Serialize;
 use unicode_segmentation::UnicodeSegmentation;
+
+mod entities;
+pub(crate) use entities::validate_body_entities;
+pub use entities::{EntityKind, MessageEntity};
 
 use crate::{
     config::OUTBOUND_SCALAR_LIMIT,
@@ -128,23 +131,7 @@ fn unsafe_format_control(c: char) -> bool {
         | '\u{202a}'..='\u{202e}' | '\u{2060}'..='\u{206f}' | '\u{feff}' | '\u{fff9}'..='\u{fffb}')
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum EntityKind {
-    Bold,
-    Italic,
-}
-
-/// Telegram entity coordinates count UTF-16 code units, never bytes or scalars.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct MessageEntity {
-    #[serde(rename = "type")]
-    pub kind: EntityKind,
-    pub offset: usize,
-    pub length: usize,
-}
-
-/// Constructed only by validated formatters; entities cover server-owned header spans.
+/// Constructed by validated formatters; header and optional body spans stay separate.
 #[derive(Clone, PartialEq, Eq)]
 pub struct FormattedMessage {
     text: String,
@@ -156,8 +143,32 @@ impl FormattedMessage {
         &self.text
     }
 
+    /// Native Telegram spans in absolute UTF-16 coordinates of the complete visible text.
     pub fn entities(&self) -> &[MessageEntity] {
         &self.entities
+    }
+
+    /// Apply explicit entities to the verbatim body following this formatter's header.
+    pub(crate) fn with_body_entities(
+        mut self,
+        body: &str,
+        entities: &[MessageEntity],
+    ) -> Result<Self, AppError> {
+        validate_body_entities(body, entities)?;
+        let framing = self
+            .text
+            .strip_suffix(body)
+            .ok_or(AppError::InvalidRequest("body entities"))?
+            .encode_utf16()
+            .count();
+        for entity in entities {
+            let mut shifted = entity.clone();
+            shifted.offset = framing
+                .checked_add(entity.offset)
+                .ok_or(AppError::InvalidRequest("body entities"))?;
+            self.entities.push(shifted);
+        }
+        Ok(self)
     }
 }
 
@@ -170,7 +181,12 @@ macro_rules! redacted_debug {
         }
     )+};
 }
-redacted_debug!(SessionTitle, DirectoryLabel, FormattedMessage);
+redacted_debug!(
+    SessionTitle,
+    DirectoryLabel,
+    FormattedMessage,
+    MessageEntity
+);
 
 /// Format text/questions with native header entities and a verbatim body.
 pub fn format_text(
@@ -239,6 +255,8 @@ fn format_outbound(
             kind: EntityKind::Bold,
             offset: prefix.encode_utf16().count(),
             length: title.as_str().encode_utf16().count(),
+            url: None,
+            language: None,
         });
         text.push_str(title.as_str());
     }
@@ -248,6 +266,8 @@ fn format_outbound(
             kind: EntityKind::Italic,
             offset: text.encode_utf16().count(),
             length: directory.as_str().encode_utf16().count(),
+            url: None,
+            language: None,
         });
         text.push_str(directory.as_str());
     }

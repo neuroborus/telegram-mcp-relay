@@ -244,8 +244,11 @@ from available public host metadata (otherwise an honest explicit fallback); sav
 session key and inbox URI.
 Optional `directory_label` is display-only context: avoid personal absolute paths. It normalizes
 to one safe line, rejects more than 100 scalars and is omitted/cleared when absent or blank.
-The server adds native bold title/italic directory entities; supply only literal bodies/captions.
-No Markdown/HTML parsing occurs. Final visible text is limited to 1,000 scalars, captions also
+The server adds native bold title/italic directory entities; supply verbatim bodies/captions.
+Optional body-relative `entities` on send/ask and `caption_entities` on send_file request native
+formatting; omitted/empty arrays stay literal. No Markdown/HTML is parsed. See the
+[entity examples and limits](../README.md#synthetic-workflows).
+Final visible text is limited to 1,000 scalars, captions also
 to 1,024 UTF-16 units. See [formatting](ARCHITECTURE.md#outbound-formatting).
 
 On modern clients, subscribe to the returned canonical inbox URI (no template or

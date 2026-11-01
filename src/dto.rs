@@ -5,6 +5,8 @@ use std::path::PathBuf;
 use rmcp::schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::domain::outbound::MessageEntity;
+
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[schemars(crate = "rmcp::schemars")]
@@ -115,9 +117,15 @@ pub struct RegisterResult {
 #[schemars(crate = "rmcp::schemars")]
 pub struct SendRequest {
     pub session_key: String,
-    /// Literal body only; the server adds native bold/italic headers. The complete visible
+    /// Verbatim body; use entities for formatting, never implicit Markdown/HTML parsing.
+    /// The server adds native bold/italic headers. The complete visible
     /// title, optional directory, separators and body must fit 1,000 Unicode scalars.
     pub text: String,
+    /// Optional native entities, at most 100; UTF-16 offsets relative to text only.
+    /// Omitted/empty means literal text. Do not include the server-owned header.
+    #[serde(default)]
+    #[schemars(length(max = 100))]
+    pub entities: Vec<MessageEntity>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -127,10 +135,16 @@ pub struct SendFileRequest {
     pub session_key: String,
     /// Absolute local path beneath a configured approved root, without symlinks.
     pub path: PathBuf,
-    /// Literal description only; the server adds the header. The complete caption must fit
+    /// Verbatim description; use caption_entities for formatting. The server adds the header.
+    /// The complete caption must fit
     /// 1,000 scalars and 1,024 UTF-16 units.
     #[serde(default)]
     pub caption: String,
+    /// Optional native entities, at most 100; UTF-16 offsets relative to caption only.
+    /// Omitted/empty means literal text; no Markdown/HTML parsing or header reproduction.
+    #[serde(default)]
+    #[schemars(length(max = 100))]
+    pub caption_entities: Vec<MessageEntity>,
 }
 
 #[derive(Serialize, JsonSchema)]

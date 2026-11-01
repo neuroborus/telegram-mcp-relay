@@ -10,6 +10,7 @@ use tokio::time::Instant;
 use crate::{
     clients::telegram::SentMessage,
     config::Delivery,
+    domain::outbound::{MessageEntity, validate_body_entities},
     error::AppError,
     repositories::{ClaimedReply, Database, InboxNotifications, InboxSubscription, ReplyTarget},
 };
@@ -65,6 +66,17 @@ impl AskService {
     /// Reserve and arm before sending, then recheck SQLite after route bookkeeping.
     /// Cancellation drops only this interest; accepted sends finish in OutboundService.
     pub async fn ask(&self, session_key: &str, text: &str) -> Result<AskedQuestion, AppError> {
+        self.ask_with_entities(session_key, text, &[]).await
+    }
+
+    /// Reject invalid native spans before arming interest; never resend to wait.
+    pub async fn ask_with_entities(
+        &self,
+        session_key: &str,
+        text: &str,
+        entities: &[MessageEntity],
+    ) -> Result<AskedQuestion, AppError> {
+        validate_body_entities(text, entities)?;
         let subscription = if self.timeout.is_some() {
             let database = self.database.lock().map_err(|_| AppError::StorageFailure)?;
             database.session(session_key)?;
@@ -72,7 +84,10 @@ impl AskService {
         } else {
             None
         };
-        let sent = self.outbound.send_text(session_key, text).await?;
+        let sent = self
+            .outbound
+            .send_text_with_entities(session_key, text, entities)
+            .await?;
         let reply = if let (Some(subscription), Some(timeout)) = (subscription, self.timeout) {
             self.wait(
                 session_key,

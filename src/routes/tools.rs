@@ -163,6 +163,284 @@ pub(super) fn failure(result: &Value, code: &str) {
     assert_eq!(rendered, result["structuredContent"]);
 }
 
+async fn entity_call(http: &Http, transport: Option<&str>, name: &str, arguments: Value) -> Value {
+    let params = json!({"name":name,"arguments":arguments});
+    match transport {
+        Some(transport) => http.legacy_rpc(transport, "tools/call", params).await,
+        None => http.rpc("tools/call", params).await,
+    }
+}
+
+#[tokio::test]
+async fn native_body_entities_and_literal_defaults_reach_json_multipart_and_journal_on_both_protocols()
+ {
+    for legacy in [false, true] {
+        let mut fixture = Fixture::new();
+        fixture.config.delivery.wait_fallback_enabled = false;
+        fixture.config.history.enabled = true;
+        let auth = fixture.auth();
+        let telegram = Telegram::new(&fixture.config, (7..16).map(sent).collect()).await;
+        let database = Arc::new(Mutex::new(
+            Database::open_with_history(
+                &fixture.config.storage,
+                &fixture.config.limits,
+                &fixture.config.history,
+                true,
+            )
+            .unwrap(),
+        ));
+        let handler =
+            Arc::new(McpHandler::new(database, telegram.client.clone(), &fixture.config).unwrap());
+        let mut http = fixture.serve(handler, Some(&auth)).await;
+        let mut headers = http::HeaderMap::new();
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_str(&format!("Bearer {TOKEN}")).unwrap(),
+        );
+        http.client = reqwest::Client::builder()
+            .no_proxy()
+            .default_headers(headers)
+            .build()
+            .unwrap();
+        let transport = if legacy {
+            Some(http.initialize(LEGACY_VERSION).await.0)
+        } else {
+            None
+        };
+        let session = http
+            .register(json!({"title":"🚀","directory_label":"📁"}))
+            .await;
+        let key = &session["session_key"];
+        let path = fixture.directory.join("rich.txt");
+        fs::write(&path, b"synthetic report").unwrap();
+        let entities = json!([
+            {"type":"bold","offset":2,"length":2},
+            {"type":"text_link","offset":2,"length":2,"url":"https://example.invalid/report"},
+            {"type":"pre","offset":0,"length":2,"language":"rust"}
+        ]);
+        let mut bodies = Vec::new();
+        for (index, (tool, args, body, rich)) in [
+            (
+                "telegram_send",
+                json!({"session_key":key,"text":"😀ok","entities":entities}),
+                "😀ok",
+                true,
+            ),
+            (
+                "telegram_ask",
+                json!({"session_key":key,"text":"😀ok","entities":entities}),
+                "😀ok",
+                true,
+            ),
+            (
+                "telegram_send_file",
+                json!({"session_key":key,"path":path,"caption":"😀ok","caption_entities":entities}),
+                "😀ok",
+                true,
+            ),
+            (
+                "telegram_send",
+                json!({"session_key":key,"text":"*literal*"}),
+                "*literal*",
+                false,
+            ),
+            (
+                "telegram_send",
+                json!({"session_key":key,"text":"*literal*","entities":[]}),
+                "*literal*",
+                false,
+            ),
+            (
+                "telegram_ask",
+                json!({"session_key":key,"text":"*literal*"}),
+                "*literal*",
+                false,
+            ),
+            (
+                "telegram_ask",
+                json!({"session_key":key,"text":"*literal*","entities":[]}),
+                "*literal*",
+                false,
+            ),
+            (
+                "telegram_send_file",
+                json!({"session_key":key,"path":path}),
+                "",
+                false,
+            ),
+            (
+                "telegram_send_file",
+                json!({"session_key":key,"path":path,"caption":"*literal*","caption_entities":[]}),
+                "*literal*",
+                false,
+            ),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let response = entity_call(&http, transport.as_deref(), tool, args).await;
+            let mut data = json!({"telegram_chat_id":-101,"outbound_message_id":7+index});
+            if tool == "telegram_ask" {
+                data["status"] = json!("sent");
+                data["reply"] = Value::Null;
+            }
+            let mut result = json!({"isError":false,"structuredContent":data,
+                "content":[{"type":"text","text":data.to_string()}]});
+            if !legacy {
+                result["resultType"] = json!("complete");
+            }
+            assert_eq!(
+                response,
+                json!({"jsonrpc":"2.0","id":response["id"],"result":result})
+            );
+            let text = if body.is_empty() {
+                "🚀\n📁".to_owned()
+            } else {
+                format!("🚀\n📁\n{body}")
+            };
+            let mut expected = json!([
+                {"type":"bold","offset":0,"length":2},
+                {"type":"italic","offset":3,"length":2}
+            ]);
+            if rich {
+                for mut entity in entities.as_array().unwrap().clone() {
+                    entity["offset"] = json!(entity["offset"].as_u64().unwrap() + 6);
+                    expected.as_array_mut().unwrap().push(entity);
+                }
+            }
+            let requests = telegram.requests.lock().unwrap();
+            let request = &requests[index];
+            if tool == "telegram_send_file" {
+                assert_eq!(request.method, "/botSynthetic/sendDocument");
+                assert_eq!(request.part("caption"), text.as_bytes());
+                assert_eq!(
+                    serde_json::from_slice::<Value>(request.part("caption_entities")).unwrap(),
+                    expected
+                );
+                assert_eq!(request.part("document"), b"synthetic report");
+            } else {
+                assert_eq!(request.method, "/botSynthetic/sendMessage");
+                assert_eq!(
+                    serde_json::from_slice::<Value>(&request.body).unwrap(),
+                    json!({"chat_id":-101,"text":text,"entities":expected})
+                );
+            }
+            bodies.push(text);
+        }
+        let sql = rusqlite::Connection::open(&fixture.config.storage.path).unwrap();
+        let saved: Vec<String> = sql
+            .prepare("SELECT body FROM journal_records ORDER BY message_id")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(saved, bodies);
+    }
+}
+
+#[tokio::test]
+async fn invalid_body_entities_have_no_send_route_journal_activity_or_wait_admission_effects() {
+    for legacy in [false, true] {
+        let mut fixture = Fixture::new();
+        fixture.config.history.enabled = true;
+        fixture.config.limits.waiters = 1;
+        let auth = fixture.auth();
+        let telegram = Telegram::new(&fixture.config, vec![]).await;
+        let database = Arc::new(Mutex::new(
+            Database::open_with_history(
+                &fixture.config.storage,
+                &fixture.config.limits,
+                &fixture.config.history,
+                true,
+            )
+            .unwrap(),
+        ));
+        let handler = Arc::new(
+            McpHandler::new(database.clone(), telegram.client.clone(), &fixture.config).unwrap(),
+        );
+        let mut http = fixture.serve(handler, Some(&auth)).await;
+        let mut headers = http::HeaderMap::new();
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_str(&format!("Bearer {TOKEN}")).unwrap(),
+        );
+        http.client = reqwest::Client::builder()
+            .no_proxy()
+            .default_headers(headers)
+            .build()
+            .unwrap();
+        let transport = if legacy {
+            Some(http.initialize(LEGACY_VERSION).await.0)
+        } else {
+            None
+        };
+        let session = http.register(json!({"title":"Session"})).await;
+        let key = session["session_key"].as_str().unwrap();
+        let before = database.lock().unwrap().session(key).unwrap();
+        // Fill waiter capacity: invalid questions must still fail validation first.
+        let _interest = database
+            .lock()
+            .unwrap()
+            .inbox_notifications
+            .waiter(key.to_owned())
+            .unwrap();
+        let path = fixture.directory.join("rich.txt");
+        fs::write(&path, b"synthetic report").unwrap();
+        for (entities, protocol_error) in [
+            (json!([{"type":"bold","offset":1,"length":1}]), false),
+            (json!([{"type":"bold","offset":4,"length":1}]), false),
+            (
+                json!([{"type":"bold","offset":0,"length":2,"language":"private"}]),
+                false,
+            ),
+            (json!([{"type":"text_link","offset":0,"length":2}]), false),
+            (
+                json!([{"type":"code","offset":0,"length":4},{"type":"italic","offset":2,"length":2}]),
+                false,
+            ),
+            (json!([{"type":"custom_emoji","offset":0,"length":2}]), true),
+            (json!([{"type":"date_time","offset":0,"length":2}]), true),
+            (json!([{"type":"bold","offset":-1,"length":1}]), true),
+            (json!([{"type":"bold","offset":0,"length":1.5}]), true),
+            (
+                json!([{"type":"bold","offset":0,"length":2,"private":true}]),
+                true,
+            ),
+            (
+                json!(vec![json!({"type":"bold","offset":0,"length":2}); 101]),
+                false,
+            ),
+        ] {
+            for tool in ["telegram_send", "telegram_ask", "telegram_send_file"] {
+                let args = if tool == "telegram_send_file" {
+                    json!({"session_key":key,"path":path,"caption":"😀ok","caption_entities":entities})
+                } else {
+                    json!({"session_key":key,"text":"😀ok","entities":entities})
+                };
+                let response = entity_call(&http, transport.as_deref(), tool, args).await;
+                if protocol_error {
+                    assert_eq!(response["error"]["code"], -32602);
+                } else {
+                    failure(&response["result"], "REQUEST_INVALID");
+                }
+                assert!(!response.to_string().contains("private"));
+            }
+        }
+        assert_eq!(database.lock().unwrap().session(key).unwrap(), before);
+        assert_eq!(telegram.request_count(), 0);
+        let sql = rusqlite::Connection::open(&fixture.config.storage.path).unwrap();
+        for table in ["message_routes", "journal_records"] {
+            assert_eq!(
+                sql.query_row(&format!("SELECT count(*) FROM {table}"), [], |row| row
+                    .get::<_, i64>(0))
+                    .unwrap(),
+                0
+            );
+        }
+    }
+}
+
 pub(crate) fn assert_tool_catalog(catalog: &Value) {
     use crate::dto::{
         AckRequest, AckResult, AskResult, GetAttachmentRequest, GetAttachmentResult,

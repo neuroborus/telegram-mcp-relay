@@ -30,7 +30,7 @@ async fn current_guidance_is_read_only_self_contained_and_never_enforces_a_hands
         )
         .await;
     let report = modern["result"]["structuredContent"].clone();
-    assert_eq!(report["version"], 1);
+    assert_eq!(report["version"], 2);
     let inventory: Vec<Value> = catalog
         .as_array()
         .unwrap()

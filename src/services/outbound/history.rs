@@ -61,7 +61,15 @@ async fn confirmed_snapshots_and_documents_survive_cancellation_rename_restart_a
         let service = mock.service(&fixture, &database);
         let sender = service.clone();
         let key = session.session_key.clone();
-        let caller = tokio::spawn(async move { sender.send_text(&key, "Literal *🚀*").await });
+        let entities: Vec<MessageEntity> = serde_json::from_value(json!([
+            {"type":"bold","offset":0,"length":7}
+        ]))
+        .unwrap();
+        let caller = tokio::spawn(async move {
+            sender
+                .send_text_with_entities(&key, "Literal *🚀*", &entities)
+                .await
+        });
         mock.seen.recv().await.unwrap();
         database
             .lock()

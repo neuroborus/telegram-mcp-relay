@@ -484,14 +484,24 @@ are omitted. Both are redacted display labels. Directory context is opt-in metad
 file authorization, a filesystem instruction, host identity or routing input. Avoid personal
 absolute paths; the relay does not infer a working directory or a host conversation title.
 
-`format_text`, `format_caption` and `format_notice` return validated literal text plus native
+`format_text`, `format_caption` and `format_notice` return validated verbatim text plus native
 bold title and optional italic directory spans. The title is the first line, the directory
 is the optional second line, and a nonempty body follows one newline. An empty caption retains
 just these headers. Every service notice begins with exactly `🔧 ` before any title or body;
 unknown-session notices have no title/directory. Entity offsets/lengths use UTF-16 code units,
 including that prefix. Text uses `entities`; multipart documents use `caption_entities`.
 No `parse_mode`, Markdown/HTML parser, body splitting or truncation is introduced. Callers
-supply only the literal body and never reproduce server-owned headers.
+supply the body and never reproduce server-owned headers. Optional `entities` on send/ask and
+`caption_entities` on send_file add explicit native formatting; omitted/empty arrays stay literal.
+`domain::outbound::entities` owns the shared typed entity schema and deterministic validator:
+at most 100 spans, positive lengths, checked UTF-16 ranges on scalar boundaries, kind-specific
+bounded metadata and official containment rules. It supports bold/italic/underline/strikethrough/
+spoiler, code/pre, text_link and both quote kinds. Code/pre never overlap; overlaps otherwise
+require containment and a styling span. Other non-style entities cannot contain each other.
+The existing reqwest URL parser validates absolute allowed-scheme links without effects.
+No crate, persistence schema or markup parser is added. Validated body offsets shift by the actual
+framing length; caller spans cannot reach header entities. Shape/type failures remain safe MCP
+invalid-params errors, while range/metadata/nesting failures return structured `REQUEST_INVALID`.
 
 Before allocating final output or admitting a send, these functions count every visible
 scalar and UTF-16 unit: prefix, title, directory, separators and full body. They enforce the
@@ -500,8 +510,9 @@ and 1,024 for captions. A very large single title grapheme can cause rejection e
 empty body. Native entity metadata adds no visible characters. These contracts follow the
 [Telegram entity](https://core.telegram.org/bots/api#messageentity),
 [text](https://core.telegram.org/bots/api#sendmessage) and
-[document](https://core.telegram.org/bots/api#senddocument) interfaces. Synthetic formatting
-proofs passed with complete composition C6. The dated HOST trial accepted native-framed text
+[document](https://core.telegram.org/bots/api#senddocument) interfaces. Earlier header-only
+formatting proofs passed with complete composition C6. Explicit body-entity validation results
+remain pending. The dated HOST trial accepted native-framed text
 and a document; independent visual rendering and live Unicode-boundary experiments were not performed.
 
 `TEXT_TOO_LONG` carries serializable details: `limit=1000`, `actual_characters`,
@@ -727,7 +738,8 @@ is claimed. Decimal MB is the conservative interpretation used by configuration 
 ## Document delivery
 
 `OutboundService::send_file` consumes a `ValidatedFile` from the confined opener and formats
-the complete literal caption with native title/directory entities before admission. Both the
+the complete verbatim caption with isolated native title/directory and optional body entities
+before admission. Both the
 final 1,000-scalar and 1,024-UTF-16-unit limits apply; an empty description leaves only the headers.
 Text and documents share send admission, metadata reservations, detached task ownership and
 the successful-send transaction. A confirmed document commits a composite `Document` route
@@ -914,6 +926,8 @@ or permission to execute content. Complete composition/release checks passed; th
 ## Current agent guidance
 
 `telegram_guidance({})` is a typed, read-only tool available without an application session.
+Its current contract version is 2, including explicit native body/caption entities and literal
+defaults; the version-1 HOST observations below remain historical.
 `services::guidance` projects only nonsecret effective capabilities, finite limits and a
 versioned self-contained policy. The handler adds its actual production tool names/descriptions
 and supported protocol revisions; the independently maintained expected DTO catalog remains
@@ -928,8 +942,8 @@ complete scalar/caption limits, explicit prepared-file reports, ask/send-file-th
 resend, startup/notification inbox recovery, current fences and saved-pair reconciliation,
 scoped sends, proactive focused communication, shared observation and daemon-local files.
 The [consumer policy](AGENT_POLICY.md) matches accepted specification section 14. Run-frozen
-contributor guidance stays unchanged until the authorized post-release follow-up. Guidance
-source/HTTP proofs passed with complete C6. The separate
+contributor guidance stays unchanged until the authorized post-release follow-up. Earlier
+version-1 guidance source/HTTP proofs passed with complete C6. The separate
 [HOST trial](MEASUREMENTS.md#agent-experience-host-acceptance) read guidance version 1 through
 both protocols; a fresh Codex metadata probe listed eleven tools without a model turn.
 

@@ -8,7 +8,7 @@ use tokio_util::task::TaskTracker;
 use crate::{
     clients::telegram::{SentMessage, TelegramClient},
     config::Config,
-    domain::outbound::{FormattedMessage, format_caption, format_text},
+    domain::outbound::{FormattedMessage, MessageEntity, format_caption, format_text},
     error::{AppError, TelegramError},
     repositories::{
         AttachmentInput, AttachmentKind, ConfirmedMessage, Database, MessageSource,
@@ -104,7 +104,17 @@ impl OutboundService {
     /// Validate the session and complete plain text before reserving capacity or sending.
     /// Success means Telegram accepted the message AND its reply route committed.
     pub async fn send_text(&self, session_key: &str, body: &str) -> Result<SentMessage, AppError> {
-        self.send(session_key, body, None).await
+        self.send_text_with_entities(session_key, body, &[]).await
+    }
+
+    /// Body-relative native formatting; validation precedes all send/storage effects.
+    pub async fn send_text_with_entities(
+        &self,
+        session_key: &str,
+        body: &str,
+        entities: &[MessageEntity],
+    ) -> Result<SentMessage, AppError> {
+        self.send(session_key, body, entities, None).await
     }
 
     /// Consume the original confined handle; no caller path is reopened or persisted.
@@ -115,13 +125,26 @@ impl OutboundService {
         file: ValidatedFile,
         caption: &str,
     ) -> Result<SentMessage, AppError> {
-        self.send(session_key, caption, Some(file)).await
+        self.send_file_with_entities(session_key, file, caption, &[])
+            .await
+    }
+
+    /// Caption-relative native formatting; the confined original file remains streamed.
+    pub async fn send_file_with_entities(
+        &self,
+        session_key: &str,
+        file: ValidatedFile,
+        caption: &str,
+        entities: &[MessageEntity],
+    ) -> Result<SentMessage, AppError> {
+        self.send(session_key, caption, entities, Some(file)).await
     }
 
     async fn send(
         &self,
         session_key: &str,
         body: &str,
+        entities: &[MessageEntity],
         file: Option<ValidatedFile>,
     ) -> Result<SentMessage, AppError> {
         // Track before admission: close/wait cannot miss a task that already has a permit,
@@ -132,15 +155,15 @@ impl OutboundService {
             let session = database.session(session_key)?;
             let delivery = if let Some(file) = file {
                 Delivery::Document(
-                    format_caption(&session.title, session.directory_label.as_ref(), body)?,
+                    format_caption(&session.title, session.directory_label.as_ref(), body)?
+                        .with_body_entities(body, entities)?,
                     file,
                 )
             } else {
-                Delivery::Text(format_text(
-                    &session.title,
-                    session.directory_label.as_ref(),
-                    body,
-                )?)
+                Delivery::Text(
+                    format_text(&session.title, session.directory_label.as_ref(), body)?
+                        .with_body_entities(body, entities)?,
+                )
             };
             let permit = Arc::clone(&self.admission)
                 .try_acquire_owned()

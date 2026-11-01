@@ -1,8 +1,8 @@
 # Telegram MCP Bridge — Technical Specification and Implementation Task
 
-**Status:** Accepted requirements, including the 2026-10-31 agent-experience revision  
+**Status:** Accepted requirements, including the 2026-11-01 native body-entity revision  
 **Original date:** 2026-10-29  
-**Revision date:** 2026-10-31  
+**Revision date:** 2026-11-01  
 **Preferred implementation:** Rust  
 **Target:** One lightweight, local, vendor-neutral MCP server shared by multiple agent sessions  
 **Primary user interface:** A single Telegram bot
@@ -26,6 +26,10 @@ See [architecture](../ARCHITECTURE.md) for implementation status and
 and bounded pre-extension HOST text-flow observations do not establish extension acceptance.
 The [public API reference](../../README.md#public-tools-and-results) documents actual DTOs,
 errors and handle permissions; illustrative logical sketches below do not replace those schemas.
+
+The owner separately authorized explicit native body/caption entities on 2026-11-01, superseding
+literal-body-only restrictions. Omitted/empty entities retain literal behavior. This revision
+does not claim new HOST/measurement results or change run-frozen contributor guidance.
 
 ---
 
@@ -60,7 +64,7 @@ Keep resource usage extremely low: one native process, minimal allocations and C
 - One local Streamable HTTP MCP endpoint serving multiple simultaneous clients.
 - One Telegram bot and one or more explicitly allowlisted user/chat IDs (optimized for a single private chat).
 - Telegram long polling with `getUpdates`, with one outstanding request; no inbound public endpoint.
-- Registration of stable agent sessions, accurate human-readable titles and optional bounded directory display metadata; native bold/italic header entities with literal bodies.
+- Registration of stable agent sessions, accurate human-readable titles and optional bounded directory display metadata; isolated native header entities and optional explicit body formatting.
 - Short text sending with a strict 1,000-character limit, plus document sending with large-file-safe streaming and outbound message-to-session routing.
 - Telegram Reply routing to the original session, including replies to sent documents.
 - Durable inbox with at-least-once recoverability, explicit processing state, deduplication, and acknowledgments.
@@ -193,12 +197,32 @@ Architecture review and implementation report.
 ```
 
 The code blocks show visible text; the server renders each title bold. If a directory label
-is present, insert its italic line between title and literal body. Use Telegram `entities`
+is present, insert its italic line between title and verbatim body. Use Telegram `entities`
 for text and `caption_entities` for documents, without `parse_mode` or a new Markdown/HTML
 parser. Server-owned bold/italic spans use **UTF-16 code-unit offsets and lengths**, including
 any preceding service prefix; bytes, scalars and graphemes are not entity offsets. Preserve
-the body literally, including markup-looking characters, with no title/directory/body markup
-injection. Callers supply the body, never manually reproduce the header or its entities.
+the body verbatim, including markup-looking characters, with no implicit markup interpretation.
+Callers supply the body, never manually reproduce the header or its entities.
+
+Accept optional body-relative `entities` on `telegram_send`/`telegram_ask` and
+`caption_entities` on `telegram_send_file`. Omitted/empty arrays retain literal behavior and
+existing required fields on both protocols. Each list has at most 100 entities with `type`,
+`offset` and positive `length` in UTF-16 units; start/end must be scalar boundaries inside the
+supplied body/caption. Supported kinds: bold, italic, underline, strikethrough, spoiler, code,
+pre, text_link, blockquote and expandable_blockquote. Only pre accepts optional `language`
+(1–64 bytes, no whitespace/controls); only text_link requires `url` (absolute http/https/tg/
+mailto/tel, at most 2,048 bytes, no whitespace/controls). Reject unsupported kinds and unknown
+fields; special mention/hashtag/cashtag/bot_command/url/email/phone_number/text_mention/
+custom_emoji/date_time entities are unsupported. Ordinary literal text remains allowed.
+Intersecting spans require full containment and at least one bold/italic/underline/
+strikethrough/spoiler entity. Code/pre cannot overlap; quotes cannot nest and other non-style
+entities cannot contain each other. Validate checked arithmetic, ranges and metadata before
+send/route/journal/activity effects, then shift body spans beyond isolated server headers.
+Return safe structured errors without sending partial content. Example arguments to send:
+
+```json
+{"session_key":"SAVED_KEY","text":"OK","entities":[{"type":"bold","offset":0,"length":2}]}
+```
 
 Use concise caller-owned cues where relevant: ❓ question, ⏳ waiting, 🔄 progress, ✅ success,
 ⚠️ warning, ❌ error and 📎 file. This is guidance, not a new tool parameter or routing rule.
@@ -786,7 +810,7 @@ Consequences must be documented: Reply to a bot message after its route expires 
 - Shared-history capture/reads require explicit opt-in, MCP authentication and current chat/user authorization. Shared content/display IDs never disclose other sessions' private credentials, fences or recovery handles and cannot authorize inbox mutation. Revalidate filters, cursors and attachment handles against current authorization/retention.
 - Limit request sizes, incoming Telegram payload parsing, message lengths (including the stricter 1,000-character outbound cap), attachment sizes, and concurrency. Enforce bounds instead of buffering unlimited data.
 - Do not leak full file paths, session keys, or sensitive message bodies into user-facing service notifications.
-- Use only server-owned native entities for headers, preserving literal title/directory/body content without a Markdown/HTML parser. Display metadata is never filesystem authority or a routing discriminator.
+- Keep server-owned header entities isolated from validated explicit body/caption entities. Preserve verbatim title/directory/body characters without a Markdown/HTML parser. Display metadata is never filesystem authority or a routing discriminator.
 - Separate approved outbound source roots from private pinned download roots. Download only through validated retained handles and official fixed-origin getFile paths, with exclusive safe files, stream/disk/concurrency/time limits and bridge-owned cleanup. Do not accept caller URLs, Telegram file IDs or unrestricted destinations. Redact token-bearing URLs and upstream error bodies.
 - Protect the journal, provenance and download bookkeeping with the same SQLite permissions/migration/restart rules as the inbox. Bound metadata, retained bodies, queries, physical database/sidecar size and download disk usage; log no full shared conversations, secrets or file contents by default.
 
@@ -886,7 +910,11 @@ this requirement revision does not change run-frozen contributor instructions or
 - Optional `directory_label` is opt-in display context only: prefer a short nonpersonal
   label; omit unavailable/blank values. It grants no file, identity or routing authority.
 - The server owns the bold title, optional italic directory and header entities.
-  Supply literal bodies/captions; do not manually repeat headers or add service notices.
+  Supply verbatim bodies/captions; do not manually repeat headers or add service notices.
+  For native formatting pass optional body-relative `entities` on send/ask or
+  `caption_entities` on send_file; omitted/empty arrays remain literal, with no Markdown/HTML
+  parsing. Each list has at most 100 spans with UTF-16 offsets/positive lengths and valid
+  metadata/nesting; discover the supported kinds and fields through `tools/list`/guidance.
   Cues: ❓ question, ⏳ waiting, 🔄 progress, ✅ success, ⚠️ warning, ❌ error, 📎 file.
   Service voice always begins with the server-owned `🔧 ` prefix.
 - Keep final VISIBLE text/questions/captions within 1,000 Unicode scalars, including all
@@ -994,7 +1022,7 @@ coverage, then reconcile public documentation with actual DTOs and tested capabi
 - [ ] A single Rust process supports at least **three concurrent agent sessions** on one Telegram bot.
 - [ ] Registration uses the actual current title from available public host metadata or an honest explicit fallback; no invented/model title or universal host-discovery claim. Stable identity, same-title isolation and future-only renaming remain intact.
 - [ ] Every agent text/question/document has a native bold normalized title of at most **50 grapheme clusters** and optional italic directory line. Directory labels are normalized to one safe line, reject over 100 normalized scalars, omit absent/blank values and confer no filesystem/routing authority.
-- [ ] Native text/caption entities use correct UTF-16 offsets/lengths, including astral/ZWJ/combining characters and any service prefix. Title, directory and body cannot inject markup; body text remains literal.
+- [ ] Native text/caption entities use correct UTF-16 offsets/lengths, including astral/ZWJ/combining characters and any service prefix. Optional body-relative entities support §4.2's kinds, metadata and nesting without header overlap. Omitted/empty lists remain literal; invalid inputs fail before effects and no implicit markup is parsed.
 - [ ] Every outgoing text/question/document caption is **at most 1,000 Unicode scalar values in its final visible form**, including emoji, service prefix, title, directory and separators; exactly 1,000 scalars are accepted by that policy, 1,001 are rejected before effects, and captions additionally fit **1,024 UTF-16 units** plus other native limits.
 - [ ] The bridge never splits or truncates an oversized message, or silently generates a file: it returns `TEXT_TOO_LONG` with an accurate count and guidance to use `telegram_send_file`.
 - [ ] Agents are instructed to keep chat replies concise and deliver substantial information in a file with a short caption; user-originated Reply text is not restricted by this outbound policy.
@@ -1066,7 +1094,7 @@ Deliver:
 4. Backward-compatible MCP tools/resources/subscriptions plus after-send wait, authorized history, attachment access and versioned guidance, with actual catalog/protocol coverage documented.
 5. Telegram client with one long poll, native header entities, exact service prefix, strict final scalar/UTF-16 validation, streamed uploads and confined bounded lazy downloads.
 6. Unit + integration tests (mock Telegram API; avoid sending real user messages in CI).
-7. Self-contained README/owning docs covering every actual tool/resource/DTO/handle, errors/recovery, setup, BotFather token, allowlists, MCP URL, secrets/permissions, real-title identity, literal body/native headers, explicit waits/deadlines/host limits, claims/fences/reconciliation, service notices, history privacy/coverage and safe daemon-local files.
+7. Self-contained README/owning docs covering every actual tool/resource/DTO/handle, errors/recovery, setup, BotFather token, allowlists, MCP URL, secrets/permissions, real-title identity, explicit body entities/literal defaults/isolated native headers, explicit waits/deadlines/host limits, claims/fences/reconciliation, service notices, history privacy/coverage and safe daemon-local files.
 8. A short `AGENTS.md` or copyable operating-policy snippet from §14.
 9. Example `systemd --user` unit and protected environment-file approach (optional to run, not required to build).
 10. A concise historical benchmark summary with build target, RSS, idle CPU, peak file-upload RSS, binary size and original evidence boundaries preserved. New behavior requires actual validation and later authorized HOST acceptance; historical figures are not new-runtime performance claims.
@@ -1102,7 +1130,7 @@ Implementation must verify current upstream versions and behavior rather than tr
 | One compact Rust native service, low idle RAM/CPU, local-only | §§1–3, 13, 16 |
 | Universal MCP, one Telegram bot for multiple agents, no vendor adapters | §§1–3, 5–6 |
 | Real host title or honest fallback, stable identity and future-only presentation | §§4.1, 5.2, 14, 16 |
-| Native bold 50-grapheme title/italic opt-in 100-scalar directory; literal body, UTF-16 entities | §§4.1–4.2, 9, 14, 16 |
+| Native bold 50-grapheme title/italic opt-in 100-scalar directory; optional explicit body formatting, literal defaults and UTF-16 entities | §§4.1–4.2, 9, 14, 16 |
 | Maximum 1,000 outgoing text characters including header; use files for details | §§4.2, 5, 9, 14, 16 |
 | Reply to any agent text/document routes to original session | §§4.3, 6, 9–10 |
 | MCP resource notifications remain active with or without a pending wait | §§5–6, 16 |

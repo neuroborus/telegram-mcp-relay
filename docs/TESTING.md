@@ -128,6 +128,17 @@ The bounded Python mock now accepts the ordered `caption_entities` part and vali
 span boundaries without buffering documents. These cases passed in the accepted composition
 C6 above; live rendering remains unverified.
 
+## Explicit native body-entity regressions
+
+Domain cases cover supported kinds, metadata bounds, surrogate/range/overflow failures,
+containment/overlap and code/pre/quote restrictions. Actual MCP calls on both revisions cover
+rich send/ask JSON and document multipart entities, body-relative UTF-16 shifts with astral
+headers/directories, exact protocol envelopes, omitted/empty-array literal compatibility and
+actual visible-text journaling. Invalid schemas, metadata, ranges and nesting leave HTTP sends,
+routes, journal and activity unchanged; saturated waiter capacity cannot mask invalid questions.
+The existing cancellation/rename/restart journal fixture also sends explicit entities.
+These are source-defined regressions; their required C1–C6 FINALIZE results remain pending.
+
 ## After-send wait regressions
 
 After-send wait coverage in `src/routes/wait.rs` defines text/document catch-up without signals
@@ -235,7 +246,8 @@ exact modern/legacy envelopes, unchanged SQLite bytes and zero Telegram effects.
 can still register without a handshake; later guidance discloses no new private session data.
 `services::guidance` tests nondefault lower limits, disabled features, database history opt-in
 and exclusion of synthetic private settings/paths/allowlist identities. Self-contained policy
-content is reviewed against specification §§5.4/14; these cases passed in accepted complete C6.
+content is reviewed against specification §§5.4/14; the earlier version-1 cases passed in
+accepted complete C6. Version-2 body-entity contract validation remains pending.
 Source inspection does not establish named-client, live Telegram, host concurrency or idle wake.
 
 ## Final mixed-protocol composition regressions
