@@ -15,8 +15,10 @@ hold blocking database guards across `.await` or buffer whole uploads. Verify cu
 SDK/API versions and choose minimal crate features when introducing dependencies.
 
 Protect distinct Unicode contracts: title graphemes, final outgoing Unicode scalar count,
-and the native caption UTF-16 bound. Native entity offsets also use UTF-16; preserve literal
-bodies and server-owned bold title/optional italic directory/service `🔧 ` prefix. Display
+and the native caption UTF-16 bound. Native entity offsets also use UTF-16. Validate bounded
+body-relative entity ranges, metadata and nesting before effects, then shift them past the
+server-owned bold `[title]`, optional italic directory and blank line. Preserve literal defaults,
+50-grapheme titles with a reserved truncation ellipsis, and the service `🔧 ` prefix. Display
 metadata never authorizes files or routing. Validate complete visible output before effects.
 Persist authorized observations, routed replies/provenance and cursor atomically before
 signaling both subscribers and waiters. All reply-claiming consumers share one atomic fence;
@@ -27,8 +29,9 @@ interest before querying durable state; timeout/cancellation preserves late repl
 no permission. Shared history is opted-in observation, never another session's claim authority.
 Download only from retained authorized opaque handles through the fixed cloud origin into
 private pinned owned storage, with bounded streams/reservations and owned-only cleanup.
-Keep `telegram_guidance` and tool descriptions aligned with actual schemas/capabilities, without
-private settings, protocol adapters or host wake/concurrency promises.
+Keep the concise server instructions, `telegram_guidance` and tool descriptions aligned with
+actual schemas/capabilities, without private settings, protocol adapters or host wake/concurrency
+promises.
 
 Return typed, structured errors with stable safe codes; preserve MCP protocol errors. Use
 redacted tracing and safe request correlation. Enforce loopback Host/Origin policy, explicit

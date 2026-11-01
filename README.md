@@ -7,6 +7,12 @@ claiming replies; `telegram_inbox`, `telegram_ask` and `telegram_wait` share the
 path. Opt-in shared history and lazy attachment downloads preserve private inbox ownership.
 The specification calls the product **Telegram MCP Bridge**.
 
+Telegram is also a convenient way to exchange files with an agent while working through a
+remote bridge, an SSH connection or a tmux session. Send attachments to the agent and receive
+reports, patches or generated files in Telegram without moving them through the terminal.
+File access still uses the relay host's filesystem; separate hosts do not automatically share
+local paths.
+
 ## Install and connect
 
 Use Linux kernel 5.6+ with permitted `openat2`, Rust 1.89+ and a native C toolchain for bundled

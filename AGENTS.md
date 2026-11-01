@@ -95,9 +95,14 @@ Register/resume a stable external identity using the real conversation title fro
 public host metadata, with an honest fallback. Preserve the returned private session key.
 Optional short `directory_label` is display context, never filesystem authority.
 
-The server owns the native bold title, optional italic directory, separators and exact leading
-`🔧 ` on service notices. Supply literal bodies/captions without repeating headers or inventing
-Markdown parsing. Final text/questions/captions fit 1,000 Unicode scalars including all visible
+The server publishes concise interaction instructions before tool calls on both supported
+protocols; `telegram_guidance` supplies the full current policy and effective limits.
+The server owns the native bold `[title]`, optional italic directory, one blank line before a
+nonempty body and exact leading `🔧 ` on service notices. Titles fit 50 graphemes, including
+`…` when new input is shortened. Supply bodies/captions without repeating headers. Request
+formatting with optional body-relative UTF-16 `entities` on send/ask or `caption_entities` on
+send_file; omitted/empty arrays preserve literal text. No implicit Markdown/HTML parsing.
+Final text/questions/captions fit 1,000 Unicode scalars including all visible
 framing/emoji; captions also fit 1,024 UTF-16 units. Never split or truncate a report: prepare
 a file in an approved root and send it with a short caption.
 

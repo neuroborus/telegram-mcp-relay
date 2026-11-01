@@ -20,8 +20,11 @@ through [delegation](../delegation/SKILL.md); find required commands in
 - Cover 1,000/1,001 final scalar boundaries and native caption bounds, same-title interleaved
   routes, durable cursor atomicity, token fencing, event/wait races, cancellation/restart,
   processing notices, retention, authorization and bounded file streaming as features land.
-- Preserve native entity UTF-16 spans and literal bodies, post-send waits without resend,
-  shared-history read-versus-claim isolation, sparse keyset/response limits, retained provenance
+- Cover native UTF-16 entity spans, literal defaults, optional body/caption formatting and
+  effect-free rejection of invalid ranges/metadata/nesting. Preserve bracketed bold headers,
+  bounded title ellipses, blank-line separation and isolated shifted body spans across both
+  protocols, including server instructions available before tool calls. Retain post-send waits
+  without resend, shared-history read-versus-claim isolation, sparse keyset/response limits, retained provenance
   and confined owned download cancellation/restart. Synchronize startup readiness before
   advancing a scheduler's test clock; retain bounded between-transaction yielding.
 - Update the independently maintained expected complete tool catalog and DTO input/output
