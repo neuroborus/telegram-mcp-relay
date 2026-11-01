@@ -13,7 +13,7 @@ Keep implementation status explicit; requirements and intended structure are not
 | [Agent operating policy](AGENT_POLICY.md) | Copyable section 14 policy, guidance-first interaction and durable reply/file recovery | Installed-agent interaction guidance changes |
 | [Resource measurements](MEASUREMENTS.md) | Recorded HOST benchmark, user-unit verification outcome, release/build identities and capture prerequisites | Measurement tooling or operational evidence changes |
 | [Testing](TESTING.md) | Required gates, recorded validation provenance, specification acceptance/traceability and deliverable coverage | A check, receipt or verification boundary changes |
-| [Development](DEVELOPMENT.md) | Runner setup, task/plan/execution lifecycle and Git boundaries | Operator workflow or runner configuration changes |
+| [Development](DEVELOPMENT.md) | Inline portable Runner setup, exclusive ignored-config creation, task/plan/execution lifecycle and Git boundaries | Operator workflow or runner configuration changes |
 
 Root [README.md](../README.md) owns the public tool/resource and DTO reference, handle permissions,
 error/recovery categories, synthetic workflows and current availability;

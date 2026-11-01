@@ -76,18 +76,36 @@ def main() -> int:
         if not path.is_symlink() or path.resolve() != (ROOT / expected).resolve():
             errors.append(f"{relative}: must be a symlink to {expected}")
 
+    template = ROOT / "agent-runner.example.json"
+    if template.exists() or template.is_symlink():
+        errors.append("agent-runner.example.json: use the inline DEVELOPMENT example instead")
+
     try:
-        config = json.loads((ROOT / "agent-runner.example.json").read_text())
+        development = (ROOT / "docs/DEVELOPMENT.md").read_text(encoding="utf-8")
+        examples = re.findall(
+            r"(?ms)^<!-- runner-config-example -->\n```json\n(.*?)\n```[ \t]*$",
+            development,
+        )
+        if len(examples) != 1:
+            raise ValueError("expected one marked inline Runner configuration")
+        config = json.loads(examples[0])
         if config["schemaVersion"] != 1 or config["artifactRoot"] != "LOCAL_ARTIFACTS":
-            errors.append("agent-runner.example.json: invalid schema/artifact root")
+            errors.append("docs/DEVELOPMENT.md: invalid Runner schema/artifact root")
+        if config["defaultBackend"] != "codex":
+            errors.append("docs/DEVELOPMENT.md: invalid Runner default backend")
+        for setting in ("defaultProfile", "defaultModel", "defaultEffort", "defaultContextSize"):
+            if config[setting] != "current":
+                errors.append(f"docs/DEVELOPMENT.md: {setting} must inherit current settings")
         for pipeline in ("plan-authoring", "plan-execution", "polishing"):
             if config["pipelines"][pipeline]["mode"] != "independent":
-                errors.append(f"agent-runner.example.json: {pipeline} must be independent")
+                errors.append(f"docs/DEVELOPMENT.md: {pipeline} default must be independent")
         for pipeline in ("plan-execution", "polishing"):
             if config["pipelines"][pipeline]["finalization"] != "auto":
-                errors.append(f"agent-runner.example.json: {pipeline} must discover finalization")
+                errors.append(f"docs/DEVELOPMENT.md: {pipeline} must discover finalization")
+            if config["pipelines"][pipeline]["trustedChecks"] != []:
+                errors.append(f"docs/DEVELOPMENT.md: {pipeline} must not publish trusted grants")
     except (OSError, ValueError, KeyError, TypeError) as error:
-        errors.append(f"agent-runner.example.json: {error}")
+        errors.append(f"docs/DEVELOPMENT.md: inline Runner configuration: {error}")
 
     if git("check-ignore", "-q", "LOCAL_ARTIFACTS/probe").returncode:
         errors.append("LOCAL_ARTIFACTS/ must be ignored")

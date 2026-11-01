@@ -197,11 +197,14 @@ compilation alone would not establish execution. Historical benchmark evidence s
 
 Run `just check-repo` (or `python3 tools/check_repository.py`) after documentation, skills,
 navigation or repository workflow changes. It checks local Markdown link destinations, required
-skill frontmatter, canonical symlinks, the tracked Runner starter configuration and ignored,
-untracked local artifacts. It uses only Python 3.9+ and Git, no third-party modules. It checks
+skill frontmatter, canonical symlinks, the marked inline Runner configuration in DEVELOPMENT
+and ignored, untracked local artifacts. It uses only Python 3.9+ and Git, no third-party modules. It checks
 workspace files including untracked nonignored files; it does not validate external URLs,
 Markdown anchors, full YAML schemas or the installed Runner's complete configuration schema.
 Runner itself validates the operational configuration when starting a run.
+The checker requires the former root JSON template to remain absent. It validates the portable
+example's schema/artifact root, current inherited settings, independent defaults, automatic
+finalization and empty trusted grants without reading private ignored configurations.
 
 During skill authoring, also use the available skill-creator `quick_validate.py` if installed.
 Its environment-specific path is an operator detail, not a portable required command.

@@ -7,21 +7,90 @@ work requires a Rust toolchain with rustfmt/Clippy and access to its declared de
 Agent Runner and a supported configured backend are development tools, not application runtime
 dependencies. The resulting daemon must not require Node.js.
 
-The tracked [agent-runner.example.json](../agent-runner.example.json) is the portable starter.
-For a fresh checkout create its ignored operational copy without replacing an existing file:
+### Portable Runner configuration
+
+The complete portable starter lives inline here; there is no separate tracked JSON template.
+It uses project schema version 1, `LOCAL_ARTIFACTS` as the artifact root, Codex as the backend
+and `current` profile/model/effort/context settings inherited from the installed environment.
+All three pipelines default to explicit `independent` mode. Execution/polishing discover
+`.agents/skills/finalization/SKILL.md` through `finalization: "auto"`; trusted-check aliases
+start empty. Backend credentials, machine paths, command vectors and root-only settings do
+not belong in this portable example.
+
+<!-- runner-config-example -->
+```json
+{
+  "schemaVersion": 1,
+  "artifactRoot": "LOCAL_ARTIFACTS",
+  "defaultBackend": "codex",
+  "defaultProfile": "current",
+  "defaultModel": "current",
+  "defaultEffort": "current",
+  "defaultContextSize": "current",
+  "pipelines": {
+    "plan-authoring": {
+      "mode": "independent",
+      "preferredCommitLineLimit": 900
+    },
+    "plan-execution": {
+      "mode": "independent",
+      "finalization": "auto",
+      "trustedChecks": []
+    },
+    "polishing": {
+      "mode": "independent",
+      "finalization": "auto",
+      "trustedChecks": []
+    }
+  }
+}
+```
+
+For a fresh trusted checkout, run this from the repository root to create its ignored
+operational configuration. The script rejects a symlinked artifact directory and uses exclusive
+creation: an existing destination, including a dangling symlink, is never overwritten. Inspect
+existing directory ownership/permissions first; this recipe does not repair them.
 
 ```bash
-mkdir -p LOCAL_ARTIFACTS
-test -f LOCAL_ARTIFACTS/agent-runner.json || cp agent-runner.example.json LOCAL_ARTIFACTS/agent-runner.json
+umask 077
+python3 -B - <<'PY'
+import json
+from pathlib import Path
+import re
+
+source = Path("docs/DEVELOPMENT.md").read_text(encoding="utf-8")
+examples = re.findall(
+    r"(?ms)^<!-- runner-config-example -->\n```json\n(.*?)\n```[ \t]*$", source
+)
+if len(examples) != 1:
+    raise SystemExit("Expected one marked inline Runner configuration.")
+json.loads(examples[0])
+directory = Path("LOCAL_ARTIFACTS")
+directory.mkdir(mode=0o700, exist_ok=True)
+if directory.is_symlink() or not directory.is_dir():
+    raise SystemExit("LOCAL_ARTIFACTS must be a real directory.")
+with (directory / "agent-runner.json").open("x", encoding="utf-8") as destination:
+    destination.write(examples[0] + "\n")
+PY
 git check-ignore LOCAL_ARTIFACTS/agent-runner.json
 ```
 
-The current prepared checkout already has that local copy. It uses project schema version 1,
-`LOCAL_ARTIFACTS` as the artifact root, Codex as the backend and `current` profile/model/effort/
-context settings inherited from the installed environment. All three pipelines use explicit
-`independent` mode. Execution/polishing discover `.agents/skills/finalization/SKILL.md` through
-`finalization: "auto"`; trusted-check aliases start empty rather than inventing local grants.
-Backend credentials, machine paths and root-only Runner settings do not belong in this file.
+If creation reports an existing configuration, preserve and use that file; do not delete it
+to repeat bootstrap. No prepared checkout, existing configuration or trusted grant is assumed.
+The repository checker validates this marked JSON example without reading ignored local settings.
+
+Select trusted-check aliases only from locally established, explicitly authorized Runner
+grants before ownership or at a supported setup boundary. Definitions, exact machine vectors,
+capabilities, provisioning and private settings stay in protected local configuration; copying
+this example grants no command execution capability. Preserve existing configurations, tasks,
+receipts and counters rather than replacing them with starter defaults.
+
+The final-eight agent-experience continuation is an explicit user-selected **lazy** exception:
+fresh `plan-authoring` and `plan-execution` use lazy/current sessions without `sourceSession`.
+Installed Worker convergence and fresh read-only confirmation apply, without an independent
+per-step product-review gate. Full applicable FINALIZE checks and COMMIT ownership remain
+mandatory. This exception does not change the portable independent/current/auto defaults or
+authorize editing a run's resolved configuration.
 
 `LOCAL_ARTIFACTS/` is ignored and must remain untracked. Its configuration and temporary files
 must be regular/confined as required by Runner. Keep durable run state outside both this
@@ -37,13 +106,14 @@ rather than embedding machine policy in tracked instructions.
 2. Put a cohesive task, accepted decisions, source references and explicit Native/HOST gates
    under `LOCAL_ARTIFACTS/tasks/<task>/`. Reference the tracked specification as product
    authority. Planning must cover all mandatory acceptance criteria and deferred optional scope.
-3. Start `plan-authoring` in `independent` mode using `run_start`. Planning is project-read-only;
+3. Start `plan-authoring` using `run_start`, with `independent` as the default unless the user
+   explicitly selects another mode as above. Planning is project-read-only;
    only the Runner-owned resolved clarification/plan paths are writable. Monitor `run_status`,
    `run_activity` and bounded `run_wait`; use `run_respond` only for a real pending question.
 4. Verify the completed reviewed plan and its exact Conventional Commit subjects. Begin
    `plan-execution` against the clean accepted baseline, with explicit task-scoped permission
-   for the planned local commits. Its Worker implements, independent review checks the result,
-   finalization attests required evidence and a separate Runner-authorized COMMIT turn creates
+   for the planned local commits. Its Worker implements, review/confirmation follows the selected
+   mode, finalization attests required evidence and a separate Runner-authorized COMMIT turn creates
    each local commit. Do not replace that lifecycle with a coordinator commit.
 5. Inspect the resulting status, commits, checks and remaining HOST evidence before acceptance.
    A returned run identifier means work started, not that implementation finished. Report actual
@@ -67,7 +137,9 @@ deployment or live Telegram messages.
 Runner freezes its configuration, task/clarification inputs, guidance and check inventory.
 Do not edit them or the owned working tree/index from a supervising session during a run.
 Use supported pause/respond/resume/cancel operations and preserve the persisted run contract.
-Independent review is the default; do not switch to lazy mode or bypass a gate to save time.
+Independent review is the default; honor an explicit user-selected mode established before
+the run freezes. Do not switch modes during ownership or bypass a gate to save time. Lazy
+convergence/confirmation cannot substitute for required validation.
 
 Network, cold dependency caches and socket permissions vary by executor. Use the actual error
 to distinguish an unavailable command from a failed assertion. Recover with supported operator
@@ -115,8 +187,9 @@ a supported verified paused-idle setup boundary. Keep it immutable while owned. 
 configuration, task, plan and guidance files; select a fresh reviewed configuration before
 starting a run that needs different command declarations. Do not weaken isolation or treat
 synthetic capability probes as evidence that product assertions passed. Selected commands
-run only in FINALIZE through their frozen vectors, followed by independent confirmation and
-Runner-owned HANDOFF. Pending HTTP execution claims remain pending until genuine results.
+run only in FINALIZE through their frozen vectors, followed by the selected mode's confirmation
+and Runner-owned COMMIT/HANDOFF as appropriate. Pending HTTP execution claims remain pending
+until genuine results.
 
 ## Release probe ownership
 
