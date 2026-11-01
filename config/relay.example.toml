@@ -18,7 +18,7 @@ allowed_roots = ["/home/synthetic/agent-exports"]
 max_outbound_mb = 50
 
 [downloads]
-# Private storage is implemented; daemon/tool integration follows separately.
+# telegram_get_attachment uses private owned storage; downloads default off.
 # Enable only with existing owned mode-0700 roots, separate from exports and secrets.
 enabled = false
 roots = []

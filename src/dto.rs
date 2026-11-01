@@ -138,6 +138,36 @@ pub struct HistoryAttachment {
     pub expires_at: i64,
 }
 
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(crate = "rmcp::schemars")]
+pub struct GetAttachmentRequest {
+    pub session_key: String,
+    /// Opaque retained own-reply or authorized history handle; never a Telegram ID or URL.
+    pub attachment_handle: String,
+}
+
+#[derive(Serialize, JsonSchema)]
+#[schemars(crate = "rmcp::schemars")]
+pub struct LocalFileIdentity {
+    /// Linux device/inode identities encoded as hexadecimal strings, not Telegram IDs.
+    pub device: String,
+    pub inode: String,
+}
+
+#[derive(Serialize, JsonSchema)]
+#[schemars(crate = "rmcp::schemars")]
+pub struct GetAttachmentResult {
+    pub attachment: HistoryAttachment,
+    pub download_id: String,
+    /// Confined daemon-local file. Remote clients do not share this filesystem.
+    pub path: PathBuf,
+    pub file_identity: LocalFileIdentity,
+    pub size_bytes: u64,
+    /// File expiry, which can precede the retained attachment handle's expiry.
+    pub expires_at: i64,
+}
+
 #[derive(Serialize, JsonSchema)]
 #[schemars(crate = "rmcp::schemars")]
 pub struct HistoryMessage {
@@ -216,6 +246,8 @@ pub struct Reply {
     pub reply_to_bot_message_id: i64,
     pub text_or_caption: Option<String>,
     pub attachment_metadata: Option<serde_json::Value>,
+    /// Safe retained handles. Insufficient legacy provenance yields no downloadable handles.
+    pub attachments: Vec<HistoryAttachment>,
     pub state: DeliveryState,
     pub claimed_at: Option<i64>,
     pub claim_expires_at: Option<i64>,

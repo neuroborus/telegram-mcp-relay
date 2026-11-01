@@ -30,6 +30,7 @@ pub(crate) struct HistoryRecord {
     pub expires_at: i64,
 }
 
+#[derive(Clone)]
 pub(crate) struct HistoryFile {
     pub handle: String,
     pub kind: String,

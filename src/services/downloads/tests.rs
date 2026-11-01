@@ -147,7 +147,7 @@ async fn private_download_composes_the_real_adapter_with_the_reserved_inode() {
         }
     });
     let output = store
-        .download(client, "stored-id".into(), "stable-id".into())
+        .download(client, "stored-id".into(), "stable-id".into(), || Ok(()))
         .await
         .unwrap();
     assert_eq!(output.bytes, 8);
@@ -297,6 +297,29 @@ async fn partial_byte_reservations_hold_until_caller_cancellation_drains_without
     call.abort();
     assert!(call.await.unwrap_err().is_cancelled());
     store.0.tasks.wait().await;
+    assert!(records(&db).is_empty());
+    assert_eq!(fs::read_dir(fixture.root()).unwrap().count(), 0);
+    store.0.tasks.reopen();
+    save(&store, b"capacity recovered").await.unwrap();
+    store.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn canceling_an_unreceived_completed_result_retires_its_owned_file() {
+    let fixture = Fixture::new();
+    let db = fixture.database();
+    let store = fixture.store(db.clone());
+    let mut call = Box::pin(save(&store, b"completed but undisclosed"));
+    // Register the worker, then leave the caller unpolled until its result is queued.
+    tokio::select! { biased;
+        result = &mut call => panic!("request completed before scheduling: {result:?}"),
+        _ = std::future::ready(()) => (),
+    }
+    store.0.tasks.close();
+    store.0.tasks.wait().await;
+    assert!(records(&db)[0].complete);
+    assert_eq!(fs::read_dir(fixture.root()).unwrap().count(), 1);
+    drop(call);
     assert!(records(&db).is_empty());
     assert_eq!(fs::read_dir(fixture.root()).unwrap().count(), 0);
     store.0.tasks.reopen();
@@ -515,6 +538,34 @@ fn shutdown_drains_a_pending_blocking_write_before_unlinking_or_releasing_capaci
             assert!(records(&db).is_empty());
             assert_eq!(fs::read_dir(fixture.root()).unwrap().count(), 0);
         });
+}
+
+#[tokio::test]
+async fn writer_panic_signals_supervision_after_draining_and_retiring_owned_output() {
+    let fixture = Fixture::new();
+    let db = fixture.database();
+    let store = fixture.store(db.clone());
+    let mut maintenance = Box::pin(store.run_maintenance());
+    tokio::select! { biased;
+        result = &mut maintenance => panic!("maintenance ended before work: {result:?}"),
+        _ = std::future::ready(()) => (),
+    }
+    let result = store
+        .materialize(|file, _, _| {
+            Box::pin(async move {
+                file.write_all(b"partial").await.unwrap();
+                panic!("synthetic writer panic");
+            })
+        })
+        .await;
+    assert!(matches!(result, Err(AppError::ServiceStopped)));
+    assert_eq!(maintenance.await.unwrap_err(), AppError::ServiceStopped);
+    assert!(records(&db).is_empty());
+    assert_eq!(fs::read_dir(fixture.root()).unwrap().count(), 0);
+    assert_eq!(
+        store.shutdown().await.unwrap_err(),
+        AppError::ServiceStopped
+    );
 }
 
 #[tokio::test]

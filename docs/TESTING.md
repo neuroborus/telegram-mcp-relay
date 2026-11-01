@@ -28,7 +28,7 @@ handles/display snapshots, redaction, deduplication/restart, independent expiry,
 provenance after disabling/acknowledgment, admission rollback and bounded cleanup/reclamation.
 Storage migration coverage preserves v1–v8 recovery data through v9 and checks transactional
 rollback of failed migrations. Configuration tests reject unsafe/inconsistent history
-budgets. Attachment download tools remain pending.
+budgets. Authorized attachment access has separate source-defined coverage below.
 
 Incoming observation cases in `tests/ingress.rs` define authorized standalone text/document/
 photo capture, absence of unauthorized/unsupported content, unchanged notice/loop/route
@@ -80,7 +80,7 @@ bodies. Writer failure/backpressure, cancellation and whole-operation deadlines 
 errors without automatic replay. Generated chunked bodies use bounded buffers; no live credentials or API
 requests are needed. These cases await the dedicated complete C6 FINALIZE gate; no test
 execution or live attachment acceptance is inferred. Owned-file cleanup and MCP authorization
-remain separate later implementation steps.
+have separate owning coverage below.
 
 ## Private download storage regressions
 
@@ -95,6 +95,19 @@ reject inconsistent budgets and source/secret/storage overlap. Storage migration
 older recovery data through v10, including v9 rollback after late DDL failure. These proofs
 await complete C6 FINALIZE execution; no runtime/filesystem support or live acceptance is
 inferred from source inspection or no-run compilation.
+
+## Authorized attachment tool regressions
+
+Attachment authorization regressions in `src/services/attachments/tests.rs` cover own versus
+shared policy, forged/foreign/expired handles, insufficient legacy provenance, source changes,
+queued-worker revocation, observational projections and revoked chat/user/history authorization.
+`src/routes/attachments.rs` defines actual tool/resource/claim workflows over both protocols,
+strict arguments and the complete independent DTO catalog, confined generated file identities,
+untrusted display names, exact result envelopes and durable-data preservation after an upstream
+failure. Storage tests retain bounded cancellation/shutdown/restart cleanup and add unreceived
+completed-result cancellation and writer-panic supervision/drainage. These cases await the
+dedicated complete C6 FINALIZE gate; no execution, release, live Telegram, filesystem deployment
+or HOST acceptance is inferred from source.
 
 ## Repository gates
 

@@ -36,6 +36,18 @@ impl std::fmt::Debug for DownloadRecord {
 }
 
 impl Database {
+    pub(crate) fn cap_download_expiry(
+        &mut self,
+        id: &str,
+        expiry: i64,
+        now: i64,
+    ) -> Result<i64, AppError> {
+        self.connection.query_row(
+            "UPDATE download_records SET expires_at = min(expires_at, ?2) WHERE download_id = ?1
+             AND state = 'complete' AND expires_at > ?3 AND ?2 > ?3 RETURNING expires_at",
+            params![id, expiry, now], |row| row.get(0)).optional()?.ok_or(AppError::AttachmentUnavailable)
+    }
+
     pub(crate) fn reserve_download(
         &mut self,
         root: &FileIdentity,

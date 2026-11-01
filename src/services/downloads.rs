@@ -1,8 +1,10 @@
-//! Private bounded download storage. Tool authorization is a separate, later caller boundary.
+//! Private bounded download storage with caller-supplied current authorization.
 
+use futures_util::FutureExt;
 use std::{
     future::Future,
     os::unix::fs::MetadataExt,
+    panic::AssertUnwindSafe,
     path::PathBuf,
     pin::Pin,
     sync::{Arc, Mutex},
@@ -28,6 +30,7 @@ use files::{Root, filename, identity};
 
 type Clock = Arc<dyn Fn() -> Result<i64, AppError> + Send + Sync>;
 type WriteFuture<'a> = Pin<Box<dyn Future<Output = Result<u64, AppError>> + Send + 'a>>;
+type Authorization = Arc<dyn Fn() -> Result<(), AppError> + Send + Sync>;
 
 #[derive(Clone)]
 pub(crate) struct DownloadStore(Arc<Inner>);
@@ -41,6 +44,7 @@ struct Inner {
     lifecycle: Mutex<bool>,
     retirement: Mutex<()>,
     stop: CancellationToken,
+    failed: CancellationToken,
     tasks: TaskTracker,
     now: Clock,
 }
@@ -98,6 +102,7 @@ impl DownloadStore {
             lifecycle: Mutex::new(false),
             retirement: Mutex::new(()),
             stop: CancellationToken::new(),
+            failed: CancellationToken::new(),
             tasks: TaskTracker::new(),
             now,
         }));
@@ -113,18 +118,35 @@ impl DownloadStore {
         telegram: TelegramClient,
         file_id: String,
         unique_id: String,
+        authorize: impl Fn() -> Result<(), AppError> + Send + Sync + 'static,
     ) -> Result<DownloadedFile, AppError> {
-        self.materialize(move |file, limit, timeout| {
-            Box::pin(async move {
-                telegram
-                    .download_file(&file_id, &unique_id, limit, timeout, file)
-                    .await
-            })
-        })
+        self.materialize_authorized(
+            move |file, limit, timeout| {
+                Box::pin(async move {
+                    telegram
+                        .download_file(&file_id, &unique_id, limit, timeout, file)
+                        .await
+                })
+            },
+            Arc::new(authorize),
+        )
         .await
     }
 
+    #[cfg(test)]
     async fn materialize<W>(&self, write: W) -> Result<DownloadedFile, AppError>
+    where
+        W: for<'a> FnOnce(&'a mut File, u64, Duration) -> WriteFuture<'a> + Send + 'static,
+    {
+        self.materialize_authorized(write, Arc::new(|| Ok(())))
+            .await
+    }
+
+    async fn materialize_authorized<W>(
+        &self,
+        write: W,
+        authorize: Authorization,
+    ) -> Result<DownloadedFile, AppError>
     where
         W: for<'a> FnOnce(&'a mut File, u64, Duration) -> WriteFuture<'a> + Send + 'static,
     {
@@ -153,13 +175,22 @@ impl DownloadStore {
                 return Err(AppError::ServiceStopped);
             }
             let store = self.clone();
+            let outcome = DownloadOutcome(Some(self.0.failed.clone()));
             self.0.tasks.spawn(async move {
                 let _permit = permit;
-                let result = store.write_owned(write, cancel, deadline).await;
+                let result = store
+                    .write_owned(write, cancel, deadline, authorize)
+                    .await
+                    .map(|file| DownloadHandoff {
+                        store: store.clone(),
+                        file: Some(file),
+                    });
+                outcome.complete();
                 let _ = send.send(result);
             });
         }
-        receive.await.map_err(|_| AppError::ServiceStopped)?
+        let pending = receive.await.map_err(|_| AppError::ServiceStopped)??;
+        pending.accept()
     }
 
     async fn write_owned<W>(
@@ -167,13 +198,17 @@ impl DownloadStore {
         write: W,
         cancel: CancellationToken,
         deadline: Instant,
+        authorize: Authorization,
     ) -> Result<DownloadedFile, AppError>
     where
         W: for<'a> FnOnce(&'a mut File, u64, Duration) -> WriteFuture<'a> + Send + 'static,
     {
         self.ensure_running(&cancel, deadline)?;
+        authorize()?;
         let record = self.reserve()?;
-        let result = self.write_record(&record, write, &cancel, deadline).await;
+        let result = self
+            .write_record(&record, write, &cancel, deadline, &authorize)
+            .await;
         if result.is_err() {
             // Reservations survive cleanup failure and are retried by maintenance/restart.
             self.retire(&record.id)?;
@@ -239,11 +274,13 @@ impl DownloadStore {
         write: W,
         cancel: &CancellationToken,
         deadline: Instant,
+        authorize: &Authorization,
     ) -> Result<DownloadedFile, AppError>
     where
         W: for<'a> FnOnce(&'a mut File, u64, Duration) -> WriteFuture<'a> + Send + 'static,
     {
         self.ensure_running(cancel, deadline)?;
+        authorize()?;
         let root = self.root(&record.root)?;
         let temporary = root.temporary()?;
         let expected = identity(
@@ -276,6 +313,7 @@ impl DownloadStore {
             return Err(AppError::DownloadCapacity);
         }
         self.ensure_running(cancel, deadline)?;
+        authorize()?;
         root.publish(record, &temporary)?;
         self.ensure_running(cancel, deadline)?;
         let mut file = File::from_std(temporary);
@@ -284,7 +322,7 @@ impl DownloadStore {
             .checked_duration_since(Instant::now())
             .filter(|remaining| !remaining.is_zero())
             .ok_or(crate::error::TelegramError::Deadline)?;
-        let result = tokio::select! {
+        let result = AssertUnwindSafe(async { tokio::select! {
             biased;
             _ = self.0.stop.cancelled() => Err(AppError::ServiceStopped),
             _ = cancel.cancelled() => Err(AppError::ServiceStopped),
@@ -293,7 +331,11 @@ impl DownloadStore {
                 if actual > bytes { return Err(AppError::FileTooLarge { limit_bytes: bytes, actual_bytes: actual }); }
                 Ok(actual)
             }) => result.unwrap_or(Err(crate::error::TelegramError::Deadline.into())),
-        };
+        }}).catch_unwind().await.unwrap_or_else(|_| {
+            self.0.failed.cancel();
+            self.close();
+            Err(AppError::ServiceStopped)
+        });
         // into_std waits for Tokio's outstanding blocking-file operation even after a
         // canceled write/flush future. Never unlink or release its reservation earlier.
         let file = file.into_std().await;
@@ -347,6 +389,35 @@ impl DownloadStore {
             .iter()
             .find(|root| root.identity == *identity)
             .ok_or(AppError::DownloadStorageUnavailable)
+    }
+
+    /// Recheck the owned identity and durably cap retention by the authorized source expiry.
+    pub fn retain_until(&self, id: &str, expiry: i64) -> Result<i64, AppError> {
+        let record = self
+            .0
+            .database
+            .lock()
+            .map_err(|_| AppError::StorageFailure)?
+            .download_record(id)?
+            .ok_or(AppError::AttachmentUnavailable)?;
+        let root = self.root(&record.root)?;
+        root.current()?;
+        root.verify(
+            &filename(id)?,
+            record
+                .file
+                .as_ref()
+                .ok_or(AppError::AttachmentUnavailable)?,
+        )?;
+        self.0
+            .database
+            .lock()
+            .map_err(|_| AppError::StorageFailure)?
+            .cap_download_expiry(id, expiry, (self.0.now)()?)
+    }
+
+    pub fn discard(&self, id: &str) -> Result<(), AppError> {
+        self.retire(id)
     }
 
     fn visit(
@@ -417,7 +488,7 @@ impl DownloadStore {
         })
     }
 
-    /// One bounded maintenance owner, to be supervised by daemon composition at integration.
+    /// One bounded maintenance owner supervised by daemon composition.
     pub async fn run_maintenance(&self) -> Result<(), AppError> {
         let _maintenance = self
             .0
@@ -428,7 +499,9 @@ impl DownloadStore {
         let mut ticks = tokio::time::interval_at(Instant::now() + period, period);
         ticks.set_missed_tick_behavior(MissedTickBehavior::Skip);
         loop {
-            tokio::select! { biased; _ = self.0.stop.cancelled() => return Ok(()), _ = ticks.tick() => () }
+            tokio::select! { biased;
+            _ = self.0.failed.cancelled() => return Err(AppError::ServiceStopped),
+            _ = self.0.stop.cancelled() => return Ok(()), _ = ticks.tick() => () }
             let work = {
                 let closed = self
                     .0
@@ -445,20 +518,63 @@ impl DownloadStore {
         }
     }
 
-    pub async fn shutdown(&self) -> Result<(), AppError> {
-        {
-            let mut closed = self
-                .0
-                .lifecycle
-                .lock()
-                .map_err(|_| AppError::StorageFailure)?;
+    pub fn close(&self) {
+        if let Ok(mut closed) = self.0.lifecycle.lock() {
             *closed = true;
-            self.0.admission.close();
-            self.0.stop.cancel();
-            self.0.tasks.close();
+        } else {
+            self.0.failed.cancel();
         }
+        self.0.admission.close();
+        self.0.stop.cancel();
+        self.0.tasks.close();
+    }
+
+    pub async fn shutdown(&self) -> Result<(), AppError> {
+        self.close();
         self.0.tasks.wait().await;
-        self.cleanup(true)
+        let cleanup = self.cleanup(true);
+        cleanup.and(if self.0.failed.is_cancelled() {
+            Err(AppError::ServiceStopped)
+        } else {
+            Ok(())
+        })
+    }
+}
+
+// The owned job can finish before its caller is polled again. Keep cleanup ownership
+// in the channel until that caller accepts the result, including failed sends.
+struct DownloadHandoff {
+    store: DownloadStore,
+    file: Option<DownloadedFile>,
+}
+impl DownloadHandoff {
+    fn accept(mut self) -> Result<DownloadedFile, AppError> {
+        self.file.take().ok_or(AppError::ServiceStopped)
+    }
+}
+impl Drop for DownloadHandoff {
+    fn drop(&mut self) {
+        if let Some(file) = &self.file
+            && self.store.retire(&file.id).is_err()
+        {
+            // Failed retirement keeps its durable reservation for restart recovery.
+            self.store.0.failed.cancel();
+            self.store.close();
+        }
+    }
+}
+
+struct DownloadOutcome(Option<CancellationToken>);
+impl DownloadOutcome {
+    fn complete(mut self) {
+        self.0 = None;
+    }
+}
+impl Drop for DownloadOutcome {
+    fn drop(&mut self) {
+        if let Some(failed) = &self.0 {
+            failed.cancel();
+        }
     }
 }
 

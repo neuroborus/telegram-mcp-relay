@@ -140,11 +140,10 @@ See [architecture](ARCHITECTURE.md#session-and-route-persistence).
 
 ## Private download storage
 
-`[downloads]` centralizes settings for the private store. The store and schema are implemented;
-the daemon's attachment-tool/lifecycle integration remains a later step. Setting `enabled`
-alone does not expose a tool or start downloads in this revision. Defaults preserve existing
-configurations without opening download roots. The store does not create roots or repair
-permissions on existing paths.
+`[downloads]` controls `telegram_get_attachment` and its supervised private store. Defaults
+preserve existing configurations without opening download roots. Enabling downloads requires
+existing approved roots; it never causes automatic attachment downloads. The store does not
+create roots or repair permissions on existing paths.
 
 | Download setting | Default | Accepted range |
 | --- | --- | --- |
@@ -195,11 +194,29 @@ their reservation until tracked work has drained outstanding filesystem I/O and 
 output. Kernel I/O is not forcibly interrupted or represented as having finished prematurely.
 SQLite schema v10 adds bounded private ownership records without changing inbox/history data.
 
+The tool accepts only `session_key` and an opaque retained `attachment_handle`. Own replies,
+including read-only inbox resources, expose `attachments` with handles and bounded display
+metadata even when shared history is disabled. Claims do not grant additional file authority.
+Shared access requires both current authenticated history opt-in and retained matching journal
+provenance. Every request revalidates the caller, current chat/user allowlists, source identity
+and expiry before effects, including after worker scheduling/preallocation; access is rechecked
+before returning bytes. Missing/legacy provenance fails closed as `ATTACHMENT_UNAVAILABLE`.
+Acknowledgment or source cleanup can remove own access; live shared provenance remains usable
+only under its separate history authorization and expiry.
+
+Success returns `attachment` metadata, a generated `download_id`, `path`, hexadecimal Linux
+device/inode `file_identity`, actual `size_bytes` and Unix-millisecond file `expires_at`.
+File expiry is the earlier of configured retention and authorized source expiry. Each successful
+call creates a separate bounded owned file; no cached path bypasses authorization. The path
+belongs to the daemon's filesystem, with no remote-filesystem or content-execution promise.
+Original filename/MIME and all bytes are untrusted display/content data, not instructions.
+
 ## Opt-in history storage
 
 `[history]` enables capture of authorized incoming observations, including standalone and
 unroutable text/captions/documents/photos, and confirmed outgoing text/captions, returned document
-metadata and service-message context. Shared reads use `telegram_history`; downloads remain pending.
+metadata and service-message context. Shared reads use `telegram_history`; authorized files
+use the separately enabled `telegram_get_attachment` capability.
 `enabled=false` is the default. Opt-in requires a configured MCP bearer source and
 an actually resolved bearer at daemon construction. Library callers use `Database::open_with_history`
 with the same explicit authentication requirement; `Database::open` keeps shared capture disabled.

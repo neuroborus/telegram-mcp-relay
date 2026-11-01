@@ -74,7 +74,11 @@ impl Telegram {
                                     assert!(requests.len() < 16);
                                     requests.push(Recorded {
                                         method: parts.uri.path().to_owned(),
-                                        content_type: parts.headers[header::CONTENT_TYPE].to_str().unwrap().to_owned(),
+                                        content_type: if parts.method == http::Method::GET {
+                                            parts.headers.get(header::CONTENT_TYPE).map(|v| v.to_str().unwrap().to_owned()).unwrap_or_default()
+                                        } else {
+                                            parts.headers[header::CONTENT_TYPE].to_str().unwrap().to_owned()
+                                        },
                                         body: body.to_vec(),
                                     });
                                     let (status, body) = responses.lock().unwrap().pop_front().unwrap();
@@ -161,9 +165,10 @@ pub(super) fn failure(result: &Value, code: &str) {
 
 pub(super) fn assert_tool_catalog(catalog: &Value) {
     use crate::dto::{
-        AckRequest, AckResult, AskResult, HistoryRequest, HistoryResult, InboxRequest, InboxResult,
-        ProcessingRequest, ProcessingResult, RegisterRequest, RegisterResult, SendFileRequest,
-        SendRequest, SendResult, WaitRequest, WaitResult,
+        AckRequest, AckResult, AskResult, GetAttachmentRequest, GetAttachmentResult,
+        HistoryRequest, HistoryResult, InboxRequest, InboxResult, ProcessingRequest,
+        ProcessingResult, RegisterRequest, RegisterResult, SendFileRequest, SendRequest,
+        SendResult, WaitRequest, WaitResult,
     };
     use rmcp::{model::Tool, schemars::JsonSchema};
 
@@ -211,6 +216,10 @@ pub(super) fn assert_tool_catalog(catalog: &Value) {
         (
             schema::<HistoryRequest, HistoryResult>("telegram_history"),
             json!(["session_key"]),
+        ),
+        (
+            schema::<GetAttachmentRequest, GetAttachmentResult>("telegram_get_attachment"),
+            json!(["session_key", "attachment_handle"]),
         ),
     ];
     let tools = catalog.as_array().unwrap();

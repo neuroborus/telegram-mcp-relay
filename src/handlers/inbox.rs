@@ -4,7 +4,9 @@ use rmcp::model::{CacheScope, PaginatedRequestParams, ReadResourceResult, Resour
 
 use super::*;
 use crate::{
-    dto::{ClaimedReplyResult, DeliveryState, InboxSnapshot, Reply, inbox_limit},
+    dto::{
+        ClaimedReplyResult, DeliveryState, HistoryAttachment, InboxSnapshot, Reply, inbox_limit,
+    },
     repositories::{InboxCursor, InboxReply, ReplyState},
 };
 
@@ -19,8 +21,31 @@ impl McpHandler {
             unix_millis()?,
         )?;
         Ok(InboxResult {
-            replies: claims.into_iter().map(claim).collect::<Result<_, _>>()?,
+            replies: claims
+                .into_iter()
+                .map(|item| {
+                    let attachments = self.attachments.own_files(
+                        &database,
+                        &request.session_key,
+                        &item.reply.reply_id,
+                        unix_millis()?,
+                    )?;
+                    claim(item, attachments)
+                })
+                .collect::<Result<_, _>>()?,
         })
+    }
+
+    pub(super) fn claim_result(
+        &self,
+        session: &str,
+        item: crate::repositories::ClaimedReply,
+    ) -> Result<ClaimedReplyResult, AppError> {
+        let database = self.database.lock().map_err(|_| AppError::StorageFailure)?;
+        let attachments =
+            self.attachments
+                .own_files(&database, session, &item.reply.reply_id, unix_millis()?)?;
+        claim(item, attachments)
     }
 
     pub(super) fn processing(
@@ -79,11 +104,9 @@ impl McpHandler {
     pub(super) fn read_inbox(&self, uri: &str) -> Result<ReadResourceResult, ErrorData> {
         let (key, after, limit) = parse_uri(uri)?;
         let snapshot = (|| {
-            let page = self
-                .database
-                .lock()
-                .map_err(|_| AppError::StorageFailure)?
-                .inbox_snapshot(key, after.as_ref(), limit, unix_millis()?)?;
+            let database = self.database.lock().map_err(|_| AppError::StorageFailure)?;
+            let now = unix_millis()?;
+            let page = database.inbox_snapshot(key, after.as_ref(), limit, now)?;
             let next_uri = page.next.map(|cursor| {
                 let tie = cursor
                     .reply_id
@@ -99,7 +122,12 @@ impl McpHandler {
                 replies: page
                     .replies
                     .into_iter()
-                    .map(reply)
+                    .map(|item| {
+                        let attachments =
+                            self.attachments
+                                .own_files(&database, key, &item.reply_id, now)?;
+                        reply(item, attachments)
+                    })
                     .collect::<Result<_, _>>()?,
                 next_uri,
             };
@@ -116,14 +144,18 @@ impl McpHandler {
 
 pub(super) fn claim(
     claim: crate::repositories::ClaimedReply,
+    attachments: Vec<HistoryAttachment>,
 ) -> Result<ClaimedReplyResult, AppError> {
     Ok(ClaimedReplyResult {
-        reply: reply(claim.reply)?,
+        reply: reply(claim.reply, attachments)?,
         claim_token: claim.claim_token,
     })
 }
 
-pub(super) fn reply(reply: InboxReply) -> Result<Reply, AppError> {
+pub(super) fn reply(
+    reply: InboxReply,
+    attachments: Vec<HistoryAttachment>,
+) -> Result<Reply, AppError> {
     Ok(Reply {
         reply_id: reply.reply_id,
         telegram_update_id: reply.telegram_update_id,
@@ -136,6 +168,7 @@ pub(super) fn reply(reply: InboxReply) -> Result<Reply, AppError> {
             .map(|json| serde_json::from_str(&json))
             .transpose()
             .map_err(|_| AppError::StorageFailure)?,
+        attachments,
         state: match reply.state {
             ReplyState::Pending => DeliveryState::Pending,
             ReplyState::Claimed => DeliveryState::Claimed,

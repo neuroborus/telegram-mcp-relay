@@ -19,7 +19,7 @@ and lockfile. Root workspace checks do not cover it; see [testing](TESTING.md).
 | `src/dto.rs` | Typed tool requests/results, inbox resource snapshots and SDK-generated schemas |
 | `src/handlers.rs`, `src/handlers/`, `src/routes.rs`, `src/routes/` | Shared SDK handler state, thin typed tools/read-only inbox resources, bounded modern subscriptions, protected HTTP transport and its tests |
 | `src/domain.rs`, `src/domain/` | Pure title normalization, final outbound Unicode rules and their tests |
-| `src/services.rs`, `src/services/` | Text/document delivery, bounded question waits, confined outbound file handles, private owned download storage, authorized reply ingestion, one restart-safe poller, bounded inbox claims, durable processing/completion, shared confirmed-processing typing, factual notice dispatch and bounded retention scheduling |
+| `src/services.rs`, `src/services/` | Text/document delivery, bounded question waits, confined outbound file handles, authorized attachment access and owned download storage, authorized reply ingestion, one restart-safe poller, bounded inbox claims, durable processing/completion, shared confirmed-processing typing, factual notice dispatch and bounded retention scheduling |
 | `src/repositories.rs`, `src/repositories/` | SQLite initialization/migrations, transactions, queries and bounded post-commit inbox interests |
 | `src/clients.rs`, `src/clients/` | Bounded direct Telegram HTTP, streamed multipart uploads, transport DTOs and synthetic tests |
 | `tests/` | Cross-module storage, ingress, claim/recovery, notice, retention and maintenance tests |

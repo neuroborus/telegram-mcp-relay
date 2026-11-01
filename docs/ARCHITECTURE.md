@@ -349,8 +349,8 @@ expired/deleted source references independently, and indexed cleanup retires exp
 provenance in bounded batches. Journal pressure rolls back without consuming inbox quotas or
 evicting valid replies. Coverage starts at actual observation, not migration; restart marks
 possible gaps and cannot reconstruct older bodies. Confirmed outgoing text/captions and service
-messages now use the same journal when enabled. Authorized shared reads are available;
-attachment downloads remain pending.
+messages now use the same journal when enabled. Authorized shared reads and separately enabled
+lazy attachment downloads use retained matching provenance.
 Returned document identifiers stay in private attachment provenance, never source paths or bytes. See
 [history settings and privacy](CONFIGURATION.md#opt-in-history-storage).
 
@@ -824,8 +824,8 @@ download or executed validation is claimed by this source change.
 
 ## Private owned download store
 
-`services::downloads` is a private component awaiting attachment-tool/daemon integration.
-Its [central settings](CONFIGURATION.md#private-download-storage) default to disabled. Schema
+`services::downloads` backs the authorized attachment tool; its
+[central settings](CONFIGURATION.md#private-download-storage) default to disabled. Schema
 v10 adds `download_records` in the existing protected SQLite database, with no file bytes,
 source paths or Telegram identifiers. Immediate reservations bound count, concurrent work,
 payload/data-block charges and pending filesystem demand before effects. Existing main-file
@@ -859,7 +859,29 @@ authority; this does not isolate files from a malicious same-user administrator.
 One maintenance owner retires expired completed files, while startup additionally recovers
 interrupted reservations/writes. Shutdown closes admission, cancels network work and waits for
 tracked writers and maintenance before its final sweep. Valid completed files remain until
-expiry. No MCP tool or new runtime service is introduced by this component.
+expiry. The application supervises its maintenance alongside the existing workers; handler
+shutdown closes admission before transport cancellation and drains owned I/O. Writer panic
+signals supervision while preserving drainage and ownership cleanup. No additional process
+or external runtime service is introduced.
+Completed output awaiting caller acceptance remains cleanup-owned: cancellation discards the
+undisclosed file even if its worker has already finished and queued the result.
+
+`services::attachments` resolves retained opaque handles through thin typed handler dispatch.
+Indexed queries bind each grant to a live matching reply owned by the caller or a live matching
+journal message. Own replies require retained authorized sender provenance independently of
+history; shared access additionally requires current authenticated history opt-in, source
+direction and chat/user authorization. Legacy source gaps fail closed. Reads/projections never
+claim, process, acknowledge or refresh another session. Own-reply results add safe `attachments`
+metadata alongside the existing compatible `attachment_metadata`; history handles use the same
+resolver. Original filenames and MIME never become filesystem authority.
+
+Authorization is checked at request admission, by the owned worker before file effects, after
+preallocation before publication/network access, and before result disclosure. Source identity
+changes, expiry or authorization loss remove the owned output without altering reply/history
+data. Final identity checks and durable expiry capping confine the returned path and ensure its
+lifetime cannot exceed the authorized source. Each successful call materializes its own bounded
+copy; results claim only daemon-local filesystem access to untrusted bytes, never remote access
+or permission to execute content. Complete composition/release/HOST acceptance remains separate.
 
 ## Reply ingestion
 

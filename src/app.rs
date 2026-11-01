@@ -21,8 +21,8 @@ use crate::{
     repositories::Database,
     routes::McpEndpoint,
     services::{
-        cleanup::CleanupService, notices::NoticeService, polling::PollingService,
-        typing::TypingService,
+        cleanup::CleanupService, downloads::DownloadStore, notices::NoticeService,
+        polling::PollingService, typing::TypingService,
     },
 };
 
@@ -57,6 +57,7 @@ struct Application {
     notices: NoticeService,
     cleanup: CleanupService,
     typing: TypingService,
+    downloads: DownloadStore,
     stop: CancellationToken,
 }
 
@@ -74,6 +75,7 @@ impl Application {
         )?));
         let handler = Arc::new(McpHandler::new(database.clone(), telegram.clone(), config)?);
         let typing = handler.typing();
+        let downloads = handler.downloads();
         let cleanup =
             CleanupService::new(database.clone(), &config.storage)?.with_typing(typing.clone());
         let polling = PollingService::new(database.clone(), telegram.clone(), config)?;
@@ -87,6 +89,7 @@ impl Application {
             notices,
             cleanup,
             typing,
+            downloads,
             stop,
         })
     }
@@ -112,6 +115,7 @@ impl Application {
             notices,
             cleanup,
             typing,
+            downloads,
             stop,
         } = self;
         // Drop/cancellation unwinds the SDK and every owned service task too.
@@ -136,6 +140,7 @@ impl Application {
             let poll_stop = receive.clone();
             workers.spawn(async move { ("polling", polling.run(poll_stop).await) });
             workers.spawn(async move { ("notices", notices.run(receive).await) });
+            workers.spawn(async move { ("downloads", downloads.run_maintenance().await) });
             workers.spawn(async move { ("mcp", endpoint.serve(listener).await) });
             let typing_stop = stop.clone();
             let observe_handler = handler.clone();

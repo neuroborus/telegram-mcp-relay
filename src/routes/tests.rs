@@ -22,6 +22,8 @@ use crate::repositories::Database;
 
 #[path = "ask.rs"]
 mod ask;
+#[path = "attachments.rs"]
+mod attachments;
 #[path = "inbox.rs"]
 mod inbox;
 #[path = "legacy.rs"]
