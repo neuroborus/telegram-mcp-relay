@@ -17,6 +17,20 @@ allowed_user_ids = [202]
 allowed_roots = ["/home/synthetic/agent-exports"]
 max_outbound_mb = 50
 
+[downloads]
+# Private storage is implemented; daemon/tool integration follows separately.
+# Enable only with existing owned mode-0700 roots, separate from exports and secrets.
+enabled = false
+roots = []
+max_file_bytes = 20000000
+max_total_bytes = 100000000
+max_files = 64
+concurrent = 2
+timeout_seconds = 600
+retention_seconds = 3600
+cleanup_interval_seconds = 60
+min_free_bytes = 16777216
+
 [delivery]
 wait_fallback_enabled = true
 wait_timeout_seconds = 600

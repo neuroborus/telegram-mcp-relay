@@ -316,7 +316,7 @@ fn failed_v7_migration_preserves_old_schema_and_records_transactionally() {
         ALTER TABLE telegram_cursor DROP COLUMN telegram_message_id;
         ALTER TABLE telegram_cursor DROP COLUMN telegram_chat_id;
         DROP TABLE attachment_records; DROP TABLE journal_records; DROP TABLE session_displays;
-        DROP TABLE history_usage; DROP TABLE history_coverage; PRAGMA user_version = 7;
+        DROP TABLE history_usage; DROP TABLE history_coverage; DROP TABLE download_records; PRAGMA user_version = 7;
         CREATE TABLE history_coverage(conflict TEXT);",
     )
     .unwrap();
@@ -336,7 +336,7 @@ fn failed_v7_migration_preserves_old_schema_and_records_transactionally() {
     assert!(!exists);
     sql.execute_batch("DROP TABLE history_coverage").unwrap();
     let db = fixture.open();
-    assert_eq!(db.schema_version().unwrap(), 9);
+    assert_eq!(db.schema_version().unwrap(), 10);
     assert_eq!(
         db.session(&session.session_key).unwrap().title.as_str(),
         "Preserve"

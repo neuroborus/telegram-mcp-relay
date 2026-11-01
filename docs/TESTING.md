@@ -82,6 +82,20 @@ requests are needed. These cases await the dedicated complete C6 FINALIZE gate; 
 execution or live attachment acceptance is inferred. Owned-file cleanup and MCP authorization
 remain separate later implementation steps.
 
+## Private download storage regressions
+
+`src/services/downloads/tests.rs` defines private-root/permission/lock checks, real adapter-to-
+reserved-inode composition, byte/file/concurrency/disk reservations, partial-write and size
+failure, caller cancellation, pending blocking-I/O drainage, shutdown, admission-time deadlines,
+bounded maintenance and expiry. Confinement cases replace the root during a write and preserve
+foreign symlinks, hard links and colliding
+names. Restart cases cover reservation-only, unnamed inode, linked partial and retiring-name
+crash points while preserving valid completed files and unknown files. Configuration cases
+reject inconsistent budgets and source/secret/storage overlap. Storage migration cases preserve
+older recovery data through v10, including v9 rollback after late DDL failure. These proofs
+await complete C6 FINALIZE execution; no runtime/filesystem support or live acceptance is
+inferred from source inspection or no-run compilation.
+
 ## Repository gates
 
 Run `just check-repo` (or `python3 tools/check_repository.py`) after documentation, skills,

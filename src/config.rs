@@ -12,11 +12,14 @@ use serde::Deserialize;
 
 use crate::error::AppError;
 
+mod downloads;
 mod secrets;
 pub use secrets::{Secret, Secrets};
 
 /// Fixed final-text policy; this is deliberately not a TOML setting.
 pub const OUTBOUND_SCALAR_LIMIT: usize = 1_000;
+pub(crate) const CLOUD_DOWNLOAD_BYTES: u64 = 20_000_000;
+pub(crate) const DOWNLOAD_TIMEOUT_MAX: u64 = 600;
 // Internal MCP transport bounds, separate from durable application sessions.
 pub(crate) const MCP_SESSION_IDLE: std::time::Duration = std::time::Duration::from_secs(300);
 pub(crate) const MCP_SESSION_INIT: std::time::Duration = std::time::Duration::from_secs(10);
@@ -38,6 +41,7 @@ pub struct Config {
     pub history: History,
     pub notifications: Notifications,
     pub files: Files,
+    pub downloads: Downloads,
     pub limits: Limits,
 }
 
@@ -153,6 +157,18 @@ impl History {
 settings!(Files {
     allowed_roots: Vec<PathBuf> = Vec::new(),
     max_outbound_mb: u32 = 50,
+});
+settings!(Downloads {
+    enabled: bool = false,
+    roots: Vec<PathBuf> = Vec::new(),
+    max_file_bytes: u64 = CLOUD_DOWNLOAD_BYTES,
+    max_total_bytes: u64 = 100_000_000,
+    max_files: u32 = 64,
+    concurrent: u32 = 2,
+    timeout_seconds: u64 = 600,
+    retention_seconds: u64 = 3_600,
+    cleanup_interval_seconds: u64 = 60,
+    min_free_bytes: u64 = 16_777_216,
 });
 settings!(Limits {
     request_bytes: u32 = 65_536,
@@ -291,6 +307,15 @@ impl Config {
             *path = expand_path(path, home)?;
             require(path.parent().is_some(), "files.allowed_roots")?;
         }
+        self.downloads.normalize(
+            home,
+            &self.files,
+            &self.storage,
+            [
+                self.server.auth_token_file.as_deref(),
+                self.telegram.bot_token_file.as_deref(),
+            ],
+        )?;
         Ok(())
     }
 }

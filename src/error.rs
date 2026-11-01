@@ -66,6 +66,9 @@ pub enum AppError {
     FileUnavailable,
     DownloadUnavailable,
     DownloadWriteFailed,
+    DownloadDisabled,
+    DownloadCapacity,
+    DownloadStorageUnavailable,
     FileTooLarge {
         limit_bytes: u64,
         actual_bytes: u64,
@@ -114,6 +117,9 @@ impl AppError {
             Self::FileUnavailable => "FILE_UNAVAILABLE",
             Self::DownloadUnavailable => "DOWNLOAD_UNAVAILABLE",
             Self::DownloadWriteFailed => "DOWNLOAD_WRITE_FAILED",
+            Self::DownloadDisabled => "DOWNLOAD_DISABLED",
+            Self::DownloadCapacity => "DOWNLOAD_CAPACITY",
+            Self::DownloadStorageUnavailable => "DOWNLOAD_STORAGE_UNAVAILABLE",
             Self::FileTooLarge { .. } => "FILE_TOO_LARGE",
             Self::SessionNotFound => "SESSION_NOT_FOUND",
             Self::SessionIdentityConflict => "SESSION_IDENTITY_CONFLICT",
@@ -187,6 +193,19 @@ impl fmt::Display for AppError {
             Self::DownloadWriteFailed => {
                 write!(f, "{}: cannot write private download output", self.code())
             }
+            Self::DownloadDisabled => {
+                write!(f, "{}: attachment downloads are disabled", self.code())
+            }
+            Self::DownloadCapacity => write!(
+                f,
+                "{}: private download capacity is unavailable",
+                self.code()
+            ),
+            Self::DownloadStorageUnavailable => write!(
+                f,
+                "{}: private download storage is unavailable or its identity changed",
+                self.code()
+            ),
             Self::FileTooLarge {
                 limit_bytes,
                 actual_bytes,

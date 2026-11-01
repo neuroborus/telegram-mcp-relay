@@ -8,10 +8,12 @@ use serde_json::json;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 
 use super::{REQUEST_TIMEOUT, TelegramClient};
-use crate::error::{AppError, TelegramError};
+use crate::{
+    config::{CLOUD_DOWNLOAD_BYTES, DOWNLOAD_TIMEOUT_MAX},
+    error::{AppError, TelegramError},
+};
 
-pub(crate) const CLOUD_DOWNLOAD_BYTES: u64 = 20_000_000;
-const MAX_DOWNLOAD_TIME: Duration = Duration::from_secs(600);
+const MAX_DOWNLOAD_TIME: Duration = Duration::from_secs(DOWNLOAD_TIMEOUT_MAX);
 const WRITE_CHUNK_BYTES: usize = 65_536;
 
 #[derive(Deserialize)]
@@ -67,8 +69,6 @@ impl TelegramClient {
     /// One deadline covers metadata retries, network reads, writer backpressure and flush.
     /// Cancellation drops HTTP work. The owner must retire its writer's outstanding I/O
     /// and remove partial output on any failure before releasing storage reservations.
-    // This entry point gains its service caller after owned storage lands.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) async fn download_file<W: AsyncWrite + Unpin>(
         &self,
         file_id: &str,

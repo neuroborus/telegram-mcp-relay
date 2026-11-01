@@ -40,8 +40,10 @@ pub use retention::{CleanupBatch, CleanupSweep};
 mod maintenance;
 pub use maintenance::DiskUsage;
 pub(crate) use maintenance::RECLAIM_PAGES;
+mod downloads;
 mod history;
 mod history_read;
+pub(crate) use downloads::{DownloadRecord, FileIdentity};
 pub use history::{
     AttachmentInput, AttachmentKind, HistoryCoverage, HistoryUsage, JournalInput, MessageDirection,
     MessageSource, StoredMessage,
@@ -49,7 +51,7 @@ pub use history::{
 pub(crate) use history::{ConfirmedMessage, OutgoingJournal};
 pub(crate) use history_read::{HistoryPosition, HistoryRecord, HistoryScan, ScanDecision};
 
-const SCHEMA_VERSION: i64 = 9;
+const SCHEMA_VERSION: i64 = 10;
 const APPLICATION_ID: i64 = 0x544d4352; // TMCR
 
 /// One private connection; services will expose narrowly scoped transactions, not raw SQL.
@@ -224,6 +226,9 @@ fn initialize_schema(connection: &mut Connection) -> Result<(), AppError> {
     }
     if version < 9 {
         transaction.execute_batch(include_str!("repositories/observations.sql"))?;
+    }
+    if version < 10 {
+        transaction.execute_batch(include_str!("repositories/downloads.sql"))?;
     }
     transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     let vacuum: i64 = transaction.pragma_query_value(None, "auto_vacuum", |r| r.get(0))?;

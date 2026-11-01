@@ -7,6 +7,9 @@ use crate::error::AppError;
 pub mod ask;
 pub mod cleanup;
 pub mod files;
+// Private until the authorized attachment tool wires its lifecycle in the next step.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) mod downloads;
 pub mod history;
 pub mod inbox;
 pub mod ingress;

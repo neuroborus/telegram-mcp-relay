@@ -822,6 +822,45 @@ a fresh link through getFile after expiry. It does not guarantee filename/MIME p
 The bridge's decimal-byte ceiling is conservative application policy. No fresh fetch, live
 download or executed validation is claimed by this source change.
 
+## Private owned download store
+
+`services::downloads` is a private component awaiting attachment-tool/daemon integration.
+Its [central settings](CONFIGURATION.md#private-download-storage) default to disabled. Schema
+v10 adds `download_records` in the existing protected SQLite database, with no file bytes,
+source paths or Telegram identifiers. Immediate reservations bound count, concurrent work,
+payload/data-block charges and pending filesystem demand before effects. Existing main-file
+limits bound bookkeeping; no history or inbox rows are evicted to admit downloads.
+
+Roots are opened once through `openat2` with beneath/no-symlink/no-magic-link resolution and
+checked for effective ownership and mode 0700. Lifetime directory locks exclude a second store.
+The writer first creates an unnamed mode-0600 inode (`O_TMPFILE`), records its device/inode,
+preallocates the bounded payload and syncs it. Only then does an exclusive descriptor-based
+`linkat` publish its generated name beneath the pinned root, followed by directory sync.
+The internal `/proc/self/fd` source is a kernel-owned descriptor link, not a caller-supplied
+symlink. A crash before linking automatically drops the unnamed inode; a crash afterward has
+durable identity proof. No original filename/MIME affects this sequence.
+
+The shared HTTP adapter writes to that already reserved descriptor. A tracked worker owns
+the reservation and output even after caller cancellation. Its admission-time deadline covers
+scheduling, allocation, network/write work, final sync and bookkeeping. Blocked kernel
+operations are drained before cleanup rather than falsely reported as canceled. Completion
+truncates unused preallocation, syncs data, rechecks root/file identity and commits actual
+bytes, measured allocation and expiry. Returned
+paths are daemon-local; root replacement causes failure instead of publishing a replacement path.
+
+Cleanup reads keyset batches of at most 100 records under a hard 1,024-record bound, never a
+directory scan. A durable retiring state precedes an exclusive rename to a recovery name.
+Identity/type/permission/link checks precede deletion, with another identity check after rename;
+replacements are preserved. Directory sync precedes forgetting the reservation. Missing output
+after a crash is recoverable; unknown or inconsistent ownership fails closed without discarding
+its capacity charge. Private roots and their contents must remain trusted local filesystem
+authority; this does not isolate files from a malicious same-user administrator.
+
+One maintenance owner retires expired completed files, while startup additionally recovers
+interrupted reservations/writes. Shutdown closes admission, cancels network work and waits for
+tracked writers and maintenance before its final sweep. Valid completed files remain until
+expiry. No MCP tool or new runtime service is introduced by this component.
+
 ## Reply ingestion
 
 `services::ingress::IngressService` accepts only allowlisted chats and non-bot senders with

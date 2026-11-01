@@ -138,6 +138,63 @@ No new configuration setting is required. See
 filesystem bounds and limitations.
 See [architecture](ARCHITECTURE.md#session-and-route-persistence).
 
+## Private download storage
+
+`[downloads]` centralizes settings for the private store. The store and schema are implemented;
+the daemon's attachment-tool/lifecycle integration remains a later step. Setting `enabled`
+alone does not expose a tool or start downloads in this revision. Defaults preserve existing
+configurations without opening download roots. The store does not create roots or repair
+permissions on existing paths.
+
+| Download setting | Default | Accepted range |
+| --- | --- | --- |
+| `enabled` | false | Boolean; enabled operation requires roots |
+| `roots` | empty | At most 8 separate absolute roots; initial `~/` expansion supported |
+| `max_file_bytes` | 20,000,000 | 1–20,000,000 bytes |
+| `max_total_bytes` | 100,000,000 | At least `max_file_bytes`, at most 1,073,741,824 bytes |
+| `max_files` | 64 | 1–1,024, including reservations and retiring files |
+| `concurrent` | 2 | 1–64, no greater than `max_files` |
+| `timeout_seconds` | 600 | 1–600 seconds |
+| `retention_seconds` | 3,600 | 1–604,800 seconds from successful completion |
+| `cleanup_interval_seconds` | 60 | 1–3,600 seconds |
+| `min_free_bytes` | 16,777,216 | 1–1,073,741,824 bytes of filesystem headroom |
+
+Roots must already be effective-user-owned mode-0700 directories, with no symlink in any
+ancestor. They cannot overlap one another or outbound export roots, or contain SQLite/secrets.
+Use dedicated bridge-managed directories with trusted ancestors. The store pins and exclusively
+locks each directory until all of its work has retired; another store cannot sweep a live owner.
+Removing/replacing a configured root does not grant access to its replacement. Restoring the
+approved root identity is required to recover records for a missing or reconfigured root.
+
+Before file/network effects, durable reservations cover concurrency, count, filesystem-block-
+rounded allocation, pending inode demand and free-space headroom, including partial work.
+Actual preallocation must fit the reservation; completed records retain their measured
+allocated-block charge. The aggregate budget counts the larger of payload bytes and allocated
+data blocks for each file; bounded file count and headroom constrain directory overhead.
+Free-space snapshots are conservative admission checks, not a quota on unrelated processes.
+Small files can cost a whole filesystem block, so a byte
+budget below that block size can reject even a small download.
+
+Linux `openat2`, a filesystem supporting `O_TMPFILE` and `fallocate`, and the kernel's
+`/proc/self/fd` descriptor links are required. Unsupported/denied operations fail closed;
+there is no unsafe path-opening fallback or request for extra OS privileges. New regular
+files have exclusive generated names and mode 0600. Filenames/MIME remain bounded untrusted
+provenance metadata; they are never passed to the store as filesystem names.
+
+Completed files survive restart until their stored expiry. The private store API sweeps on
+open, on its maintenance interval, and after shutdown drains active work. Disabling admission
+does not prevent maintenance of still-configured roots. Unknown files, mismatched inodes,
+symlinks and hard links are not deleted; failed retirement keeps its durable reservation and
+returns a safe error. Restore the expected owned file/root before retrying recovery. Cleanup
+never scans directories for prefixes or touches outbound source files. Crash/daemon-offline
+time can delay retirement until the next successful open/sweep.
+
+`DOWNLOAD_DISABLED`, `DOWNLOAD_CAPACITY`, `DOWNLOAD_STORAGE_UNAVAILABLE` and
+`DOWNLOAD_WRITE_FAILED` disclose only safe classifications. Canceled/timed-out callers retain
+their reservation until tracked work has drained outstanding filesystem I/O and removed partial
+output. Kernel I/O is not forcibly interrupted or represented as having finished prematurely.
+SQLite schema v10 adds bounded private ownership records without changing inbox/history data.
+
 ## Opt-in history storage
 
 `[history]` enables capture of authorized incoming observations, including standalone and

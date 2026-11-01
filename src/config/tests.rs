@@ -20,6 +20,7 @@ fn defaults_and_example_are_safe_and_independent() {
     assert!(config.delivery.wait_fallback_enabled && config.activity.typing_enabled);
     assert_eq!(config.delivery.wait_timeout_seconds, 600);
     assert!(!config.history.enabled);
+    assert!(!config.downloads.enabled && config.downloads.roots.is_empty());
     assert_eq!(config.activity.typing_max_duration_seconds, 600);
     let storage = &config.storage;
     assert_eq!(storage.session_ttl_days, 30);
@@ -72,6 +73,24 @@ fn rejects_invalid_settings_before_resolving_secrets() {
         "[history]\nresponse_bytes=0",
         "[history]\nquery_bytes=4097",
         "[history]\nscan_records=1",
+        "[downloads]\nenabled=true",
+        "[downloads]\nmax_file_bytes=0",
+        "[downloads]\nmax_file_bytes=20000001",
+        "[downloads]\nmax_total_bytes=1",
+        "[downloads]\nmax_files=0",
+        "[downloads]\nmax_files=1025",
+        "[downloads]\nconcurrent=0",
+        "[downloads]\nconcurrent=65",
+        "[downloads]\ntimeout_seconds=601",
+        "[downloads]\nretention_seconds=0",
+        "[downloads]\ncleanup_interval_seconds=0",
+        "[downloads]\nmin_free_bytes=0",
+        "[downloads]\nroots=['/']",
+        "[downloads]\nroots=['relative']",
+        "[downloads]\nroots=['/private/../downloads']",
+        "[downloads]\nroots=['~/exports/downloads']",
+        "[downloads]\nroots=['/home/synthetic']",
+        "[downloads]\nroots=['/private/downloads','/private/downloads/nested']",
         "[limits]\nconcurrent_requests=0",
         "[limits]\nwaiters=33",
         "[limits]\nreply_bytes=16777217",
@@ -108,6 +127,30 @@ fn rejects_invalid_settings_before_resolving_secrets() {
         )
         .is_err()
     );
+}
+
+#[test]
+fn download_paths_are_explicit_separate_and_cannot_export_storage_or_secrets() {
+    let config = parse("[downloads]\nenabled=true\nroots=['~/downloads']").unwrap();
+    assert_eq!(
+        config.downloads.roots,
+        [PathBuf::from("/home/synthetic/downloads")]
+    );
+    assert_eq!(config.downloads.max_file_bytes, 20_000_000);
+    assert_eq!(config.downloads.retention_seconds, 3_600);
+    assert!(parse("[storage]\npath='/private/downloads/relay.sqlite'\n[downloads]\nroots=['/private/downloads']").is_err());
+    let bot = BASE.replace(
+        "chat_id = 101",
+        "bot_token_file='/private/downloads/token'\nchat_id = 101",
+    );
+    assert!(
+        Config::parse(
+            &format!("{bot}[downloads]\nroots=['/private/downloads']"),
+            Some(Path::new("/home/synthetic"))
+        )
+        .is_err()
+    );
+    assert!(parse("[server]\nauth_token_file='/private/downloads/token'\n[downloads]\nroots=['/private/downloads']").is_err());
 }
 
 #[test]
