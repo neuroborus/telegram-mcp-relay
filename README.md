@@ -5,13 +5,27 @@ a protected local MCP endpoint. Telegram Replies to text or documents return to 
 session. SQLite retains replies across disconnects. Notifications signal inbox changes without
 claiming replies; `telegram_inbox`, `telegram_ask` and `telegram_wait` share the fenced claim
 path. Opt-in shared history and lazy attachment downloads preserve private inbox ownership.
-The specification calls the product **Telegram MCP Bridge**.
 
 Telegram is also a convenient way to exchange files with an agent while working through a
 remote bridge, an SSH connection or a tmux session. Send attachments to the agent and receive
 reports, patches or generated files in Telegram without moving them through the terminal.
 File access still uses the relay host's filesystem; separate hosts do not automatically share
 local paths.
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="docs/assets/chat-1.webp"><img src="docs/assets/chat-1.webp" alt="A Markdown release proposal delivered in Telegram and approved by the user" width="100%"></a>
+    </td>
+    <td width="50%" valign="top">
+      <a href="docs/assets/chat-2.webp"><img src="docs/assets/chat-2.webp" alt="The agent confirms the published release in Telegram with a GitHub link" width="100%"></a>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">File delivery and approval</td>
+    <td align="center">Release confirmation</td>
+  </tr>
+</table>
 
 ## Install and connect
 

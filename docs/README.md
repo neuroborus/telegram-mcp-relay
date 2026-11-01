@@ -11,6 +11,7 @@ Keep implementation status explicit; requirements and intended structure are not
 | [Configuration](CONFIGURATION.md) | Settings, bounds and protected secret sources | Startup configuration or secret handling changes |
 | [Setup](SETUP.md) | Locked builds, Telegram setup, local secrets, MCP clients and optional user service | Installation or client requirements change |
 | [Agent operating policy](AGENT_POLICY.md) | Copyable section 14 policy, guidance-first interaction and durable reply/file recovery | Installed-agent interaction guidance changes |
+| [Documentation assets](assets/README.md) | Screenshot inventory, dimensions and README gallery | A screenshot or its presentation changes |
 | [Resource measurements](MEASUREMENTS.md) | Historical benchmark/build identities, static-unit outcomes and separately dated baseline/extension HOST observations and limits | Measurement tooling or operational evidence changes |
 | [Testing](TESTING.md) | Required gates, recorded validation provenance, specification acceptance/traceability and deliverable coverage | A check, receipt or verification boundary changes |
 | [Development](DEVELOPMENT.md) | Inline portable Runner setup, exclusive ignored-config creation, task/plan/execution lifecycle and Git boundaries | Operator workflow or runner configuration changes |

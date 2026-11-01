@@ -78,6 +78,7 @@ use its staging-independent check division. An unrun required check remains pend
 | `tools/check_repository.py`, `justfile` | Repository/documentation checks and development command index |
 | `docs/product/TECHNICAL_SPECIFICATION.md` | Accepted product requirements, authorized revisions and acceptance criteria |
 | `docs/` | Architecture, conventions, testing, setup, agent policy and measurement evidence |
+| `docs/assets/` | Optimized chat screenshots and the documentation asset inventory |
 | `.agents/skills/` | Canonical repository skills |
 | `.claude/skills`, `CLAUDE.md` | Symlinks to canonical skills and these instructions |
 | `LOCAL_ARTIFACTS/` | Ignored Runner config, tasks, plans, reports and local scratch |
