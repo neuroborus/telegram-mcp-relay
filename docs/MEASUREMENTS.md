@@ -7,7 +7,8 @@ its executable was absent, then passed after authorized binary installation as r
 These results cover the disclosed mocked composition and static verification; they establish
 neither production-bootstrap measurements, service activation nor live Telegram interoperability.
 The later [baseline text-flow trial](#dated-baseline-host-observations) has its own release
-identity and limits. [Extension HOST acceptance](#agent-experience-host-acceptance) remains pending.
+identity and limits. The [extension HOST record](#agent-experience-host-acceptance) separately
+identifies the later installed release and bounded observed behavior; it is not a new benchmark.
 
 ## Recorded HOST capture
 
@@ -167,7 +168,8 @@ The executable-absence blocker was resolved. That static trial installed, enable
 no service unit and tested no live Telegram/client behavior. Preserve both its original failure
 and later success. The later baseline below records actual service-start failure and bounded
 text-flow success separately. Incoming downloads are now implemented and synthetically tested;
-their extended-runtime HOST acceptance remains pending. See the complete
+the later [extension trial](#agent-experience-host-acceptance) also records a bounded real
+authorized file round trip. See the complete
 [acceptance and deliverable coverage](TESTING.md#specification-1619-coverage-map).
 
 ## Dated baseline HOST observations
@@ -200,25 +202,64 @@ failure visible without weakening the unit or OS policy.
 
 ## Agent-experience HOST acceptance
 
-**Pending.** The [source/check record](TESTING.md#agent-experience-continuation-status) separates
-accepted commits and executed gates from operational acceptance. No new benchmark or live
-probe was performed for this documentation change. Old benchmark figures and the bounded
-baseline above supply no extension acceptance result.
+After final-eight **DONE** and released/quiescent ownership, the coordinator performed the
+following authorized **2026-11-01** installation and bounded probes. This is a sanitized factual
+record, not a dependency on private receipts, a new benchmark, a universal host certification
+or a claim that every live failure/recovery case was exercised.
 
-Only after actual final-eight DONE, completed applicable gates/lazy confirmation and released,
-quiescent ownership does the authorized coordinator install the accepted locked releases and
-restart one shared process. Preserve SQLite and filled private settings, narrowly enable the
-requested history, and retain canonical-unit/OS security. Workers do not inspect private
-storage, install services or make live API/model calls. Do not start a second poller to probe.
+### Installed source and preserved state
 
-The separately reviewed post-release record must identify the accepted source/release and
-dated actual outcomes for observable inventory, native framing, waits, shared history and
-authorized attachments. State host concurrency/deadline behavior, idle-wake limits and the
-same-host requirement for daemon-local file paths. Record failures and unobserved cases
-honestly, including canonical-unit startup; do not turn discovery or transient operation into
-broader compatibility. Publish only sanitized facts, not credentials, IDs, content or paths.
-Finish these HOST obligations and the [frozen-guidance follow-ups](TESTING.md#release-follow-ups)
-before claiming full acceptance or publication. This commit can finish with HOST pending.
+The accepted source HEAD is `70fedf8471b8981a802fa0085d527f6bd5d35645`; Rust runtime composition
+is unchanged since `e7575f2636480b35fa1da75134e337fadb9a4a00`, whose full C1–C6 and Native
+locked daemon/probe releases passed. The final documentation step passed its own Native C1/C2;
+all fifteen planned steps reached DONE as [recorded in testing](TESTING.md#agent-experience-continuation-status).
+
+The coordinator separately materialized the locked daemon and probe releases offline after
+the accepted gates. The final identities below describe those separate artifacts; they do
+not assert byte equality for a combined multi-target build.
+
+| Artifact | Actual final identity |
+| --- | --- |
+| Installed stripped daemon | **11,912,632 bytes**, SHA-256 `aff87150e9f98129e5ed1cb0514b10cdf7ee471490684c5f1e050b7d492d7da1`; matched the accepted Native release artifact |
+| Separate stripped probe | SHA-256 `1f7b56fecc9a0616e43f77fc522e2537952de52e87c5bd3dfa12f676935a55d8` |
+
+Existing SQLite was privately backed up from schema **6**, then migrated to **10**; the
+resulting database remained mode `0600`. Filled bot/bearer credentials and numeric user/chat
+configuration were preserved. Only necessary opt-in history/download settings were enabled.
+Private backup locations, filesystem paths, keys, IDs, usernames and message contents are omitted.
+Exactly one ordinary-user relay process/listener ran under the transient user service.
+The canonical hardened unit still failed at runtime with **218/CAPABILITIES**; no unit or OS
+security was weakened. Old successful static unit verification remains a separate historical fact.
+
+### Bounded observed protocol and interaction outcomes
+
+| Observation | Actual result and limit |
+| --- | --- |
+| Legacy MCP 2025-06-18 | Initialization HTTP 200, eleven-tool catalog and guidance version 1; correct legacy result-tag omission, no resource subscription advertisement; deletion of the probe's own transport returned 202 |
+| Modern MCP 2026-07-28 | Discovery listed both supported revisions and `resources.subscribe=true`; a request without bearer returned 401. This verifies capability advertisement, not a new live event-delivery trial |
+| Fresh Codex public app-server inventory | Eleven tools, `toolsError: null`, no model turn. The resumed model still cached seven tools and required a client restart/refresh before natural calls to the new tools; the separate probe did not refresh its catalog |
+| Guidance and registration | Guidance was fetched first; stable existing identity resumed with a short directory label; startup inbox returned zero. Retained title/directory display snapshots matched registration. Fresh public TUI title lookup was unavailable, so the last known public title was preserved privately |
+| Authorized Telegram text and document | Each send succeeded with Telegram acceptance and committed reply routing. Shared history exposed confirmed outgoing metadata with the expected display context; no local content or identifiers are reproduced here |
+| Authorized stored-handle download | Returned **44 bytes**, identical to the sent file; private mode `0600`, pinned root and device/inode identity were verified. This is one bounded same-host file round trip, not general remote-filesystem access |
+| Active after-file wait | A single default **600-second** `telegram_wait` was armed after the successful file send, without resending. While it remained pending, tools/list, history and download requests succeeded concurrently through HTTP |
+| Wait completion | Returned `wait_timeout` after **600.003 seconds**, without resending or granting permission; the owned probe session then retired with exit 0 |
+
+The assigned bounded HOST probe completed successfully. A timeout is the observed outcome of
+that wait, not permission to act or proof that no later reply can arrive within retention.
+
+The observed concurrency belongs to the direct HTTP probe. It does not establish concurrent
+Codex model/background execution or automatic waking of an idle/paused/unloaded host. The
+native entity layout passed the accepted synthetic tests and Telegram accepted framed sends;
+visual Telegram rendering was not independently inspected. The current cached model catalog,
+fresh title-lookup limitation and canonical-unit runtime failure remain explicit boundaries.
+The earlier pre-extension inbound-text handling cycle above is separate; this trial does not
+claim every new inbound/error/restart scenario was exercised live.
+
+These installed-release/file/protocol observations supply no fresh startup/RSS/CPU/upload-peak
+measurement. The `968802` mocked resource figures retain their original source/build/workload
+identity. Post-release contributor guidance/navigation and public evidence changes require their
+own documentation/skill checks and selected-mode review/confirmation before authorized commit
+and whole-task publication; they do not inherit checks from the completed product run.
 
 ## Library-linked release probe
 

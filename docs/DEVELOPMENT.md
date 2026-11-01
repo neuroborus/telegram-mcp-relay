@@ -119,11 +119,14 @@ rather than embedding machine policy in tracked instructions.
    A returned run identifier means work started, not that implementation finished. Report actual
    durable status and unresolved blockers accurately.
 
-For existing changes needing refinement, `polishing` offers independent review/finalization
-and a Runner-owned staged HANDOFF. The pipeline does not commit. The user grants standing
+For existing changes needing refinement, `polishing` offers the selected mode's required
+review/confirmation and finalization, with a Runner-owned staged HANDOFF. Default to independent;
+honor an explicit lazy selection without claiming independent code review. The pipeline does
+not commit. The user grants standing
 permission for the coordinator to commit its in-scope successful result locally without
 asking again, after `DONE` and released workspace ownership. Verify that staged content still
-matches the exact finalized, independently reviewed snapshot, and respect later instructions
+matches the exact finalized snapshot accepted by that mode's required review/confirmation, and
+respect later instructions
 to withhold a commit.
 
 Use [delegation](../.agents/skills/delegation/SKILL.md),
@@ -218,6 +221,6 @@ followed explicitly authorized installation of the matching prebuilt binary. Tho
 phases installed, enabled or started no service unit and performed no live-client trial.
 The separately dated [baseline observations](MEASUREMENTS.md#dated-baseline-host-observations)
 record later limited text flow, transient one-process operation, no idle wake and canonical-unit
-runtime failure. The [extension HOST obligations](MEASUREMENTS.md#agent-experience-host-acceptance)
-remain pending after actual final-eight DONE and released ownership; they require no new
+runtime failure. The [extension HOST record](MEASUREMENTS.md#agent-experience-host-acceptance)
+documents the separate post-DONE installation/probes and their limitations; it requires no new
 benchmark or changes to the historical controller's closed independent-run receipt schema.

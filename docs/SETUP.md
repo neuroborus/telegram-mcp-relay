@@ -10,8 +10,9 @@ failed because its executable was absent, then passed after authorized binary in
 as [recorded below](#optional-systemd-user-service). That historical trial installed, enabled
 or started no service unit. The
 [agent-experience composition record](TESTING.md#agent-experience-composition-validation)
-separately records executed synthetic validation; extension HOST installation/probes and
-extended-runtime named-client/live Telegram interoperability remain pending. The separate
+separately records executed synthetic validation. The
+[2026-11-01 extension HOST record](MEASUREMENTS.md#agent-experience-host-acceptance) records
+later installation and bounded real HTTP/Telegram/file observations with their limits. The separate
 [2026-10-31 baseline](MEASUREMENTS.md#dated-baseline-host-observations) records limited seven-tool
 discovery/text flow, no idle wake and canonical-unit runtime failure despite transient operation.
 Setup instructions are not acceptance evidence.
@@ -222,16 +223,19 @@ retain resource events. Older clients can use bounded `telegram_ask` and startup
 inbox recovery, without periodic agent polling. Do not assume a named client works merely
 because it advertises Streamable HTTP. The
 [baseline trial](MEASUREMENTS.md#dated-baseline-host-observations) observed limited discovery/text
-flow, including a resumed conversation that initially lacked tools. Extended-runtime HOST
-acceptance remains pending; no automatic reload mechanism or universal idle wake is established.
+flow, including a resumed conversation that initially lacked tools. The later
+[extension trial](MEASUREMENTS.md#agent-experience-host-acceptance) discovered eleven tools in a
+fresh Codex app-server probe while the resumed model still cached seven. Refresh/restart the
+affected client before expecting new tools in its model catalog; a separate successful probe
+does not update that catalog. No automatic reload mechanism or universal idle wake is established.
 
 | Capability | Evidence and limitation |
 | --- | --- |
-| Legacy initialization, tool listing, calls and private inbox reads | [2025-06-18 HTTP fixtures](../src/routes/legacy.rs) and real mixed-protocol daemon coverage passed in the accepted [composition validation](TESTING.md#agent-experience-composition-validation); extended-runtime named-client discovery awaits HOST |
+| Legacy initialization, tool listing, calls and private inbox reads | [2025-06-18 fixtures](../src/routes/legacy.rs) and mixed-protocol daemon coverage passed in accepted C6; the later HOST trial verified initialization, eleven-tool listing, guidance and transport deletion, not every live tool effect |
 | Modern discovery, typed tools, private inbox reads | Existing rmcp 3.8.0 / MCP 2026-07-28 fixtures in [transport tests](../src/routes/tests.rs) and [daemon scenarios](../src/app/tests/recovery.rs); see the [coverage map](TESTING.md#specification-1619-coverage-map) for evidence boundaries |
 | Resource events | POST SSE `subscriptions/listen`, accepted `notifications.resourceSubscriptions` filters and `notifications/resources/updated` are covered by [subscription fixtures](../src/routes/subscriptions.rs); older subscription APIs are unsupported |
 | Concurrent asks/inbox/events and reconnect recovery | [Daemon recovery](../src/app/tests/recovery.rs), [mixed-protocol fixtures](../src/routes/mixed.rs) and [extended composition](../src/app/tests/extended.rs) passed with complete C6; synthetic coverage does not certify a live client |
-| Extended-runtime named clients/live Telegram and idle-host wake | Pending HOST; limited pre-extension discovery/text flow is recorded separately and the observed Telegram reply did not wake the idle agent |
+| Extended-runtime named clients/live Telegram and idle-host wake | Fresh Codex public app-server discovery exposed eleven tools without a model turn; separate HTTP/Telegram/file probes are scoped in the HOST record. Resumed model-catalog refresh, model concurrency and universal idle wake are not established |
 
 Call `telegram_guidance({})` first per client conversation, including before registration;
 inspect the actual tool schemas with `tools/list`. Guidance is self-contained read-only advice,

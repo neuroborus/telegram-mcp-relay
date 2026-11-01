@@ -29,11 +29,14 @@ C1/C2 FINALIZE; the earlier source results do not validate these edits.
 
 ## Agent-experience continuation status
 
-At this step-8 authoring snapshot on **2026-11-01**, the Runner's verified completed-commit
-projection records the seven commits below. Starting from overall **7/15** at
-`7412bf7851f8ea8ff8f4f3af0a8d88c948b2981c`, continuation **7/8** is committed: overall source
-progress **14/15**. Step 8, its checks/confirmation/commit and whole-run DONE remain pending.
-Committed source progress is separate from full operational acceptance.
+On **2026-11-01**, the final-eight execution reached actual **DONE**, revision **1374**, with
+idle execution, no lease owner and no process record. Starting from overall **7/15** at
+`7412bf7851f8ea8ff8f4f3af0a8d88c948b2981c`, all **8/8** continuation commits are accepted:
+overall source progress **15/15**, ending at `70fedf8471b8981a802fa0085d527f6bd5d35645`.
+The finalization/confirmation fingerprint is
+`89644d77e3b18f0fcf0492632d3ca4a060105ecca05efd62153d95b6bc24b8a2`.
+Source completion and released ownership are separate from the dated HOST observations and
+post-release documentation/workflow acceptance below.
 
 | Step | Accepted source commit | Recorded FINALIZE result |
 | --- | --- | --- |
@@ -44,6 +47,7 @@ Committed source progress is separate from full operational acceptance.
 | 5. Mixed-protocol composition | `e7575f2636480b35fa1da75134e337fadb9a4a00` | C1–C6 plus both Native locked release builds exited 0, as detailed above |
 | 6. Public workflow documentation | `a4aea0e4c6a64cbe593ac9c5a4fb37b9a978879a` | Native C1/C2 exited 0 |
 | 7. Inline Runner setup | `9f45f3e96090a3e24378ad7d3eb4395f7fc1c55f` | Native C1/C2 and Python AST parsing exited 0 |
+| 8. Self-contained evidence documentation | `70fedf8471b8981a802fa0085d527f6bd5d35645` | Native C1/C2 exited 0; lazy finalization/confirmation accepted the exact committed content |
 
 These are the supplied accepted per-step FINALIZE/terminal-confirmation records, followed by
 the constrained executor's commits. They are not new check runs in this documentation turn
@@ -73,40 +77,41 @@ HOST results. Content repairs invalidate earlier candidate evidence.
 This explicitly lazy continuation uses installed convergence and fresh read-only confirmation
 at each step. Lazy confirmation is not independent code review and does not replace full
 applicable FINALIZE or terminal confirmation. Staging/index hygiene and the subject-only commit
-belong to the constrained COMMIT executor. The mandatory post-release HOST work below remains
-pending; this snapshot claims neither whole-run DONE nor final acceptance/publication.
+belong to the constrained COMMIT executor. The completed-run results do not validate later
+documentation edits or imply unobserved live behavior. The dated
+[HOST record](MEASUREMENTS.md#agent-experience-host-acceptance) and post-release workflow have
+their own evidence and acceptance boundary.
 
 ### Release follow-ups
 
-After all eight continuation commits reach actual DONE and ownership is released/quiescent,
-the coordinator must install the accepted locked releases, restart one shared process with
-preserved SQLite/private settings, narrowly enable requested history, and probe the actual
-inventory, native framing, waits, shared history and attachments. Record honest host-concurrency,
-idle-wake and daemon-local-filesystem limits. Retain canonical-unit hardening, including the
-unresolved `218/CAPABILITIES` runtime boundary; static verification is a separate historical fact.
-These HOST observations remain pending and cannot be inferred from source checks or old text trials.
+After actual DONE and released/quiescent ownership, the coordinator installed the accepted
+release, restarted one shared process with preserved SQLite/private settings and narrowly
+enabled the requested history/downloads. The
+[2026-11-01 HOST record](MEASUREMENTS.md#agent-experience-host-acceptance) owns the actual
+inventory/protocol, native-send, wait, shared-history and attachment observations and their
+limits. Retain canonical-unit hardening and unresolved `218/CAPABILITIES`; static verification
+is a separate historical fact. Neither old text trials nor synthetic checks establish these
+later outcomes or general host concurrency/idle wake.
 
-Run-frozen contributor guidance remains untouched while Runner owns the workspace. The
-authorized separately reviewed post-release follow-up must reconcile `AGENTS.md`'s interaction
-policy/map with guidance-first use, directory/native-caption limits, explicit waits,
-observational history and confined attachments; reconcile relevant `.agents/skills`/references
-and navigation with the final public docs and template removal. Preserve general independent/
-current/auto workflow defaults while honoring explicit mode selection, including this lazy run.
-Publish safe actual HOST observations and finish these follow-ups before claiming complete
-acceptance or publication. This is separate from per-step lazy convergence/confirmation.
-In particular, reconcile [delegation](../.agents/skills/delegation/SKILL.md)'s explicit
-independent-mode selection and [finalization](../.agents/skills/finalization/SKILL.md)'s review
-wording with user-selected mode exceptions; preserve ordinary independent defaults and Git
-ownership boundaries. Align discovery/applicability serialization guidance with the separate
-payloads described above. Audit supporting references/navigation at the same authorized
-boundary, without editing frozen guidance or active configuration/state while owned.
+Run-frozen guidance remains untouched while Runner owns the workspace. This authorized
+post-release documentation follow-up reconciles `AGENTS.md`'s map/policy, current modules,
+guidance-first interaction, native-caption limits, waits, observational history and confined
+attachments. [Delegation](../.agents/skills/delegation/SKILL.md),
+[finalization](../.agents/skills/finalization/SKILL.md) and supporting skills/references preserve
+independent/current/auto defaults while honoring explicit modes, including lazy, without false
+independent-review claims. Discovery and per-unit applicability retain their separate schemas.
+Portable Runner setup is inline; no tracked JSON template is restored. This follow-up needs
+its own applicable documentation/skill checks and required review/confirmation before commit;
+it does not inherit the completed product run's checks or add per-step product review.
+Finish required HOST/evidence/workflow acceptance before publication. Never edit frozen guidance
+or active configuration/state during ownership.
 Historical canceled/paused runs, receipts
 and counters remain intact; do not resume them, reset budgets or manually edit state/leases.
 
 The [dated baseline HOST record](MEASUREMENTS.md#dated-baseline-host-observations) publishes
 the limited pre-extension text trial without private receipts. The
-[extension HOST record](MEASUREMENTS.md#agent-experience-host-acceptance) owns pending installation,
-bounded probes and their eventual sanitized outcomes. After actual DONE and completed HOST/
+[extension HOST record](MEASUREMENTS.md#agent-experience-host-acceptance) owns installation,
+bounded probes and sanitized outcomes. After actual DONE and completed HOST/
 follow-ups, the coordinator reports final evidence and publishes the related compatibility,
 all fifteen experience and authorized cohesive correction commits. Workers never push; no
 early/force push, new branch, remote/identity change or history rewrite is authorized here.
@@ -189,8 +194,9 @@ declared and actual size limits, exact 20,000,000-byte streaming, lower configur
 absent/false sizes, unavailable/expired paths, redirects, partial/encoded responses and truncated
 bodies. Writer failure/backpressure, cancellation and whole-operation deadlines preserve safe
 errors without automatic replay. Generated chunked bodies use bounded buffers; no live credentials or API
-requests are needed. These cases passed in accepted complete C6; live attachment acceptance
-remains separate. Owned-file cleanup and MCP authorization
+requests are needed. These cases passed in accepted complete C6; the separate
+[HOST trial](MEASUREMENTS.md#agent-experience-host-acceptance) verified one authorized 44-byte
+round trip, not all adapter edge cases. Owned-file cleanup and MCP authorization
 have separate owning coverage below.
 
 ## Private download storage regressions
@@ -204,8 +210,10 @@ names. Restart cases cover reservation-only, unnamed inode, linked partial and r
 crash points while preserving valid completed files and unknown files. Configuration cases
 reject inconsistent budgets and source/secret/storage overlap. Storage migration cases preserve
 older recovery data through v10, including v9 rollback after late DDL failure. These proofs
-passed in accepted complete C6; support on the deployment filesystem and live acceptance
-remain separate HOST obligations.
+passed in accepted complete C6. The separate
+[HOST trial](MEASUREMENTS.md#agent-experience-host-acceptance) verified a private mode-0600
+download on the deployed pinned root with matching device/inode identity. Other filesystem
+failure/restart cases in this suite were not all reproduced live.
 
 ## Authorized attachment tool regressions
 
@@ -511,7 +519,9 @@ terminated session IDs without registration effects, preserve partial legacy met
 and exercise session-owned cancellation/DELETE with controlled handler signals. The preflight
 retains inclusive declared/chunked body bounds and shutdown cancellation during a partial body.
 Supplied `Mcp-Method` initialization cases follow the SDK's legacy/modern header semantics.
-These cases passed in accepted complete C6; named-client success remains unverified.
+These cases passed in accepted complete C6. The separate
+[HOST record](MEASUREMENTS.md#agent-experience-host-acceptance) verifies fresh eleven-tool
+metadata discovery and legacy initialization/catalog/guidance, not all model-driven tool effects.
 The prior modern-only version-list assertion is
 intentionally expanded to the two supported versions; independent unsupported-version
 and security assertions remain. The historical benchmark at
@@ -542,8 +552,11 @@ sends across admission closure; shutdown waits for durable route bookkeeping, an
 accept recoverable replies afterward without implicit acknowledgment. These mixed-protocol
 cases passed in accepted complete C6. Source inspection or no-run compilation does not
 establish a passing test outcome, real Codex discovery, live Telegram operation or fresh
-resource measurements. Named-client acceptance remains the coordinator's later HOST check
-after Runner DONE and ownership retirement, including actual discovery of the complete tool catalog.
+resource measurements. After Runner DONE and ownership retirement, the coordinator separately
+[recorded](MEASUREMENTS.md#agent-experience-host-acceptance) fresh eleven-tool Codex metadata
+discovery and bounded real HTTP/Telegram/file probes. That trial made no model turn, and the
+resumed model still cached seven tools; live asks/subscription events, model concurrency and
+independent visual rendering remain unverified.
 
 `routes::tests::tools` exercises the real shared handler through separate modern MCP HTTP
 requests and a separate synthetic Bot API. It covers typed input/output discovery, stable
@@ -581,7 +594,8 @@ recovery of offline commits through a fresh handler/database. Pure queue tests i
 prove coalescing, slow-listener isolation, uninterested-session silence, drop-based admission
 release and budget validation. Fixtures are private and TMPDIR-aware; no live Telegram calls are made.
 These tests address subscription/reconnect and bounded slow-client criteria in §§6.1, 16 and 19.
-Named-client interoperability remains unverified.
+Live named-client subscription/event interoperability remains unverified; capability
+advertisement and bounded non-subscription HOST effects are recorded separately.
 
 `routes::tests::ask` defines actual mocked Telegram sends and modern MCP calls alongside
 resource subscriptions. It covers exact formatted question boundaries, independent waiter
@@ -603,7 +617,8 @@ through cancellation before/after send and after reply commit, preserving event 
 restart recovery independently of the canceled waiter.
 These cases cover the ask/event/race, timeout and wait-cancellation portions of §§6.2–6.3,
 16 and 19. Fixtures are private and TMPDIR-aware. Full-composition interactions are defined
-above, and named-client interoperability is unverified.
+above; live named-client ask/subscription interoperability is not established by those
+fixtures or by the separate bounded HOST trial.
 
 `services::typing::tests` uses controlled time for per-chat merging, independent session/reply
 stops, cooldowns across stop/start races, the original 600-second cap across repeated starts
@@ -840,7 +855,7 @@ mark the unchanged product specification accepted or establish named-client/live
 | One native daemon, one poller, no vendor adapters/agent management, external database, broker, Node.js or Docker requirement; no public HTTPS/webhook needed (§§1–3, 13, 16, 19) | [Application](../src/app.rs), application/poller tests and [architecture](ARCHITECTURE.md) define and exercise the composition; [setup](SETUP.md) documents locked builds and optional user deployment. [HOST record](MEASUREMENTS.md#recorded-host-capture) preserves the resource result and initial failed/later successful static unit verification |
 | Concise agent text/file policy; no periodic agent polling and no universal LLM wake promise (§§2, 6, 14, 16, 19) | Complete copyable section 14 [agent policy](AGENT_POLICY.md), token/reconciliation instructions and [client timeout guidance](SETUP.md#connect-mcp-clients); existing [contributor policy](../AGENTS.md) is preserved |
 | Telegram at-most-24-hour unconsumed backlog, independent TTLs and reconnect limitations explained to users (§§10–11, 16, 19) | [Setup/recovery](SETUP.md#recovery-and-retention), [README](../README.md), [architecture](ARCHITECTURE.md) and [configuration](CONFIGURATION.md) explain the independent limits and webhook-safe setup |
-| Protocol support and actual client capabilities (§§5–6, 16–19) | [Subscription](../src/routes/subscriptions.rs), transport and daemon recovery fixtures cover synthetic MCP 2026-07-28 clients. [Legacy HTTP fixtures](../src/routes/legacy.rs), [mixed clients](../src/routes/mixed.rs) and [extended composition](../src/app/tests/extended.rs) passed in accepted complete C6, including negotiation, the complete catalog, shared observation/downloads and delivery/recovery/shutdown. [Client requirements](SETUP.md#connect-mcp-clients) retain the older-event limitation and pending HOST named-client acceptance, live Telegram and automatic host wake boundaries |
+| Protocol support and actual client capabilities (§§5–6, 16–19) | [Subscription](../src/routes/subscriptions.rs), transport and daemon recovery fixtures cover synthetic MCP 2026-07-28 clients. [Legacy HTTP fixtures](../src/routes/legacy.rs), [mixed clients](../src/routes/mixed.rs) and [extended composition](../src/app/tests/extended.rs) passed in accepted complete C6, including negotiation, full DTO catalog, observation/downloads and recovery/shutdown. [Client requirements](SETUP.md#connect-mcp-clients) separate later HOST protocol/discovery/bounded live effects from unverified model concurrency/catalog refresh and universal wake; legacy events remain unsupported |
 | Near-zero idle CPU, best-effort idle RSS below approximately 30 MB, startup, near-limit upload peak RSS, stripped locked release size and dependency profile (§§3, 9, 16–19) | [Recorded HOST benchmark](MEASUREMENTS.md#workload-and-observed-resources) gives actual probe/mock/driver figures, startup and sampled/lifetime limits; [build identity](MEASUREMENTS.md#provenance-and-release-identity) records stripped daemon/probe sizes and distinct profiles. Unit tests retain bounded-read/idle-scheduler proofs without asserting resource targets |
 
 ## Section 17 deliverable coverage
@@ -854,9 +869,9 @@ from current documentation finalization and full operational acceptance.
 | 2. Lock, reproducible release instructions, sample configuration | [Cargo.lock](../Cargo.lock), [setup](SETUP.md), [sample TOML](../config/relay.example.toml), recorded R1/R2 and bound offline HOST materialization |
 | 3. SQLite initialization/migrations, cleanup, restart-safe cursor | [Repositories](../src/repositories.rs), storage/retention/maintenance/ingress/poller suites above |
 | 4. MCP tools/resources/subscriptions with tested current protocol | Accepted complete mixed-protocol C6, including guidance/history/attachments and complete independent DTO catalog; legacy resource events remain unsupported |
-| 5. Single poller, strict final text/caption limits, safe documents | Client, domain, file and outbound suites above; historical mocked HOST upload and bounded baseline text trial; extension live acceptance pending |
+| 5. Single poller, strict final text/caption limits, safe documents | Client/domain/file/outbound suites above; historical mocked upload and separately dated real native-framed text/file/history/download observations; visual rendering and general live cases remain outside that bounded trial |
 | 6. Unit/integration tests using mock Telegram | Recorded complete unfiltered C6 and controlled P1/P2; no real messages or credentials used |
-| 7. README/setup covering bot, allowlists, URL, secrets, registration, wait caveat, notices | [README](../README.md), [setup/client guidance](SETUP.md), [configuration](CONFIGURATION.md); bounded baseline discovery/text trial recorded, extended-runtime named-client acceptance pending |
+| 7. README/setup covering bot, allowlists, URL, secrets, registration, wait caveat, notices | [README](../README.md), [setup/client guidance](SETUP.md), [configuration](CONFIGURATION.md); separate baseline and extension discovery/live records retain their model-catalog, concurrency and wake limits |
 | 8. Contributor or copyable section 14 agent policy | Preserved [AGENTS.md](../AGENTS.md) and complete copyable [agent policy](AGENT_POLICY.md), including file reports, no periodic inbox polling and explicit completion |
 | 9. Example user unit and protected environment-file approach | [Unit](../deploy/telegram-mcp-relay.service), [environment template](../deploy/relay.env.example), [setup](SETUP.md#optional-systemd-user-service); static verification failed then passed after binary installation; later installed canonical unit failed at runtime with `218/CAPABILITIES`, separate from transient one-process text operation |
 | 10. Benchmark target, RSS/CPU, file-upload peak and binary size | [Recorded HOST capture](MEASUREMENTS.md#recorded-host-capture), with separate process overhead and sampled/lifetime limits; production bootstrap was not measured |
@@ -877,7 +892,7 @@ separate bound HOST capture. Source/build checks do not attest runtime measureme
 complete C6 owns actual HTTP/routing proofs. The original unit failure is historical; later
 verification passed after binary installation as [recorded](MEASUREMENTS.md#unit-verification-and-remaining-acceptance).
 That benchmark/static trial exercised no service activation or live behavior. Later baseline
-observations and pending extension HOST acceptance are separately scoped above.
+observations and the extension HOST record are separately scoped above.
 
 Native Runner commands use the accepted staging-independent inventory and
 [Runner finalization](../.agents/skills/finalization/agent-runner.md). Staged inspection belongs

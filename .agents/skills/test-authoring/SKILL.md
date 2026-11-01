@@ -20,9 +20,19 @@ through [delegation](../delegation/SKILL.md); find required commands in
 - Cover 1,000/1,001 final scalar boundaries and native caption bounds, same-title interleaved
   routes, durable cursor atomicity, token fencing, event/wait races, cancellation/restart,
   processing notices, retention, authorization and bounded file streaming as features land.
+- Preserve native entity UTF-16 spans and literal bodies, post-send waits without resend,
+  shared-history read-versus-claim isolation, sparse keyset/response limits, retained provenance
+  and confined owned download cancellation/restart. Synchronize startup readiness before
+  advancing a scheduler's test clock; retain bounded between-transaction yielding.
+- Update the independently maintained expected complete tool catalog and DTO input/output
+  schema bindings when adding tools; retain original-tool, required-field and security checks.
+  Assert protocol-specific wire envelopes precisely, including modern result tags versus
+  legacy omissions, alongside equal semantic payloads rather than stripping arbitrary fields.
 - For a reproduced bug, retain evidence that the regression fails before the fix and passes
   after it when practical. Preserve safety assertions; do not skip failures or reduce
   concurrency to conceal races. Explain a retained replacement before deleting redundant tests.
-- Run focused affected tests plus required gates. Record actual outcomes; a sandbox failure
-  before execution is neither an assertion failure nor a pass. Keep live Telegram checks opt-in
-  and separately authorized. Do not repeat expensive broad runs without an unresolved reason.
+- Follow Runner's FINALIZE-only division for established checks, including full unfiltered
+  suites and selected trusted routes. IMPLEMENT/read-only confirmation uses inspection or
+  appropriate no-run compilation. Record actual outcomes; inability before execution is neither
+  an assertion failure nor a pass. Live Telegram remains separately authorized. Repeat broad
+  gates only after content changes, failures or unresolved concerns justify them.

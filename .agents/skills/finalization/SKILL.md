@@ -24,15 +24,19 @@ finalization entry point, while that reference defines the pipeline-specific div
 5. Reconcile root README availability, `AGENTS.md` map, document index and affected owning docs.
    Validate changed skills and links, and keep canonical symlinks intact. Keep local plans,
    run state/configuration, databases and build output out of Git.
-6. Complete the required independent review after the last content correction. For a requested
-   subagent quality loop require a full final zero-finding pass, not only verification of old
-   fixes. Any later content change invalidates that reviewed snapshot.
+6. Complete the selected mode's required review/confirmation after the last content correction.
+   Default independent review remains; explicit Runner `lazy` uses convergence and fresh
+   read-only confirmation, not independent code review. For a separately requested subagent
+   quality-loop scope require a full final zero-finding pass, not only old-fix verification.
+   Do not add that loop per product step contrary to explicit mode selection. Any later content
+   change invalidates the accepted review/confirmation and finalization snapshot.
 7. Follow [git-workflow](../git-workflow/SKILL.md). Outside Runner, stage/commit only a cohesive
    change set covered by the user request or standing polishing permission. Commit a successful
    in-scope polishing handoff without another approval question under the
    [handoff conditions](agent-runner.md). Report unauthorized work without claiming a commit.
-   Inside Runner obey its exclusive COMMIT/HANDOFF ownership. Never push or rewrite history.
+   Inside Runner obey its exclusive COMMIT/HANDOFF ownership. Push requires separate explicit
+   user authorization and its stated completion boundary; never rewrite history implicitly.
 
-Report the result, material checks and independent review outcome, actual Git state and any
+Report the result, material checks and actual review/confirmation mode, Git state and any
 remaining acceptance evidence. Identify actual commits by hash/subject. Runtime/measurement
 claims require observed results; a successful local commit is not full operational acceptance.

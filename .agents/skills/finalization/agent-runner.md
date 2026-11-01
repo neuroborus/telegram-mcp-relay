@@ -4,6 +4,11 @@ The installed Runner guidance and accepted task gates define the active contract
 preserves this repository's pipeline boundaries; it is a supporting reference, not a valid
 `finalization` setting. Use `auto` or `.agents/skills/finalization/SKILL.md` as the skill setting.
 
+Default to independent review unless the user explicitly selects another supported mode.
+Honor `lazy` with installed convergence and fresh read-only confirmation; do not describe that
+as independent code review or add an independent review per step. All applicable checks and
+finalization remain mandatory in either mode.
+
 ## Checks and evidence
 
 Keep bootstrap, candidate and finalization inventories independent of index contents. Run
@@ -38,8 +43,9 @@ coordinator keeps checkout, inputs, guidance and config unchanged while Runner o
 
 The user grants standing permission for the coordinator to commit in-scope work from a
 successful `polishing` handoff locally, without asking again. Wait for `DONE` and released
-workspace ownership, verify that the staged content still matches the exact finalized and
-independently reviewed snapshot, then commit under [git-workflow](../git-workflow/SKILL.md).
+workspace ownership, verify that staged content still matches the exact finalized snapshot
+accepted by the selected mode's required review/confirmation, then commit under
+[git-workflow](../git-workflow/SKILL.md).
 Respect later user instructions to withhold a commit. This permission does not cover unrelated
 manual work. No pipeline grants push, branch/ref changes, identity overrides, history rewrites,
 bodies/footers or co-author trailers.

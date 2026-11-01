@@ -12,7 +12,10 @@ described under [runtime and ownership](#runtime-and-ownership), including grace
 draining after SIGINT/SIGTERM in the binary or host cancellation through the embedding API.
 The [agent-experience validation record](TESTING.md#agent-experience-composition-validation)
 records complete mixed-protocol C6 and both locked release builds at
-`e7575f2636480b35fa1da75134e337fadb9a4a00`; extension HOST installation/probes remain pending.
+`e7575f2636480b35fa1da75134e337fadb9a4a00`. All fifteen planned steps reached DONE at
+`70fedf8471b8981a802fa0085d527f6bd5d35645`; the separate
+[extension HOST record](MEASUREMENTS.md#agent-experience-host-acceptance) scopes the later
+installation, protocol, Telegram and confined-file observations.
 The earlier coordinator [validation evidence](TESTING.md#recorded-validation-evidence)
 reports successful complete workspace tests, including composition, shutdown and protocol
 fixtures, at captured commit `968802371f94f51eedab66998eff6031762db5ea`. The
@@ -117,7 +120,8 @@ cached published registry metadata. Its cached archive now matches the checksum 
 `Cargo.lock`; source inspection confirms `UnicodeSegmentation::grapheme_indices(true)`,
 the declared minimum and the absence of runtime dependencies. Native bounds below match
 specification §9.3 and the saved official Telegram API reference, with conservative UTF-16
-counting. Native formatting has synthetic coverage; live rendering awaits extension HOST.
+counting. Accepted tests cover native entity layout. Telegram accepted native-framed text and
+a document in the later HOST trial; independent visual rendering inspection was not performed.
 
 Feature unification also enables Tokio I/O utilities, synchronization and time, and tracing
 attributes through the SDK. It does not enable Tokio's multi-thread runtime or the SDK's
@@ -193,7 +197,8 @@ Binary diagnostics suppress rmcp targets, whose upstream logs can contain raw me
 library embedders must retain this filter. The accepted
 [composition validation](TESTING.md#agent-experience-composition-validation) includes legacy
 HTTP coverage; older recorded outcomes cover their original snapshots. Extended-runtime
-named-client/live acceptance remains pending, separate from the limited baseline text trial.
+named-client discovery and bounded live effects are recorded separately from the limited
+baseline text trial; neither proves every host model's new-tool use or universal idle wake.
 
 ### SDK transport session bounds
 
@@ -262,7 +267,9 @@ errors retain byte limits/counts; Telegram rejections retain numeric code/retry 
 Uncertain delivery and confirmed-send bookkeeping failure remain distinct and explicitly
 forbid automatic resending. Supplied paths, keys, bodies and upstream descriptions are never
 included in errors. Synthetic MCP-to-mocked-Telegram tests are included in the recorded C6
-outcome; no named-client interoperability is claimed.
+outcome; those synthetic fixtures alone do not establish named-client interoperability.
+The separate [dated HOST trial](MEASUREMENTS.md#agent-experience-host-acceptance) records
+fresh eleven-tool discovery and bounded real text/file/history/download effects.
 
 ## MCP inbox resources and reply tools
 
@@ -337,8 +344,9 @@ then sends one initial invalidation per accepted inbox to cover commits during t
 Clients read SQLite-backed resources or claim through `telegram_inbox`, including after
 reconnect/restart; signals are neither persistent nor replayed and never claim or acknowledge.
 There is no guarantee that a host wakes an idle LLM. Actual HTTP protocol tests are defined in
-[testing](TESTING.md) and included in the recorded C6 outcome. No named client or live
-Telegram interoperability is claimed.
+[testing](TESTING.md) and included in the recorded C6 outcome. Live named-client subscription/
+event delivery remains unverified; later capability advertisement and bounded non-subscription
+HOST effects are [recorded separately](MEASUREMENTS.md#agent-experience-host-acceptance).
 
 ## Bounded observation storage
 
@@ -461,7 +469,9 @@ and `wait_timeout`. The default 600-second deadline starts when the authorized w
 Cancellation, timeout and shutdown retire only the interest; no route/reply deletion, resend,
 processing start, acknowledgment or timeout notice occurs. Recover a lost claim response through
 normal inbox leases. Both protocols expose the tool; modern events remain independent. The
-accepted complete C6 covers synthetic wait cases without establishing live or idle-host wake behavior.
+accepted complete C6 covers synthetic wait cases. The separate
+[HOST trial](MEASUREMENTS.md#agent-experience-host-acceptance) completed a post-file wait with
+`wait_timeout` after 600.003 seconds, without resend; it establishes no automatic idle-host wake.
 
 ## Outbound formatting
 
@@ -491,7 +501,8 @@ empty body. Native entity metadata adds no visible characters. These contracts f
 [Telegram entity](https://core.telegram.org/bots/api#messageentity),
 [text](https://core.telegram.org/bots/api#sendmessage) and
 [document](https://core.telegram.org/bots/api#senddocument) interfaces. Synthetic formatting
-proofs passed with complete composition C6; live Unicode/rendering remains a separate HOST obligation.
+proofs passed with complete composition C6. The dated HOST trial accepted native-framed text
+and a document; independent visual rendering and live Unicode-boundary experiments were not performed.
 
 `TEXT_TOO_LONG` carries serializable details: `limit=1000`, `actual_characters`,
 `native_limit_utf16`, `actual_utf16_units` and file-delivery `guidance`. Native caption
@@ -622,7 +633,8 @@ Usage is a snapshot rather than peak telemetry or reserved disk space, and exclu
 metadata, snapshots, logs and user-owned outbound sources. Filesystem allocation rounding can
 exceed file lengths. The private directory and same-user single-process ownership remain trust
 requirements; concurrent external writers/replacement invalidate accounting assumptions.
-Measured runtime/peak disk behavior remains pending.
+No runtime peak-disk measurement is claimed for this implementation; the historical resource
+capture and later bounded operational probes have separate scopes.
 
 ## Session and route persistence
 
@@ -740,7 +752,9 @@ automatic replay or a fabricated route. Caller cancellation leaves admitted work
 bookkeeping completion. Graceful daemon shutdown drains the same tracked work. Synthetic
 document tests are included in the recorded C6 outcome. The
 [HOST capture](MEASUREMENTS.md#workload-and-observed-resources) records a near-limit streamed
-upload through the probe and loopback mock; no live Telegram upload is claimed.
+upload through the probe and loopback mock, not a live Telegram upload. The separate
+[2026-11-01 HOST trial](MEASUREMENTS.md#agent-experience-host-acceptance) accepted one real
+document and verified its 44-byte authorized download; it is not a near-limit live benchmark.
 
 ## Telegram HTTP client
 
@@ -795,8 +809,10 @@ not live bot observations.
 The complete, unfiltered `cargo test --locked --workspace` suite passed in Runner FINALIZE
 through the read-only trusted route, including the synthetic HTTP client tests. Earlier
 Native attempts failed at loopback `bind` with `Operation not permitted`; that limitation
-did not affect the successful Runner execution. No socket tests were skipped. Live Telegram
-behavior remains untested, and production configuration exposes no endpoint override.
+did not affect the successful Runner execution. No socket tests were skipped. The separate
+[HOST record](MEASUREMENTS.md#agent-experience-host-acceptance) verifies bounded live text,
+document and download effects; live rate-limit/retry, Unicode-boundary and other API edge cases
+remain unverified. Production configuration exposes no endpoint override.
 
 ## Private cloud download adapter
 
@@ -819,8 +835,8 @@ caller limit or 20,000,000 bytes. Writes are at most 64 KiB, with no whole-file 
 positive caller deadline, at most 600 seconds, covers metadata retries/backoff, download,
 writer backpressure and flush. Streaming is attempted once. Success returns actual bytes;
 truncation, timeout, unavailable/expired paths and writer failure remain errors. Cancellation
-drops HTTP work; the future storage owner must retire outstanding writer I/O and remove partial
-output before releasing reservations. Errors retain no URLs, IDs, OS diagnostics or paths.
+drops HTTP work; the implemented `services::downloads::DownloadStore` retires outstanding
+writer I/O and removes owned partial output before releasing reservations. Errors retain no URLs, IDs, OS diagnostics or paths.
 The existing lower configured/50,000,000-byte upload contract is unchanged.
 
 The saved official [getFile](https://core.telegram.org/bots/api#getfile) and
@@ -828,8 +844,9 @@ The saved official [getFile](https://core.telegram.org/bots/api#getfile) and
 against its recorded SHA-256 during this implementation. It documents up-to-20-MB downloads,
 optional size/path fields, token-based download links valid for at least one hour and obtaining
 a fresh link through getFile after expiry. It does not guarantee filename/MIME preservation.
-The bridge's decimal-byte ceiling is conservative application policy. No fresh fetch, live
-download or executed validation is claimed by this source change.
+The bridge's decimal-byte ceiling is conservative application policy. That recorded API
+reference check alone establishes no live result; complete composition C6 and the later
+[bounded HOST download](MEASUREMENTS.md#agent-experience-host-acceptance) are separate executed evidence.
 
 ## Private owned download store
 
@@ -890,7 +907,9 @@ changes, expiry or authorization loss remove the owned output without altering r
 data. Final identity checks and durable expiry capping confine the returned path and ensure its
 lifetime cannot exceed the authorized source. Each successful call materializes its own bounded
 copy; results claim only daemon-local filesystem access to untrusted bytes, never remote access
-or permission to execute content. Complete composition/release/HOST acceptance remains separate.
+or permission to execute content. Complete composition/release checks passed; the separate
+[HOST record](MEASUREMENTS.md#agent-experience-host-acceptance) covers one authorized same-host
+44-byte round trip, not every attachment or remote-client scenario.
 
 ## Current agent guidance
 
@@ -910,7 +929,9 @@ resend, startup/notification inbox recovery, current fences and saved-pair recon
 scoped sends, proactive focused communication, shared observation and daemon-local files.
 The [consumer policy](AGENT_POLICY.md) matches accepted specification section 14. Run-frozen
 contributor guidance stays unchanged until the authorized post-release follow-up. Guidance
-source/HTTP proofs passed with complete C6; HOST remains a separate acceptance boundary.
+source/HTTP proofs passed with complete C6. The separate
+[HOST trial](MEASUREMENTS.md#agent-experience-host-acceptance) read guidance version 1 through
+both protocols; a fresh Codex metadata probe listed eleven tools without a model turn.
 
 The extended composition fixture in `app::tests::extended` uses synthetic authenticated clients
 on both protocols against the actual daemon. It combines native document/wait delivery,
@@ -972,7 +993,8 @@ Notice attempts share the receipt count and metadata budgets with acknowledgment
 unroutable dispositions, including outstanding send reservations. Any batch admission/SQL
 failure rolls back every decision without removing replies or advancing ingress. Attempt
 expiry stays anchored to the source reply/disposition expiry; attempts have no payload or
-reply/session foreign key. Cleanup remains later work.
+reply/session foreign key. Implemented bounded retention cleanup deletes expired attempts
+alongside the other child tables without changing their independent deadlines or valid replies.
 
 `services::notices::NoticeService` holds one scheduler lease per shared database handle.
 One global one-second sweep admits at most one eligible attempt, with one bounded HTTP send
@@ -1014,7 +1036,7 @@ to 100 items and `limits.reply_bytes` of combined UTF-8 text/attachment payload.
 lowered limit cannot fit the first retained reply, return capacity pressure without skipping it.
 
 `services::inbox::InboxService` validates the configured 1–600-second claim lease (default 60).
-Inbox and future ask consumers share one immediate SQLite transaction for ordered selection,
+Inbox, ask and post-send wait consumers share one immediate SQLite transaction for ordered selection,
 metadata admission and claims. Optional question filtering includes both chat and outbound
 message ID within the session. Each acquisition uses a fresh 32-byte OS-random fencing token;
 only a committed transaction returns tokens. Admission counts token bytes and outstanding send
@@ -1250,10 +1272,12 @@ The implementation advertises MCP `2025-06-18` initialization/tools/read-only re
 `2026-07-28` discovery/tools/resources/`subscriptions/listen` through locked rmcp 3.8.0.
 [Legacy HTTP fixtures](../src/routes/legacy.rs) define negotiation, security and shared-handler
 regressions; complete C6 passed with the accepted mixed-protocol composition. Existing modern
-event proofs remain in place. Extended-runtime named-client acceptance requires later HOST
-discovery of the complete eleven-tool catalog and the
-[bounded workflow probes](MEASUREMENTS.md#agent-experience-host-acceptance). The pre-extension
-seven-tool/text trial does not establish these results or universal idle-host wake.
+event proofs remain in place. The [dated HOST record](MEASUREMENTS.md#agent-experience-host-acceptance)
+now records eleven-tool discovery in a fresh Codex metadata probe, legacy initialization,
+both protocols' catalogs/guidance and bounded modern HTTP text/file/history/download/post-file-wait
+effects. The resumed model still cached seven tools; live model-driven new-tool use, asks, subscription event delivery,
+independent visual rendering and universal idle-host wake are not established. The pre-extension
+seven-tool/text trial remains a separate historical result.
 See [client requirements](SETUP.md#connect-mcp-clients) and specification sections 5–6 and 18.
 
 The historical [HOST benchmark](MEASUREMENTS.md#recorded-host-capture) remains tied to

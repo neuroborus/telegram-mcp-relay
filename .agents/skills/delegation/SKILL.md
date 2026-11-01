@@ -1,6 +1,6 @@
 ---
 name: delegation
-description: Prepare and operate Agent Runner planning, implementation and polishing for Telegram MCP Relay while preserving independent review and Git ownership.
+description: Prepare and operate Agent Runner planning, implementation and polishing for Telegram MCP Relay with mode-appropriate confirmation, checks and Git ownership.
 ---
 
 # Delegation
@@ -18,19 +18,26 @@ configuration and [Runner finalization](../finalization/agent-runner.md) for che
 
 Serialize validation against the actual phase schema. Structured check IDs match
 `^C[1-9][0-9]{0,8}$`; IDs and exact commands are globally unique within an inventory.
-Share one row per command: scoped rows merge applicability into one nonempty, strictly
-ascending `steps` list; unscoped rows omit it. H/R/P labels in prose are logical names,
-not structured IDs. Persisted per-step receipt IDs may differ from global catalog IDs;
-export the observed receipt IDs, commands and provenance. Retain conditional checks.
+Discovery `requiredChecks` rows contain `id` and `command` only. Current bounded
+`APPLICABILITY_BATCH_SCHEMA` replies instead contain assignments with `checkId` and nonempty
+`steps` inside the CURRENT supplied unit range. Omit checks in units where they do not apply;
+do not send a full-plan union or discovery rows as applicability output. Every discovered
+check must have a truthful owner somewhere in the plan. Keep absent-scope checks conditional,
+not active phantom rows; select only matching established trusted aliases. Runner assembles
+the scoped inventory. H/R/P prose labels are not structured IDs; persisted receipt IDs may
+renumber, so export actual IDs, exact commands and provenance.
 
 Use `plan-authoring` to write a reviewed commit plan, then `plan-execution` to implement it
-one verified local commit at a time. Select `independent` explicitly. `polishing` reviews and
-stages existing changes but never commits. Only a Runner-authorized Worker `COMMIT` turn may
+one verified local commit at a time. Default to `independent`; honor an explicit supported
+user-selected mode. In `lazy`, use installed Worker convergence and fresh read-only confirmation,
+without claiming independent code review or adding it per step. All applicable checks remain.
+`polishing` finalizes existing changes and Runner stages at HANDOFF; agents never stage/commit.
+Only a Runner-authorized Worker `COMMIT` turn in plan-execution may
 create execution commits; do not stage or edit while another run owns the workspace.
 
 After successful polishing reaches `DONE` and releases workspace ownership, use the user's
-standing permission to commit the unchanged, finalized and independently reviewed in-scope
-handoff locally without another approval question. Follow
+standing permission to commit the unchanged, finalized in-scope handoff with the selected
+mode's required review/confirmation locally without another approval question. Follow
 [git-workflow](../git-workflow/SKILL.md) and the Runner finalization handoff conditions.
 
 Keep ignored task artifacts confined under `LOCAL_ARTIFACTS/`, run state outside both checkout

@@ -20,8 +20,10 @@ and lockfile. Root workspace checks do not cover it; see [testing](TESTING.md).
 | `src/handlers.rs`, `src/handlers/`, `src/routes.rs`, `src/routes/` | Shared SDK handler state, thin typed tools/read-only inbox resources, bounded modern subscriptions, protected HTTP transport and its tests |
 | `src/domain.rs`, `src/domain/` | Pure title normalization, final outbound Unicode rules and their tests |
 | `src/services.rs`, `src/services/` | Text/document delivery, bounded question waits, confined outbound files and authorized downloads, read-only current agent guidance, authorized reply ingestion, one restart-safe poller, bounded inbox claims, durable processing/completion, shared confirmed-processing typing, factual notice dispatch and bounded retention scheduling |
-| `src/repositories.rs`, `src/repositories/` | SQLite initialization/migrations, transactions, queries and bounded post-commit inbox interests |
-| `src/clients.rs`, `src/clients/` | Bounded direct Telegram HTTP, streamed multipart uploads, transport DTOs and synthetic tests |
+| `src/services/history.rs`, `src/services/attachments.rs`, `src/services/guidance.rs` | Authorized shared reads, retained own/shared attachment authorization and nonsecret policy projection |
+| `src/services/downloads.rs`, `src/services/downloads/` | Private pinned-root file storage, reservations, cancellation and owned restart cleanup |
+| `src/repositories.rs`, `src/repositories/` | SQLite migrations/transactions, journal and provenance queries, durable owned file identities and bounded post-commit interests |
+| `src/clients.rs`, `src/clients/` | Bounded direct Telegram HTTP, streamed uploads/getFile downloads, transport DTOs and synthetic tests |
 | `tests/` | Cross-module storage, ingress, claim/recovery, notice, retention and maintenance tests |
 | `config/` | Nonsecret example configuration |
 | `deploy/` | Example `systemd --user` unit and protected secret-file guidance |
@@ -50,11 +52,13 @@ SDK owns route wiring; do not duplicate an HTTP server to imitate this tree.
 - Prefer a Tokio current-thread runtime, one reusable HTTP client and bounded tasks/buffers.
   Do not hold synchronous database locks across `.await`; measure SQLite impact before adding
   a dedicated bounded worker. Avoid loading whole files or histories into RAM.
-- Default to plain Telegram text, loopback binding and explicit allowlists. Configuration is
-  TOML plus environment secrets, validated once at startup. Never commit actual bot tokens.
+- Preserve literal Telegram bodies with server-owned native entities for headers/directories;
+  service messages begin `🔧 `. Do not introduce implicit Markdown/HTML parsing. Default to
+  loopback binding and explicit allowlists. Configuration is TOML plus protected secret sources,
+  validated once at startup. Never commit actual bot tokens.
 
-Verify exact versions/features against official upstream sources when the Cargo manifest is
-introduced. Prefer `rmcp`, Tokio, the existing Hyper/Tower transport integration, reqwest with
+Verify changed versions/features against official upstream sources. Prefer `rmcp`, Tokio,
+the existing Hyper/Tower transport integration, reqwest with
 rustls, rusqlite, serde and tracing where needed. Do not inherit OpenAPI/Swagger, broad CORS,
 compression or a multi-thread runtime
 merely because they occur in a service template.
