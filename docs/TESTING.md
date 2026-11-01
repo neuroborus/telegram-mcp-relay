@@ -120,6 +120,34 @@ and exclusion of synthetic private settings/paths/allowlist identities. Self-con
 content is reviewed against specification §§5.4/14; these cases await complete C6 FINALIZE.
 Source inspection does not establish named-client, live Telegram, host concurrency or idle wake.
 
+## Final mixed-protocol composition regressions
+
+`app::tests::extended` composes authenticated 2025-06-18 and 2026-07-28 clients with the real
+daemon, one poller, SQLite, outbound files, history, guidance and private downloads. Both clients
+reuse the separately maintained complete expected catalog and full DTO assertions from
+`routes::tests::tools`; production registration is never used as its own expected inventory.
+Every tool result retains exact JSON-RPC/payload/content/error assertions, modern
+`resultType:"complete"` and legacy omission. Existing security and lifecycle assertions remain.
+
+Explicit synthetic response gates cover a native-caption document followed by a legacy wait,
+a modern ask, two modern subscriptions and an inbox claimant, with three distinct durable
+claims. Shared-history observation and shared/own attachment downloads preserve reply fences;
+shared visibility cannot process/ack the owner's reply. Shutdown with connected subscriptions
+retires an abandoned pending download while preserving completed owned copies and durable
+recovery. Fresh transport/daemon construction resumes the same application session and saved
+reconciliation pair. Disabling history revokes shared downloads before Telegram effects while
+own-reply access remains usable; no cached result bypasses current authorization.
+
+Feature-local suites remain the owners of text/file-then-wait catch-up and no resend,
+saturated-wait control capacity and forged-header rejection (`routes::tests::wait`), active-call
+and idle/abandonment lifetimes (`routes::sessions::tests`), mixed question cancellation and
+single-claim recovery (`routes::tests::mixed`), and path/size/expiry boundaries in the attachment
+and storage suites. The new scenario combines these components without duplicating those
+boundary proofs. Complete unfiltered C6 and both locked daemon/resource-probe release builds
+(R1/C11 and R2/C12) must execute in FINALIZE for this composition. These are source-defined
+coverage records; no execution, release success, named-client/HOST, live API or wake outcome is
+inferred from inspection or no-run compilation. Historical benchmark evidence stays separate.
+
 ## Repository gates
 
 Run `just check-repo` (or `python3 tools/check_repository.py`) after documentation, skills,

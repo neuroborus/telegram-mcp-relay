@@ -35,7 +35,7 @@ mod mixed;
 #[path = "subscriptions.rs"]
 mod subscriptions;
 #[path = "tools.rs"]
-mod tools;
+pub(crate) mod tools;
 #[path = "wait.rs"]
 mod wait;
 

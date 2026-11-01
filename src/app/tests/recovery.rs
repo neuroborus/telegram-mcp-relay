@@ -5,15 +5,23 @@ use std::{collections::HashSet, time::Duration};
 
 use super::conversations::{accepted, incoming, snapshot};
 
-struct Events {
+pub(super) struct Events {
     response: reqwest::Response,
     pending: Vec<u8>,
 }
 
 impl Events {
     async fn listen(address: SocketAddr, uri: &str) -> Self {
+        Self::listen_authenticated(address, uri, None).await
+    }
+
+    pub(super) async fn listen_authenticated(
+        address: SocketAddr,
+        uri: &str,
+        token: Option<&str>,
+    ) -> Self {
         let filter = json!({"resourceSubscriptions":[uri]});
-        let response = reqwest::Client::builder()
+        let mut request = reqwest::Client::builder()
             .no_proxy()
             .build()
             .unwrap()
@@ -26,10 +34,11 @@ impl Events {
                 "params":{"notifications":filter,"_meta":{
                     "io.modelcontextprotocol/protocolVersion":"2026-07-28",
                     "io.modelcontextprotocol/clientCapabilities":{}}}}),
-            )
-            .send()
-            .await
-            .unwrap();
+            );
+        if let Some(token) = token {
+            request = request.bearer_auth(token);
+        }
+        let response = request.send().await.unwrap();
         assert_eq!(response.status(), http::StatusCode::OK);
         assert_eq!(response.headers()["content-type"], "text/event-stream");
         let mut stream = Self {
@@ -71,7 +80,7 @@ impl Events {
         .unwrap()
     }
 
-    async fn updated(&mut self, uri: &str) {
+    pub(super) async fn updated(&mut self, uri: &str) {
         let event = self.next().await;
         assert_eq!(
             event["method"], "notifications/resources/updated",

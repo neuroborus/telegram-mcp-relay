@@ -505,4 +505,4 @@ impl Body for AdmittedBody {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

@@ -163,7 +163,7 @@ pub(super) fn failure(result: &Value, code: &str) {
     assert_eq!(rendered, result["structuredContent"]);
 }
 
-pub(super) fn assert_tool_catalog(catalog: &Value) {
+pub(crate) fn assert_tool_catalog(catalog: &Value) {
     use crate::dto::{
         AckRequest, AckResult, AskResult, GetAttachmentRequest, GetAttachmentResult,
         GuidanceRequest, GuidanceResult, HistoryRequest, HistoryResult, InboxRequest, InboxResult,

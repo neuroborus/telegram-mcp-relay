@@ -26,6 +26,7 @@ use crate::{
 };
 
 mod conversations;
+mod extended;
 mod probe;
 mod recovery;
 
@@ -76,7 +77,11 @@ impl Fixture {
     }
 
     fn start(&mut self, client: TelegramClient) -> Running {
-        let app = Application::new(&self.config, client, None).unwrap();
+        self.start_authenticated(client, None)
+    }
+
+    fn start_authenticated(&mut self, client: TelegramClient, auth: Option<&Secret>) -> Running {
+        let app = Application::new(&self.config, client, auth).unwrap();
         let retired = app.stop.clone();
         let listener = self.listener.take().unwrap();
         let stop = CancellationToken::new();
@@ -246,11 +251,16 @@ impl Mock {
                                 let send = send.clone();
                                 async move {
                                     let method = request.uri().path().rsplit('/').next().unwrap().to_owned();
-                                    let content_type = request.headers()[http::header::CONTENT_TYPE]
-                                        .to_str().unwrap().to_owned();
+                                    let download = request.method() == http::Method::GET;
+                                    let content_type = if download {
+                                        request.headers().get(http::header::CONTENT_TYPE)
+                                            .map(|value| value.to_str().unwrap().to_owned()).unwrap_or_default()
+                                    } else {
+                                        request.headers()[http::header::CONTENT_TYPE].to_str().unwrap().to_owned()
+                                    };
                                     let body = Limited::new(request.into_body(), 8_192)
                                         .collect().await.unwrap().to_bytes();
-                                    let payload = if method == "sendDocument" {
+                                    let payload = if download || method == "sendDocument" {
                                         Value::Null
                                     } else {
                                         serde_json::from_slice(&body).unwrap()

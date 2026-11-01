@@ -903,6 +903,15 @@ The [consumer policy](AGENT_POLICY.md) matches accepted specification section 14
 contributor guidance stays unchanged until the authorized post-release follow-up. Guidance
 source/HTTP proofs await their FINALIZE gate; composition/releases and HOST remain separate.
 
+The extended composition fixture in `app::tests::extended` uses synthetic authenticated clients
+on both protocols against the actual daemon. It combines native document/wait delivery,
+ask/inbox/event contention, observational shared history, authorized own/shared downloads,
+shutdown cleanup and saved-fence recovery under changed history policy after restart. It reuses
+the complete independent expected catalog and preserves exact protocol envelope differences.
+Feature-local saturation/active-call/confinement proofs remain in the complete suite. Current
+composition C6 and both locked release builds await FINALIZE; source coverage establishes no
+new HOST, live-client, filesystem deployment or performance outcome.
+
 ## Reply ingestion
 
 `services::ingress::IngressService` accepts only allowlisted chats and non-bot senders with
