@@ -12,6 +12,7 @@ use crate::{
     error::{AppError, TelegramError},
 };
 
+mod download;
 mod types;
 mod upload;
 pub use types::*;
@@ -24,6 +25,7 @@ const MAX_RETRY_DELAY: Duration = Duration::from_secs(30);
 pub struct TelegramClient {
     http: Client,
     endpoint: String,
+    file_endpoint: reqwest::Url,
     response_bytes: usize,
     poll_seconds: u64,
     #[cfg(test)]
@@ -73,6 +75,7 @@ impl TelegramClient {
     }
 
     fn build(config: &Config, endpoint: String, https_only: bool) -> Result<Self, AppError> {
+        let file_endpoint = download::file_endpoint(&endpoint, https_only)?;
         if !(1..=16_777_216).contains(&config.limits.telegram_response_bytes)
             || !(1..=50).contains(&config.telegram.long_poll_timeout_seconds)
         {
@@ -93,6 +96,7 @@ impl TelegramClient {
         Ok(Self {
             http,
             endpoint,
+            file_endpoint,
             response_bytes: config.limits.telegram_response_bytes as usize,
             poll_seconds: config.telegram.long_poll_timeout_seconds,
             #[cfg(test)]

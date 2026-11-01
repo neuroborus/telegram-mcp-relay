@@ -70,6 +70,18 @@ Catalog fixtures bind the complete expected inventory to full DTO-generated inpu
 schemas while retaining their authorization and lifecycle checks. These cases await FINALIZE;
 no execution or live historical retrieval is inferred from source inspection.
 
+## Private cloud download regressions
+
+`src/clients/telegram/download/tests.rs` defines synthetic getFile/GET workflow proofs for
+retained stable identity, renewed file IDs and safe path/origin validation, bounded metadata,
+declared and actual size limits, exact 20,000,000-byte streaming, lower configured bounds,
+absent/false sizes, unavailable/expired paths, redirects, partial/encoded responses and truncated
+bodies. Writer failure/backpressure, cancellation and whole-operation deadlines preserve safe
+errors without automatic replay. Generated chunked bodies use bounded buffers; no live credentials or API
+requests are needed. These cases await the dedicated complete C6 FINALIZE gate; no test
+execution or live attachment acceptance is inferred. Owned-file cleanup and MCP authorization
+remain separate later implementation steps.
+
 ## Repository gates
 
 Run `just check-repo` (or `python3 tools/check_repository.py`) after documentation, skills,

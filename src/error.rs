@@ -64,6 +64,8 @@ pub enum AppError {
     TextTooLong(TextTooLong),
     InvalidRequest(&'static str),
     FileUnavailable,
+    DownloadUnavailable,
+    DownloadWriteFailed,
     FileTooLarge {
         limit_bytes: u64,
         actual_bytes: u64,
@@ -110,6 +112,8 @@ impl AppError {
             Self::TextTooLong(_) => "TEXT_TOO_LONG",
             Self::InvalidRequest(_) => "REQUEST_INVALID",
             Self::FileUnavailable => "FILE_UNAVAILABLE",
+            Self::DownloadUnavailable => "DOWNLOAD_UNAVAILABLE",
+            Self::DownloadWriteFailed => "DOWNLOAD_WRITE_FAILED",
             Self::FileTooLarge { .. } => "FILE_TOO_LARGE",
             Self::SessionNotFound => "SESSION_NOT_FOUND",
             Self::SessionIdentityConflict => "SESSION_IDENTITY_CONFLICT",
@@ -175,6 +179,14 @@ impl fmt::Display for AppError {
                 "{}: expected a readable regular file beneath an approved root without symlinks or traversal",
                 self.code()
             ),
+            Self::DownloadUnavailable => write!(
+                f,
+                "{}: retained attachment is unavailable, expired or not downloadable",
+                self.code()
+            ),
+            Self::DownloadWriteFailed => {
+                write!(f, "{}: cannot write private download output", self.code())
+            }
             Self::FileTooLarge {
                 limit_bytes,
                 actual_bytes,

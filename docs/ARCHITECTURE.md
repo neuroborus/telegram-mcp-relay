@@ -789,6 +789,39 @@ Native attempts failed at loopback `bind` with `Operation not permitted`; that l
 did not affect the successful Runner execution. No socket tests were skipped. Live Telegram
 behavior remains untested, and production configuration exposes no endpoint override.
 
+## Private cloud download adapter
+
+`clients::telegram::download` adds private `getFile` and streamed-download methods through
+the existing shared client. No MCP download tool or persistent download store is exposed yet.
+Services must eventually authorize retained provenance and reserve a private owned writer
+before calling it. The adapter never opens a destination path or creates files.
+
+The getFile envelope uses the existing bounded decoder and read-retry policy. The returned
+stable `file_unique_id` must match retained provenance; the bounded opaque `file_id` may differ
+because Telegram permits multiple valid IDs for one file. Missing paths are unavailable.
+Relative paths are bounded to 4,096 ASCII bytes with nonempty safe segments; traversal, URL
+syntax, percent encoding, controls and backslashes fail closed. File origin and token prefix
+come from the validated fixed HTTPS API endpoint. Only explicit synthetic constructors accept a
+numeric loopback HTTP origin. Redirects, unsolicited partial responses and nonidentity content
+encoding fail; upstream error bodies are never exposed or consumed as file output.
+
+Metadata/HTTP sizes can reject early, but actual streamed bytes independently enforce the lower
+caller limit or 20,000,000 bytes. Writes are at most 64 KiB, with no whole-file buffer. One
+positive caller deadline, at most 600 seconds, covers metadata retries/backoff, download,
+writer backpressure and flush. Streaming is attempted once. Success returns actual bytes;
+truncation, timeout, unavailable/expired paths and writer failure remain errors. Cancellation
+drops HTTP work; the future storage owner must retire outstanding writer I/O and remove partial
+output before releasing reservations. Errors retain no URLs, IDs, OS diagnostics or paths.
+The existing lower configured/50,000,000-byte upload contract is unchanged.
+
+The saved official [getFile](https://core.telegram.org/bots/api#getfile) and
+[File](https://core.telegram.org/bots/api#file) reference fetched on 2026-10-29 was rechecked
+against its recorded SHA-256 during this implementation. It documents up-to-20-MB downloads,
+optional size/path fields, token-based download links valid for at least one hour and obtaining
+a fresh link through getFile after expiry. It does not guarantee filename/MIME preservation.
+The bridge's decimal-byte ceiling is conservative application policy. No fresh fetch, live
+download or executed validation is claimed by this source change.
+
 ## Reply ingestion
 
 `services::ingress::IngressService` accepts only allowlisted chats and non-bot senders with
