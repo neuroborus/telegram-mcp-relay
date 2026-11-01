@@ -20,8 +20,10 @@ fixtures, at captured commit `968802371f94f51eedab66998eff6031762db5ea`. The
 with separate mock/driver accounting. User-unit verification initially failed because the
 configured executable was absent, then
 [passed after binary installation](MEASUREMENTS.md#unit-verification-and-remaining-acceptance).
-That historical trial installed, enabled or started no service unit; it is separate from
-later operational acceptance and supplies no new-feature live evidence.
+That historical trial installed, enabled or started no service unit. The later
+[dated baseline](MEASUREMENTS.md#dated-baseline-host-observations) records one bounded text-flow
+cycle under a transient process and canonical-unit runtime failure `218/CAPABILITIES`.
+Neither record supplies new-feature live acceptance or universal idle-host wake.
 Reply ingestion authorizes input and commits replies/dispositions with the cursor.
 A cancellable single-consumer long poller drives it.
 Bounded library inbox snapshots, pre-processing claims, durable processing-start,
@@ -115,7 +117,7 @@ cached published registry metadata. Its cached archive now matches the checksum 
 `Cargo.lock`; source inspection confirms `UnicodeSegmentation::grapheme_indices(true)`,
 the declared minimum and the absence of runtime dependencies. Native bounds below match
 specification §9.3 and the saved official Telegram API reference, with conservative UTF-16
-counting. No live Telegram behavior has been tested.
+counting. Native formatting has synthetic coverage; live rendering awaits extension HOST.
 
 Feature unification also enables Tokio I/O utilities, synchronization and time, and tracing
 attributes through the SDK. It does not enable Tokio's multi-thread runtime or the SDK's
@@ -190,8 +192,8 @@ static; JSON-RPC failures retain codes, IDs and structured negotiation data with
 Binary diagnostics suppress rmcp targets, whose upstream logs can contain raw metadata;
 library embedders must retain this filter. The accepted
 [composition validation](TESTING.md#agent-experience-composition-validation) includes legacy
-HTTP coverage; older recorded outcomes cover their original snapshots. No named-client
-compatibility or live Telegram behavior is claimed.
+HTTP coverage; older recorded outcomes cover their original snapshots. Extended-runtime
+named-client/live acceptance remains pending, separate from the limited baseline text trial.
 
 ### SDK transport session bounds
 
@@ -1238,8 +1240,9 @@ installation paths, webhook-safe migration and current client requirements; the
 [agent policy](AGENT_POLICY.md) includes the complete copyable specification policy and
 explicit processing-recovery guidance. The recorded mocked capture and static HOST unit
 verification remain separate evidence. The initial absent-executable failure was resolved by
-later binary installation and successful verification. These records establish no service
-activation, live Telegram or named-client operation.
+later binary installation and successful static verification. The separately
+[dated baseline](MEASUREMENTS.md#dated-baseline-host-observations) records limited live text flow
+and an installed canonical unit that failed at runtime; it does not establish extension acceptance.
 
 ## Protocol compatibility gate
 
@@ -1247,8 +1250,10 @@ The implementation advertises MCP `2025-06-18` initialization/tools/read-only re
 `2026-07-28` discovery/tools/resources/`subscriptions/listen` through locked rmcp 3.8.0.
 [Legacy HTTP fixtures](../src/routes/legacy.rs) define negotiation, security and shared-handler
 regressions; complete C6 passed with the accepted mixed-protocol composition. Existing modern
-event proofs remain in place. Named-client acceptance requires later HOST discovery of the complete
-tool catalog; no named-client, live Telegram or universal idle-host wake success is claimed.
+event proofs remain in place. Extended-runtime named-client acceptance requires later HOST
+discovery of the complete eleven-tool catalog and the
+[bounded workflow probes](MEASUREMENTS.md#agent-experience-host-acceptance). The pre-extension
+seven-tool/text trial does not establish these results or universal idle-host wake.
 See [client requirements](SETUP.md#connect-mcp-clients) and specification sections 5–6 and 18.
 
 The historical [HOST benchmark](MEASUREMENTS.md#recorded-host-capture) remains tied to

@@ -311,6 +311,12 @@ wake. Historical source `968802371f94f51eedab66998eff6031762db5ea` has a separat
 It supplies no fresh performance or extension-acceptance claim. Static user-unit verification
 initially failed for an absent executable, then passed after authorized binary installation;
 that historical trial installed/enabled/started no service unit.
+The separate [2026-10-31 baseline](docs/MEASUREMENTS.md#dated-baseline-host-observations) records
+limited seven-tool discovery and one live text-reply cycle. It also records no idle wake and
+canonical-unit runtime failure `218/CAPABILITIES`, despite transient one-process operation.
+The [continuation status](docs/TESTING.md#agent-experience-continuation-status) and
+[pending HOST obligations](docs/MEASUREMENTS.md#agent-experience-host-acceptance) distinguish
+accepted source from full release acceptance.
 
 See the [documentation map](docs/README.md), [specification](docs/product/TECHNICAL_SPECIFICATION.md),
 [conventions](docs/CONVENTIONS.md) and [development workflow](docs/DEVELOPMENT.md).

@@ -214,5 +214,10 @@ commit `968802371f94f51eedab66998eff6031762db5ea` and prior public aggregate che
 later documentation changes do not relabel that source identity or inherit its check results.
 The initial HOST unit verification failure remains preserved. A
 [later successful verification](MEASUREMENTS.md#unit-verification-and-remaining-acceptance)
-followed explicitly authorized installation of the matching prebuilt binary. No service unit
-was installed, enabled or started, and no live Telegram or named-client test was performed.
+followed explicitly authorized installation of the matching prebuilt binary. Those static/mock
+phases installed, enabled or started no service unit and performed no live-client trial.
+The separately dated [baseline observations](MEASUREMENTS.md#dated-baseline-host-observations)
+record later limited text flow, transient one-process operation, no idle wake and canonical-unit
+runtime failure. The [extension HOST obligations](MEASUREMENTS.md#agent-experience-host-acceptance)
+remain pending after actual final-eight DONE and released ownership; they require no new
+benchmark or changes to the historical controller's closed independent-run receipt schema.

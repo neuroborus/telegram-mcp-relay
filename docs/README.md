@@ -11,7 +11,7 @@ Keep implementation status explicit; requirements and intended structure are not
 | [Configuration](CONFIGURATION.md) | Settings, bounds and protected secret sources | Startup configuration or secret handling changes |
 | [Setup](SETUP.md) | Locked builds, Telegram setup, local secrets, MCP clients and optional user service | Installation or client requirements change |
 | [Agent operating policy](AGENT_POLICY.md) | Copyable section 14 policy, guidance-first interaction and durable reply/file recovery | Installed-agent interaction guidance changes |
-| [Resource measurements](MEASUREMENTS.md) | Recorded HOST benchmark, user-unit verification outcome, release/build identities and capture prerequisites | Measurement tooling or operational evidence changes |
+| [Resource measurements](MEASUREMENTS.md) | Historical benchmark/build identities, static-unit outcomes, dated baseline text-flow observations and pending extension HOST acceptance | Measurement tooling or operational evidence changes |
 | [Testing](TESTING.md) | Required gates, recorded validation provenance, specification acceptance/traceability and deliverable coverage | A check, receipt or verification boundary changes |
 | [Development](DEVELOPMENT.md) | Inline portable Runner setup, exclusive ignored-config creation, task/plan/execution lifecycle and Git boundaries | Operator workflow or runner configuration changes |
 
@@ -21,8 +21,10 @@ error/recovery categories, synthetic workflows and current availability;
 [.agents/skills](../.agents/skills/) own reusable workflows and link to these documents.
 
 For acceptance, distinguish source behavior in architecture, executed checks in
-[testing](TESTING.md#agent-experience-composition-validation), and dated HOST observations in
-[measurements](MEASUREMENTS.md). Setup commands and specification criteria are not executed evidence.
+[testing](TESTING.md#agent-experience-continuation-status), and dated HOST observations in
+[measurements](MEASUREMENTS.md#dated-baseline-host-observations). The
+[pending extension HOST work](MEASUREMENTS.md#agent-experience-host-acceptance) is separate from
+old benchmark/text-flow results. Setup commands and specification criteria are not executed evidence.
 
 Working task documents, clarifications, commit plans and review reports belong under ignored
 `LOCAL_ARTIFACTS/`. Keep durable implemented decisions in the owning document, rather than

@@ -27,6 +27,55 @@ establish source behavior; no named-client/live Telegram, deployed-filesystem, i
 fresh resource-use result follows. This later documentation change still requires its own
 C1/C2 FINALIZE; the earlier source results do not validate these edits.
 
+## Agent-experience continuation status
+
+At this step-8 authoring snapshot on **2026-11-01**, the Runner's verified completed-commit
+projection records the seven commits below. Starting from overall **7/15** at
+`7412bf7851f8ea8ff8f4f3af0a8d88c948b2981c`, continuation **7/8** is committed: overall source
+progress **14/15**. Step 8, its checks/confirmation/commit and whole-run DONE remain pending.
+Committed source progress is separate from full operational acceptance.
+
+| Step | Accepted source commit | Recorded FINALIZE result |
+| --- | --- | --- |
+| 1. Bounded cloud downloads | `cabc612c2816671e84ec4a381e95ae52b76e757f` | C1–C3 Native and C4–C6 selected Runner checks exited 0 |
+| 2. Confined owned storage | `6ada6dbe5bcf00405fbef416cc316cdfb0a2eea3` | C1–C3 Native and C4–C6 selected Runner checks exited 0 |
+| 3. Authorized attachment tool | `cbea9f1d1a9ca602f91ee8e45090617d60e86f99` | C1–C3 Native and C4–C6 selected Runner checks exited 0 |
+| 4. Current interaction guidance | `3489a604af7e55f402b20e2d158944b0158d2188` | C1–C3 Native and C4–C6 selected Runner checks exited 0 |
+| 5. Mixed-protocol composition | `e7575f2636480b35fa1da75134e337fadb9a4a00` | C1–C6 plus both Native locked release builds exited 0, as detailed above |
+| 6. Public workflow documentation | `a4aea0e4c6a64cbe593ac9c5a4fb37b9a978879a` | Native C1/C2 exited 0 |
+| 7. Inline Runner setup | `9f45f3e96090a3e24378ad7d3eb4395f7fc1c55f` | Native C1/C2 and Python AST parsing exited 0 |
+
+These are the supplied accepted per-step FINALIZE/terminal-confirmation records, followed by
+the constrained executor's commits. They are not new check runs in this documentation turn
+or inherited benchmark PASS claims. Step 5's actual receipt IDs **C7/C8** denote R1/R2
+(global **C11/C12**); step 7's actual **C3** denotes P1 (global **C13**), not Rust formatting.
+Keep the historical independent capture's different receipt mapping below scoped to that run.
+
+The final-eight schedule retains exactly the existing commands and applicability:
+
+| Established catalog checks | Applicable continuation steps | FINALIZE route |
+| --- | --- | --- |
+| C1 repository gate; C2 `git diff --check HEAD` | 1–8 | Native |
+| C3 Rust formatting | 1–5 | Native |
+| C4 Clippy; C5 rustdoc; C6 complete unfiltered workspace tests | 1–5 | Unchanged selected `rust-workspace-clippy`, `rust-workspace-doc`, `rust-workspace-tests` vectors |
+| C11/R1 daemon release; C12/R2 probe release | 5 | Native locked builds |
+| C13/P1 Python AST parsing | 7 | Native |
+
+P2 and H1–H4 remain conditional and inactive in this continuation. No helper or measurement
+Python implementation changes are assigned. Discovery rows contain only `id`/`command`;
+separate applicability assignments contain only `checkId` and nonempty `steps` in the supplied
+unit. Preserve the full accepted schedule; a current-step amendment cannot erase future gates.
+Run established gates only in FINALIZE. IMPLEMENT/fresh read-only confirmation permits source
+inspection and appropriate no-run compilation, not those checks or socket tests. Do not skip,
+filter, replace or weaken a gate, execute a selected vector inside an agent turn, or substitute
+HOST results. Content repairs invalidate earlier candidate evidence.
+
+This explicitly lazy continuation uses installed convergence and fresh read-only confirmation
+at each step. Lazy confirmation is not independent code review and does not replace full
+applicable FINALIZE or terminal confirmation. Staging/index hygiene and the subject-only commit
+belong to the constrained COMMIT executor. The mandatory post-release HOST work below remains
+pending; this snapshot claims neither whole-run DONE nor final acceptance/publication.
+
 ### Release follow-ups
 
 After all eight continuation commits reach actual DONE and ownership is released/quiescent,
@@ -45,6 +94,22 @@ and navigation with the final public docs and template removal. Preserve general
 current/auto workflow defaults while honoring explicit mode selection, including this lazy run.
 Publish safe actual HOST observations and finish these follow-ups before claiming complete
 acceptance or publication. This is separate from per-step lazy convergence/confirmation.
+In particular, reconcile [delegation](../.agents/skills/delegation/SKILL.md)'s explicit
+independent-mode selection and [finalization](../.agents/skills/finalization/SKILL.md)'s review
+wording with user-selected mode exceptions; preserve ordinary independent defaults and Git
+ownership boundaries. Align discovery/applicability serialization guidance with the separate
+payloads described above. Audit supporting references/navigation at the same authorized
+boundary, without editing frozen guidance or active configuration/state while owned.
+Historical canceled/paused runs, receipts
+and counters remain intact; do not resume them, reset budgets or manually edit state/leases.
+
+The [dated baseline HOST record](MEASUREMENTS.md#dated-baseline-host-observations) publishes
+the limited pre-extension text trial without private receipts. The
+[extension HOST record](MEASUREMENTS.md#agent-experience-host-acceptance) owns pending installation,
+bounded probes and their eventual sanitized outcomes. After actual DONE and completed HOST/
+follow-ups, the coordinator reports final evidence and publishes the related compatibility,
+all fifteen experience and authorized cohesive correction commits. Workers never push; no
+early/force push, new branch, remote/identity change or history rewrite is authorized here.
 
 ## Native header and service-prefix regressions
 
@@ -250,8 +315,9 @@ private directory cleanup, selective registry provisioning, missing/corrupt arch
 SHA-256 vectors.
 They never invoke the launcher recursively, start Cargo checks or run product/socket tests.
 
-For the read-only Runner route, the six selected Cargo clippy/doc/test commands execute only
-through Runner's exact persisted vectors during FINALIZE. Each vector builds the standalone
+For the read-only Runner route, root/helper Cargo clippy/doc/test commands execute only when
+selected, through Runner's exact persisted vectors during FINALIZE. This continuation selects
+only root C4–C6; helper gates remain conditional/inactive. Each vector builds the standalone
 launcher in declared scratch and invokes its corresponding closed mode. The launcher runs
 the complete original check with `--offline` and private target output; doc modes retain
 `RUSTDOCFLAGS="-D warnings"`. Full root tests still execute the real HTTP assertions. Native
@@ -351,8 +417,10 @@ renumber the frozen global fourteen-row catalog or change conditional helper H1�
 and selected trusted routes. No helper change or new helper-gate receipt is claimed here.
 The report and receipt identities, release profile, separate daemon/probe feature profiles
 and HOST retirement provenance are retained in the measurement record. The later static unit
-verification passed after binary installation. No service-unit installation or activation,
-live Telegram, named-client compatibility or idle-host wake test is established by these records.
+verification passed after binary installation. Those capture/static-unit records establish no
+service activation or live-client behavior. The separate
+[dated baseline](MEASUREMENTS.md#dated-baseline-host-observations) records later bounded text-flow
+success, absent idle wake and canonical-unit runtime failure; it supplies no extension acceptance.
 
 ## Behavioral acceptance
 
@@ -741,7 +809,8 @@ response stalled after headers. Mock tasks are canceled on fixture drop. The com
 unfiltered `cargo test --locked --workspace` suite passed in Runner FINALIZE through the
 read-only trusted route, exercising all seven HTTP tests and the pure retry-policy test
 without skips. Earlier Native attempts failed before HTTP requests at loopback `bind` with
-`Operation not permitted`. Live Telegram behavior remains untested. See
+`Operation not permitted`. These fixtures establish no live Telegram result; see the separate
+[baseline text trial](MEASUREMENTS.md#dated-baseline-host-observations) and
 [architecture](ARCHITECTURE.md#telegram-http-client).
 
 ## Specification §§16/19 coverage map
@@ -785,11 +854,11 @@ from current documentation finalization and full operational acceptance.
 | 2. Lock, reproducible release instructions, sample configuration | [Cargo.lock](../Cargo.lock), [setup](SETUP.md), [sample TOML](../config/relay.example.toml), recorded R1/R2 and bound offline HOST materialization |
 | 3. SQLite initialization/migrations, cleanup, restart-safe cursor | [Repositories](../src/repositories.rs), storage/retention/maintenance/ingress/poller suites above |
 | 4. MCP tools/resources/subscriptions with tested current protocol | Accepted complete mixed-protocol C6, including guidance/history/attachments and complete independent DTO catalog; legacy resource events remain unsupported |
-| 5. Single poller, strict final text/caption limits, safe documents | Client, domain, file and outbound suites above; HOST near-limit normal-path upload; live Telegram unverified |
+| 5. Single poller, strict final text/caption limits, safe documents | Client, domain, file and outbound suites above; historical mocked HOST upload and bounded baseline text trial; extension live acceptance pending |
 | 6. Unit/integration tests using mock Telegram | Recorded complete unfiltered C6 and controlled P1/P2; no real messages or credentials used |
-| 7. README/setup covering bot, allowlists, URL, secrets, registration, wait caveat, notices | [README](../README.md), [setup/client guidance](SETUP.md), [configuration](CONFIGURATION.md); named-client compatibility remains unverified |
+| 7. README/setup covering bot, allowlists, URL, secrets, registration, wait caveat, notices | [README](../README.md), [setup/client guidance](SETUP.md), [configuration](CONFIGURATION.md); bounded baseline discovery/text trial recorded, extended-runtime named-client acceptance pending |
 | 8. Contributor or copyable section 14 agent policy | Preserved [AGENTS.md](../AGENTS.md) and complete copyable [agent policy](AGENT_POLICY.md), including file reports, no periodic inbox polling and explicit completion |
-| 9. Example user unit and protected environment-file approach | [Unit](../deploy/telegram-mcp-relay.service), [environment template](../deploy/relay.env.example), [setup](SETUP.md#optional-systemd-user-service); initial verification failed for absent executable, then passed after binary installation; no service unit was installed, enabled or started |
+| 9. Example user unit and protected environment-file approach | [Unit](../deploy/telegram-mcp-relay.service), [environment template](../deploy/relay.env.example), [setup](SETUP.md#optional-systemd-user-service); static verification failed then passed after binary installation; later installed canonical unit failed at runtime with `218/CAPABILITIES`, separate from transient one-process text operation |
 | 10. Benchmark target, RSS/CPU, file-upload peak and binary size | [Recorded HOST capture](MEASUREMENTS.md#recorded-host-capture), with separate process overhead and sampled/lifetime limits; production bootstrap was not measured |
 
 ## Measurements and check ownership
@@ -807,7 +876,8 @@ their prior successful outcome is recorded above. Actual resource values come fr
 separate bound HOST capture. Source/build checks do not attest runtime measurements; existing
 complete C6 owns actual HTTP/routing proofs. The original unit failure is historical; later
 verification passed after binary installation as [recorded](MEASUREMENTS.md#unit-verification-and-remaining-acceptance).
-Service activation and live behavior were not exercised.
+That benchmark/static trial exercised no service activation or live behavior. Later baseline
+observations and pending extension HOST acceptance are separately scoped above.
 
 Native Runner commands use the accepted staging-independent inventory and
 [Runner finalization](../.agents/skills/finalization/agent-runner.md). Staged inspection belongs

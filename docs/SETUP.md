@@ -11,7 +11,9 @@ as [recorded below](#optional-systemd-user-service). That historical trial insta
 or started no service unit. The
 [agent-experience composition record](TESTING.md#agent-experience-composition-validation)
 separately records executed synthetic validation; extension HOST installation/probes and
-named-client/live Telegram interoperability remain pending.
+extended-runtime named-client/live Telegram interoperability remain pending. The separate
+[2026-10-31 baseline](MEASUREMENTS.md#dated-baseline-host-observations) records limited seven-tool
+discovery/text flow, no idle wake and canonical-unit runtime failure despite transient operation.
 Setup instructions are not acceptance evidence.
 
 ## Build and prepare private directories
@@ -80,7 +82,8 @@ The relay never deletes a webhook or pending updates automatically. A 409/confli
 operator investigation, not another competing poller.
 
 See the [official API](https://core.telegram.org/bots/api) and
-[documented API review](ARCHITECTURE.md#telegram-http-client); live behavior is unverified.
+[documented API review](ARCHITECTURE.md#telegram-http-client); the baseline text trial did not
+verify webhook migration or every upstream failure mode.
 
 ## Configure paths and secrets
 
@@ -217,15 +220,18 @@ Legacy initialization advertises tools/resources without subscription support;
 `resources/subscribe` and `resources/unsubscribe` return method-not-found. Modern clients
 retain resource events. Older clients can use bounded `telegram_ask` and startup/resume
 inbox recovery, without periodic agent polling. Do not assume a named client works merely
-because it advertises Streamable HTTP; actual HOST acceptance remains pending.
+because it advertises Streamable HTTP. The
+[baseline trial](MEASUREMENTS.md#dated-baseline-host-observations) observed limited discovery/text
+flow, including a resumed conversation that initially lacked tools. Extended-runtime HOST
+acceptance remains pending; no automatic reload mechanism or universal idle wake is established.
 
 | Capability | Evidence and limitation |
 | --- | --- |
-| Legacy initialization, tool listing, calls and private inbox reads | [2025-06-18 HTTP fixtures](../src/routes/legacy.rs) and real mixed-protocol daemon coverage passed in the accepted [composition validation](TESTING.md#agent-experience-composition-validation); named-client discovery awaits HOST |
+| Legacy initialization, tool listing, calls and private inbox reads | [2025-06-18 HTTP fixtures](../src/routes/legacy.rs) and real mixed-protocol daemon coverage passed in the accepted [composition validation](TESTING.md#agent-experience-composition-validation); extended-runtime named-client discovery awaits HOST |
 | Modern discovery, typed tools, private inbox reads | Existing rmcp 3.8.0 / MCP 2026-07-28 fixtures in [transport tests](../src/routes/tests.rs) and [daemon scenarios](../src/app/tests/recovery.rs); see the [coverage map](TESTING.md#specification-1619-coverage-map) for evidence boundaries |
 | Resource events | POST SSE `subscriptions/listen`, accepted `notifications.resourceSubscriptions` filters and `notifications/resources/updated` are covered by [subscription fixtures](../src/routes/subscriptions.rs); older subscription APIs are unsupported |
 | Concurrent asks/inbox/events and reconnect recovery | [Daemon recovery](../src/app/tests/recovery.rs), [mixed-protocol fixtures](../src/routes/mixed.rs) and [extended composition](../src/app/tests/extended.rs) passed with complete C6; synthetic coverage does not certify a live client |
-| Named agent clients, live Telegram, automatic idle-host wake | Unverified; no named-client or automatic wake guarantee |
+| Extended-runtime named clients/live Telegram and idle-host wake | Pending HOST; limited pre-extension discovery/text flow is recorded separately and the observed Telegram reply did not wake the idle agent |
 
 Call `telegram_guidance({})` first per client conversation, including before registration;
 inspect the actual tool schemas with `tools/list`. Guidance is self-contained read-only advice,
@@ -345,8 +351,13 @@ runtime access. The [verification history](MEASUREMENTS.md#unit-verification-and
 retains the original exit-1 attempt caused by the absent executable. On 2026-10-31, the operator
 installed the matching prebuilt release binary at `~/.local/bin/telegram-mcp-relay`; the same
 verification command then returned 0 with empty output against the unchanged unit. This resolves
-the executable prerequisite. No service unit was installed, enabled or started, and static
-verification does not test runtime access to protected settings, Telegram or MCP clients.
+the executable prerequisite. That static trial installed, enabled or started no service unit.
+The [later baseline](MEASUREMENTS.md#dated-baseline-host-observations) records installation of
+the canonical unit and its runtime `218/CAPABILITIES` failure, with one transient process used
+for the limited text trial. Static verification does not test runtime access to protected
+settings, Telegram or MCP clients. Retain hardening/OS security; do not equate transient
+operation with canonical-unit startup success. Extension installation/restart/probes belong
+to the authorized post-DONE [HOST boundary](MEASUREMENTS.md#agent-experience-host-acceptance).
 SIGINT/SIGTERM close admission and drain accepted sends. The example allows 660 seconds before
 forced termination to accommodate uploads/downloads up to 600 seconds and bookkeeping; reassess
 that margin for your host. Tracked filesystem I/O must drain and is not forcibly preemptible.
