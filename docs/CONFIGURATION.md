@@ -7,8 +7,8 @@ optional systemd examples, follow [setup](SETUP.md). Install the
 The library provides `Config::load`, side-effect-free `Config::parse` and explicit
 `Config::load_secrets`, with no network I/O in these operations. The binary takes exactly one
 TOML path: `telegram-mcp-relay /absolute/path/to/config.toml`. Startup validates settings and
-secrets, opens protected SQLite/export roots and binds the configured listener, then completes
-startup cleanup before serving MCP or starting Telegram activity. Start with the
+secrets, opens protected SQLite/export roots and configured private download roots, binds the
+listener, then completes startup cleanup before serving MCP or starting Telegram activity. Start with the
 [synthetic example](../config/relay.example.toml);
 unlisted settings retain [central defaults](../src/config.rs). Unknown fields, inline
 credentials and API overrides fail. TOML input is bounded to 64 KiB.
@@ -116,7 +116,9 @@ Notice batches contain at most 100 decisions, with whole-batch rollback on capac
 unattempted sources remain eligible. Attempts retain the original source expiry, and consumed
 attempts never become retryable after cancellation, uncertain delivery or restart.
 Inbox pages and claim batches contain at most 100 items and `limits.reply_bytes` combined
-payload bytes. Claims enforce `delivery.claim_lease_seconds` (default 60, maximum 600) before
+stored text/legacy attachment-JSON bytes. Additive safe attachment handles have separate bounded
+counts/metadata; this payload budget is not a cap on the complete serialized MCP envelope.
+Claims enforce `delivery.claim_lease_seconds` (default 60, maximum 600) before
 processing starts; processing work is not lease-expired. Tokens count toward shared metadata
 capacity, including outstanding send reservations; rotation replaces the previous token charge.
 Processing start removes the pre-processing lease. Explicit reconciliation rotates its token
@@ -137,6 +139,11 @@ No new configuration setting is required. See
 [disk maintenance](ARCHITECTURE.md#physical-disk-maintenance) for usage accounting, recovery,
 filesystem bounds and limitations.
 See [architecture](ARCHITECTURE.md#session-and-route-persistence).
+
+`telegram_guidance` reports nonsecret effective capabilities and limits, including lower cloud
+file ceilings; it discloses no configured roots, allowlist IDs or secret sources. Disabled
+features remain in the tool catalog and their configured budgets remain visible alongside
+disabled capability flags. See the complete [public DTO and error reference](../README.md#public-tools-and-results).
 
 ## Private download storage
 
@@ -288,8 +295,10 @@ The binary registers SIGINT and SIGTERM before service startup; either signal st
 and drains accepted sends and route bookkeeping before exit. Registration failure logs
 `SHUTDOWN_SIGNAL_UNAVAILABLE` and exits unsuccessfully before starting services. No shutdown
 setting is required.
-Allow the existing network deadlines (15 seconds for text, 600 seconds for uploads), followed
-by SQLite bookkeeping, to finish before any external forced-stop deadline. Repeated SIGINT or
+Allow the existing network deadlines (15 seconds for text, 600 seconds for uploads, up to
+600 seconds for downloads), SQLite bookkeeping and tracked download filesystem I/O to drain
+before any external forced-stop deadline. Kernel I/O cannot be forcibly preempted; cleanup can
+outlast a logical download deadline. Repeated SIGINT or
 SIGTERM does not abort the drain. SIGKILL, crashes and forced termination can still interrupt
 bookkeeping after a send is accepted; do not automatically resend an uncertain message.
 

@@ -16,12 +16,16 @@ incoming attachments, agent guidance and their configuration, security and accep
 Other requirements remain in force. These are accepted requirements, **not proof of implemented
 or validated features**. Native headers, after-send waiting, shared journal/history reads,
 authorized attachment downloads and current guidance now have source implementations.
-Each changed revision still requires its dedicated validation and later composition/HOST gates;
-source availability does not establish extension acceptance.
+The accepted [composition validation](../TESTING.md#agent-experience-composition-validation)
+at `e7575f2636480b35fa1da75134e337fadb9a4a00` records complete mixed-protocol checks and both
+locked release builds. Extension HOST installation/probes and post-release guidance follow-ups
+remain mandatory; source availability and synthetic validation do not establish that acceptance.
 The unchecked acceptance criteria below describe obligations, not observed test results.
 See [architecture](../ARCHITECTURE.md) for implementation status and
 [testing](../TESTING.md) for separately recorded validation evidence. Historical measurements
 and bounded pre-extension HOST text-flow observations do not establish extension acceptance.
+The [public API reference](../../README.md#public-tools-and-results) documents actual DTOs,
+errors and handle permissions; illustrative logical sketches below do not replace those schemas.
 
 ---
 

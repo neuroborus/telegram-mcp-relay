@@ -68,6 +68,9 @@ See [testing](TESTING.md) and [test-authoring](../.agents/skills/test-authoring/
 Write repository documentation in English. Keep current guarantees in owning documents and
 index new durable documents in [docs/README.md](README.md). Use relative links and named
 symbols/sections rather than line-number citations that drift after edits.
+Keep the public [tool/resource reference](../README.md#public-tools-and-results) aligned with
+`dto` and production handlers, including optional/null fields, errors and handle permissions.
+Separate specification requirements, source coverage, executed validation and HOST observations.
 
 `LOCAL_ARTIFACTS/` is ignored, untracked and machine local. Runner state itself must live
 outside the repository and task directory. Keep local config/task/plan/report files here;

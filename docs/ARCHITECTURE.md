@@ -5,17 +5,23 @@
 The binary now loads one TOML path and runs the shared library composition on Tokio's
 current-thread runtime, with structured `tracing` diagnostics on stderr. It wires protected
 SQLite, the bounded Telegram client, text/document delivery, the shared protected MCP endpoint,
-one reply poller, typing, notices and retention/reclamation. Startup and supervision are
+one reply poller, typing, notices, retention/reclamation, opt-in history, authorized private
+downloads and read-only current guidance. The [public API reference](../README.md#public-tools-and-results)
+describes the actual DTOs, resources, errors and handle permissions. Startup and supervision are
 described under [runtime and ownership](#runtime-and-ownership), including graceful accepted-send
 draining after SIGINT/SIGTERM in the binary or host cancellation through the embedding API.
-The coordinator's [recorded validation evidence](TESTING.md#recorded-validation-evidence)
+The [agent-experience validation record](TESTING.md#agent-experience-composition-validation)
+records complete mixed-protocol C6 and both locked release builds at
+`e7575f2636480b35fa1da75134e337fadb9a4a00`; extension HOST installation/probes remain pending.
+The earlier coordinator [validation evidence](TESTING.md#recorded-validation-evidence)
 reports successful complete workspace tests, including composition, shutdown and protocol
 fixtures, at captured commit `968802371f94f51eedab66998eff6031762db5ea`. The
 [mocked HOST benchmark](MEASUREMENTS.md#recorded-host-capture) measures the library-linked probe
 with separate mock/driver accounting. User-unit verification initially failed because the
 configured executable was absent, then
 [passed after binary installation](MEASUREMENTS.md#unit-verification-and-remaining-acceptance).
-The service unit was not installed, enabled or started; live operation remains unverified.
+That historical trial installed, enabled or started no service unit; it is separate from
+later operational acceptance and supplies no new-feature live evidence.
 Reply ingestion authorizes input and commits replies/dispositions with the cursor.
 A cancellable single-consumer long poller drives it.
 Bounded library inbox snapshots, pre-processing claims, durable processing-start,
@@ -182,8 +188,9 @@ Correlation uses fresh random IDs, never client-supplied IDs. Authorization, pro
 cookies and client correlation headers are removed before SDK dispatch. HTTP rejection text is
 static; JSON-RPC failures retain codes, IDs and structured negotiation data with safe messages.
 Binary diagnostics suppress rmcp targets, whose upstream logs can contain raw metadata;
-library embedders must retain this filter. Earlier recorded C6 outcomes cover their original
-snapshots; new legacy HTTP coverage awaits the dedicated FINALIZE gate. No named-client
+library embedders must retain this filter. The accepted
+[composition validation](TESTING.md#agent-experience-composition-validation) includes legacy
+HTTP coverage; older recorded outcomes cover their original snapshots. No named-client
 compatibility or live Telegram behavior is claimed.
 
 ### SDK transport session bounds
@@ -223,7 +230,7 @@ lock as the retirement sweep; channels arriving after cancellation are released 
 Accepted outbound sends retain their existing bounded completion/bookkeeping path and daemon
 drain. SDK service response draining
 can add its existing grace period; no short deadline aborts admitted sends. Synthetic adapter
-regressions cover these ownership rules; their execution belongs to the next FINALIZE gate.
+regressions cover these ownership rules within the accepted complete composition C6.
 
 ## MCP registration and outbound tools
 
@@ -451,8 +458,8 @@ Statuses are `disabled` (no interest or claim), `reply_received` (one ordinary f
 and `wait_timeout`. The default 600-second deadline starts when the authorized wait is armed.
 Cancellation, timeout and shutdown retire only the interest; no route/reply deletion, resend,
 processing start, acknowledgment or timeout notice occurs. Recover a lost claim response through
-normal inbox leases. Both protocols expose the tool; modern events remain independent. New
-synthetic wait cases await FINALIZE and do not establish live or idle-host wake behavior.
+normal inbox leases. Both protocols expose the tool; modern events remain independent. The
+accepted complete C6 covers synthetic wait cases without establishing live or idle-host wake behavior.
 
 ## Outbound formatting
 
@@ -481,8 +488,8 @@ and 1,024 for captions. A very large single title grapheme can cause rejection e
 empty body. Native entity metadata adds no visible characters. These contracts follow the
 [Telegram entity](https://core.telegram.org/bots/api#messageentity),
 [text](https://core.telegram.org/bots/api#sendmessage) and
-[document](https://core.telegram.org/bots/api#senddocument) interfaces; new behavior still
-requires FINALIZE and later HOST acceptance, with no live Unicode/rendering claim here.
+[document](https://core.telegram.org/bots/api#senddocument) interfaces. Synthetic formatting
+proofs passed with complete composition C6; live Unicode/rendering remains a separate HOST obligation.
 
 `TEXT_TOO_LONG` carries serializable details: `limit=1000`, `actual_characters`,
 `native_limit_utf16`, `actual_utf16_units` and file-delivery `guidance`. Native caption
@@ -639,8 +646,8 @@ reservations in its budget. Retained expired rows still count until cleanup; pre
 evicts data. Logical session/route charges are 128 bytes per row plus UTF-8 identity/title/directory
 bytes (route rows include the session key). SQLite pages have their separate physical cap.
 Reservations live only in RAM and do not guarantee post-send disk success: the sending service
-reports failed bookkeeping distinctly from an unknown send outcome. Physical maintenance
-remains a later step.
+reports failed bookkeeping distinctly from an unknown send outcome. Bounded physical
+maintenance is implemented as described under [disk maintenance](#physical-disk-maintenance).
 
 ## Text delivery
 
@@ -791,10 +798,10 @@ behavior remains untested, and production configuration exposes no endpoint over
 
 ## Private cloud download adapter
 
-`clients::telegram::download` adds private `getFile` and streamed-download methods through
-the existing shared client. No MCP download tool or persistent download store is exposed yet.
-Services must eventually authorize retained provenance and reserve a private owned writer
-before calling it. The adapter never opens a destination path or creates files.
+`clients::telegram::download` provides private `getFile` and streamed-download methods through
+the existing shared client. The authorized attachment service integrates this adapter with
+the private persistent store below, reserving an owned writer and checking retained provenance
+before calling it. The adapter itself never opens a destination path or creates files.
 
 The getFile envelope uses the existing bounded decoder and read-retry policy. The returned
 stable `file_unique_id` must match retained provenance; the bounded opaque `file_id` may differ
@@ -901,16 +908,17 @@ resend, startup/notification inbox recovery, current fences and saved-pair recon
 scoped sends, proactive focused communication, shared observation and daemon-local files.
 The [consumer policy](AGENT_POLICY.md) matches accepted specification section 14. Run-frozen
 contributor guidance stays unchanged until the authorized post-release follow-up. Guidance
-source/HTTP proofs await their FINALIZE gate; composition/releases and HOST remain separate.
+source/HTTP proofs passed with complete C6; HOST remains a separate acceptance boundary.
 
 The extended composition fixture in `app::tests::extended` uses synthetic authenticated clients
 on both protocols against the actual daemon. It combines native document/wait delivery,
 ask/inbox/event contention, observational shared history, authorized own/shared downloads,
 shutdown cleanup and saved-fence recovery under changed history policy after restart. It reuses
 the complete independent expected catalog and preserves exact protocol envelope differences.
-Feature-local saturation/active-call/confinement proofs remain in the complete suite. Current
-composition C6 and both locked release builds await FINALIZE; source coverage establishes no
-new HOST, live-client, filesystem deployment or performance outcome.
+Feature-local saturation/active-call/confinement proofs remain in the complete suite. The
+[accepted validation record](TESTING.md#agent-experience-composition-validation) includes complete
+C6 and both locked release builds. Those checks establish no new HOST, live-client, filesystem
+deployment or performance outcome.
 
 ## Reply ingestion
 
@@ -937,8 +945,8 @@ variable metadata accounting including send reservations. Unroutable disposition
 receipt count budget and reply TTL. The fixed ignored marker is bookkeeping like the singleton
 cursor: it consumes no receipt or variable metadata admission and remains under the physical
 database cap. Compacting it removes no reply, receipt or notice obligation; older ignored input
-may be ignored again without retaining contents or generating effects. Attachment downloads
-remain pending.
+may be ignored again without retaining contents or generating effects. Ingestion stores bounded
+attachment provenance without fetching bytes; only an authorized explicit attachment call downloads them.
 
 ## Durable notice arbitration
 
@@ -1116,13 +1124,15 @@ The binary registers SIGINT and SIGTERM before starting services, then passes th
 future to `app::run_until` and awaits completion. Registration failure emits the safe static
 `SHUTDOWN_SIGNAL_UNAVAILABLE` code and exits before service startup. `app::run_until` loads the
 supplied configuration path, resolves protected secrets, opens one SQLite connection, pins
-export roots and constructs all services before binding the loopback listener.
+export roots and configured private download roots, and constructs all services before binding
+the loopback listener.
 The same `Arc<Mutex<Database>>` reaches MCP handlers, outbound delivery, ingress, cleanup and
-notices. All Telegram adapters clone one reusable client. Post-commit subscription/wait
+notices, plus attachment authorization/download bookkeeping. All Telegram adapters clone one
+reusable client. Post-commit subscription/wait
 signals remain database-owned; no extra relay or periodic inbox reader is needed.
 
-One fixed supervisor owns cleanup, polling, notices, MCP serving and an observer for typing
-and admitted-send failures.
+One fixed supervisor owns cleanup, polling, notices, private-download maintenance, MCP serving
+and an observer for typing and admitted-send failures.
 Cleanup retains its exclusive lease and completes startup deletion/reclamation before the
 other loops start. Each loop remains bounded by its existing admission policy; these fixed
 supervisors are additional to `limits.background_tasks` admitted sends. The typing scheduler
@@ -1140,7 +1150,10 @@ deletes or repairs operator files to roll back an error.
 and closes bounded subscription/wait interests, then cancels MCP connections and service loops.
 Synchronous ingress transactions finish before yielding; unresolved updates remain unconfirmed
 and recover from the durable cursor. Handler/listener futures and every admitted send are tracked
-and drained, including sends whose callers disconnected. No short shutdown timeout aborts route
+and drained, including sends whose callers disconnected. Download admission closes, HTTP work
+is canceled, and tracked writers/partial-output retirement drain before the store releases its
+roots. Valid completed owned files remain until stored expiry. Kernel filesystem I/O cannot be
+forcibly preempted and can outlast a logical download deadline. No short shutdown timeout aborts route
 bookkeeping: existing 15-second text and 600-second upload deadlines bound network attempts,
 followed by synchronous SQLite bookkeeping. Failure, uncertainty and failed bookkeeping never
 authorize replay or create a guessed route. Service errors survive draining; individual send
@@ -1156,8 +1169,8 @@ Both library entry points remain free of process-wide signal handlers. `app::run
 supervised service failure; embedding hosts that need graceful shutdown supply cancellation
 and await `app::run_until`. Dropping its future only fences admission, cancels the SDK and aborts
 the supervisor task set, without awaiting detached sends. In the binary, either SIGINT or SIGTERM
-starts the drain; repeated signals do not force an early exit. Allow pending uploads and their
-bookkeeping to finish before an external service-manager deadline. SIGKILL, process crashes and
+starts the drain; repeated signals do not force an early exit. Allow pending uploads, download
+I/O and bookkeeping to finish before an external service-manager deadline. SIGKILL, process crashes and
 forced termination can bypass draining and interrupt bookkeeping after Telegram accepts a send;
 they do not justify automatically resending. Composition tests use the same private constructor
 with a mocked client; production exposes no endpoint override.
@@ -1233,8 +1246,8 @@ activation, live Telegram or named-client operation.
 The implementation advertises MCP `2025-06-18` initialization/tools/read-only resources and
 `2026-07-28` discovery/tools/resources/`subscriptions/listen` through locked rmcp 3.8.0.
 [Legacy HTTP fixtures](../src/routes/legacy.rs) define negotiation, security and shared-handler
-regressions; their execution is pending the dedicated FINALIZE gate. Existing modern event
-proofs remain in place. Named-client acceptance requires later HOST discovery of the complete
+regressions; complete C6 passed with the accepted mixed-protocol composition. Existing modern
+event proofs remain in place. Named-client acceptance requires later HOST discovery of the complete
 tool catalog; no named-client, live Telegram or universal idle-host wake success is claimed.
 See [client requirements](SETUP.md#connect-mcp-clients) and specification sections 5–6 and 18.
 

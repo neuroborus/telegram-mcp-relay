@@ -9,7 +9,7 @@ WorkingDirectory=%h
 UMask=0077
 Restart=on-failure
 RestartSec=5s
-# Allow a 600-second upload and subsequent SQLite bookkeeping to drain.
+# Allow uploads/downloads up to 600 seconds plus bookkeeping/I/O drainage; review host margin.
 TimeoutStopSec=660s
 NoNewPrivileges=true
 CapabilityBoundingSet=

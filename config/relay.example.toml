@@ -49,7 +49,7 @@ reply_ttl_days = 30
 cleanup_interval_hours = 24
 
 [history]
-# Incoming capture is supported; outgoing capture/read tools land separately. Bodies are private data.
+# Opt-in incoming and confirmed outgoing/service capture plus shared reads. Bodies are private data.
 # Enabling requires server.auth_token_env or server.auth_token_file and a resolved bearer.
 enabled = false
 retention_days = 30
