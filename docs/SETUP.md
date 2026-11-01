@@ -239,12 +239,16 @@ does not update that catalog. No automatic reload mechanism or universal idle wa
 
 Call `telegram_guidance({})` first per client conversation, including before registration;
 inspect the actual tool schemas with `tools/list`. Guidance is self-contained read-only advice,
-without a required handshake. Register/resume using a stable external ID and the real title
+without a required handshake. Standard policy instructions are visible before tools in legacy
+initialization and modern discovery. Register/resume using a stable external ID and the real title
 from available public host metadata (otherwise an honest explicit fallback); save the returned
-session key and inbox URI.
+session key and inbox URI. Titles fit 50 graphemes; overlong new titles end in `…` inside that
+limit. Fitting titles and stored ellipses remain unchanged; old truncated input is unrecoverable.
 Optional `directory_label` is display-only context: avoid personal absolute paths. It normalizes
 to one safe line, rejects more than 100 scalars and is omitted/cleared when absent or blank.
-The server adds native bold title/italic directory entities; supply verbatim bodies/captions.
+The server adds native bold `[title]`, optional italic directory on a separate line and one
+blank line before a nonempty body/caption, without trailing blank lines for an empty caption.
+Supply verbatim bodies/captions without repeating these headers.
 Optional body-relative `entities` on send/ask and `caption_entities` on send_file request native
 formatting; omitted/empty arrays stay literal. No Markdown/HTML is parsed. See the
 [entity examples and limits](../README.md#synthetic-workflows).

@@ -214,7 +214,7 @@ async fn factual_notices_stay_outside_routes_and_known_targets_are_silent_after_
     for (id, expected) in [
         (
             201,
-            format!("🔧 Same title\nworkspace/📁\n{UNCONFIRMED_NOTICE}"),
+            format!("🔧 [Same title]\nworkspace/📁\n\n{UNCONFIRMED_NOTICE}"),
         ),
         (202, format!("🔧 {UNROUTABLE_NOTICE}")),
     ] {
@@ -223,7 +223,7 @@ async fn factual_notices_stay_outside_routes_and_known_targets_are_silent_after_
         assert_eq!(
             request,
             json!({"chat_id":-101,"text":expected,"entities": if id == 201 { json!([
-            {"type":"bold","offset":3,"length":10}, {"type":"italic","offset":14,"length":12}
+            {"type":"bold","offset":3,"length":12}, {"type":"italic","offset":16,"length":12}
         ]) } else { json!([]) }})
         );
         assert_eq!(work.await.unwrap(), Ok(()));
@@ -355,7 +355,7 @@ async fn complete_notice_length_is_validated_without_truncation_or_replay() {
         let db = fixture.open();
         let title = format!(
             "a{}",
-            "\u{301}".repeat(length - UNCONFIRMED_NOTICE.chars().count() - 4)
+            "\u{301}".repeat(length - UNCONFIRMED_NOTICE.chars().count() - 7)
         );
         fixture.seed(&db, &title);
         fixture.ingest(&db, 11, json!({"message_id":5}));
@@ -369,7 +369,7 @@ async fn complete_notice_length_is_validated_without_truncation_or_replay() {
                 request["text"]
                     .as_str()
                     .unwrap()
-                    .starts_with(&format!("🔧 {title}\n"))
+                    .starts_with(&format!("🔧 [{title}]\n\n"))
             );
             assert_eq!(work.await.unwrap(), Ok(()));
         } else {

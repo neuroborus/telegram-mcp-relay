@@ -354,7 +354,7 @@ async fn validates_before_effects_and_persists_exact_formatted_boundaries_across
             .unwrap_err(),
         AppError::SessionNotFound
     );
-    for body in ["a".repeat(999), "😀".repeat(999)] {
+    for body in ["a".repeat(996), "😀".repeat(996)] {
         let error = service
             .send_text(&session.session_key, &body)
             .await
@@ -383,8 +383,8 @@ async fn validates_before_effects_and_persists_exact_formatted_boundaries_across
             .unwrap()
             .is_none()
     );
-    // The normalized header consumes two scalars; astral text is legal below native bounds.
-    for (id, body) in [(7, "a".repeat(998)), (8, "😀".repeat(998))] {
+    // Brackets and the blank line consume five scalars with this one-scalar title.
+    for (id, body) in [(7, "a".repeat(995)), (8, "😀".repeat(995))] {
         let result = service
             .send_text(&session.session_key, &body)
             .await
@@ -394,7 +394,7 @@ async fn validates_before_effects_and_persists_exact_formatted_boundaries_across
         assert_eq!(requests.last().unwrap().method, "/botSynthetic/sendMessage");
         assert_eq!(
             serde_json::from_slice::<Value>(&requests.last().unwrap().body).unwrap(),
-            json!({"chat_id":-101,"text":format!("界\n{body}"),"entities":[{"type":"bold","offset":0,"length":1}]})
+            json!({"chat_id":-101,"text":format!("[界]\n\n{body}"),"entities":[{"type":"bold","offset":0,"length":3}]})
         );
     }
     assert_eq!(mock.count(), 2);

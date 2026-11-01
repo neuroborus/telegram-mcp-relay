@@ -32,10 +32,10 @@ fn body_entities_validate_supported_kinds_metadata_and_utf16_boundaries() {
             .unwrap()
             .with_body_entities("😀e\u{301}", &[span])
             .unwrap();
-        assert_eq!(text.as_str(), "🚀\n😀e\u{301}");
+        assert_eq!(text.as_str(), "[🚀]\n\n😀e\u{301}");
         assert_eq!(
             (text.entities()[1].offset, text.entities()[1].length),
-            (5, 2)
+            (8, 2)
         );
     }
     for value in [
@@ -116,8 +116,8 @@ fn rich_bodies_preserve_final_bounds_and_service_prefix_offsets() {
     use serde_json::json;
     let title = SessionTitle::new("T");
     for (caption, body, units) in [
-        (false, "a".repeat(998), 998),
-        (true, "😀".repeat(511), 1_022),
+        (false, "a".repeat(995), 995),
+        (true, "😀".repeat(509) + "a", 1_019),
     ] {
         let span = entity(json!({"type":"bold","offset":0,"length":units}));
         let format = |body: &str| {
@@ -135,7 +135,7 @@ fn rich_bodies_preserve_final_bounds_and_service_prefix_offsets() {
             message.as_str().encode_utf16().count(),
             if caption { 1_024 } else { 1_000 }
         );
-        assert_eq!(message.entities()[1].offset, 2);
+        assert_eq!(message.entities()[1].offset, 5);
         assert_eq!(format(&(body + "a")).unwrap_err().code(), "TEXT_TOO_LONG");
     }
     let directory = DirectoryLabel::new("📁").unwrap().unwrap();
@@ -144,14 +144,14 @@ fn rich_bodies_preserve_final_bounds_and_service_prefix_offsets() {
         .unwrap()
         .with_body_entities("😀", &[span])
         .unwrap();
-    assert_eq!(notice.as_str(), "🔧 🚀\n📁\n😀");
+    assert_eq!(notice.as_str(), "🔧 [🚀]\n📁\n\n😀");
     assert_eq!(
         notice
             .entities()
             .iter()
             .map(|e| e.offset)
             .collect::<Vec<_>>(),
-        [3, 6, 9]
+        [3, 8, 12]
     );
 }
 
@@ -197,11 +197,39 @@ fn title_cutoff_preserves_whole_extended_graphemes() {
     ] {
         let fifty = grapheme.repeat(50);
         assert_eq!(SessionTitle::new(&fifty).as_str(), fifty);
-        assert_eq!(SessionTitle::new(&grapheme.repeat(51)).as_str(), fifty);
+        let shortened = SessionTitle::new(&grapheme.repeat(51));
+        assert_eq!(shortened.as_str(), format!("{}…", grapheme.repeat(49)));
+        assert_eq!(shortened.as_str().graphemes(true).count(), 50);
+        assert_eq!(SessionTitle::new(shortened.as_str()), shortened);
+        let notice = format_notice(Some(&shortened), None, "😀")
+            .unwrap()
+            .with_body_entities(
+                "😀",
+                &[entity(serde_json::json!({
+                    "type":"code","offset":0,"length":2
+                }))],
+            )
+            .unwrap();
+        assert_eq!(
+            notice.as_str(),
+            format!("🔧 [{}…]\n\n😀", grapheme.repeat(49))
+        );
+        assert_eq!(notice.entities()[0].offset, 3);
+        assert_eq!(
+            notice.entities()[0].length,
+            49 * grapheme.encode_utf16().count() + 3
+        );
+        assert_eq!(
+            notice.entities()[1].offset,
+            49 * grapheme.encode_utf16().count() + 8
+        );
     }
     // A separator at the truncation boundary must not leave trailing whitespace.
     let input = format!("{} b", "a".repeat(49));
-    assert_eq!(SessionTitle::new(&input).as_str(), "a".repeat(49));
+    assert_eq!(
+        SessionTitle::new(&input).as_str(),
+        format!("{}…", "a".repeat(49))
+    );
 }
 
 #[test]
@@ -211,7 +239,7 @@ fn native_headers_use_utf16_coordinates_and_leave_bodies_literal() {
         .unwrap()
         .unwrap();
     let body = "  <code> & *literal*\n\nNext line\r\n ";
-    let expected = format!("🚀[Review] *draft*\nworkspace/📁 <tag>\n{body}");
+    let expected = format!("[🚀[Review] *draft*]\nworkspace/📁 <tag>\n\n{body}");
     let text = format_text(&title, Some(&directory), body).unwrap();
     assert_eq!(text.as_str(), expected);
     assert_eq!(
@@ -221,8 +249,8 @@ fn native_headers_use_utf16_coordinates_and_leave_bodies_literal() {
     assert_eq!(
         serde_json::to_value(text.entities()).unwrap(),
         serde_json::json!([
-            {"type":"bold", "offset":0, "length":18},
-            {"type":"italic", "offset":19, "length":18}
+            {"type":"bold", "offset":0, "length":20},
+            {"type":"italic", "offset":21, "length":18}
         ])
     );
     let notice = format_notice(Some(&title), Some(&directory), body).unwrap();
@@ -237,11 +265,11 @@ fn native_headers_use_utf16_coordinates_and_leave_bodies_literal() {
     assert!(bare.entities().is_empty());
     assert_eq!(
         format_caption(&title, None, "").unwrap().as_str(),
-        title.as_str()
+        format!("[{}]", title.as_str())
     );
     assert_eq!(
         format_text(&title, Some(&directory), "").unwrap().as_str(),
-        "🚀[Review] *draft*\nworkspace/📁 <tag>"
+        "[🚀[Review] *draft*]\nworkspace/📁 <tag>"
     );
 }
 
@@ -271,10 +299,10 @@ fn text_captions_and_notices_count_every_visible_scalar() {
     let directory = DirectoryLabel::new("📁").unwrap().unwrap();
     for unit in ["a", "Я", "e\u{301}", "👨‍👩‍👧‍👦", "𐐀", "line\n"] {
         for (notice, with_directory, framing) in [
-            (false, false, 2),
-            (false, true, 4),
-            (true, false, 4),
-            (true, true, 6),
+            (false, false, 5),
+            (false, true, 7),
+            (true, false, 7),
+            (true, true, 9),
         ] {
             let directory = with_directory.then_some(&directory);
             let width = unit.chars().count();
@@ -299,7 +327,7 @@ fn text_captions_and_notices_count_every_visible_scalar() {
             assert_eq!(details.native_limit_utf16, 4_096);
         }
     }
-    let body = "a".repeat(998);
+    let body = "a".repeat(995);
     assert_eq!(
         format_caption(&title, None, &body)
             .unwrap()
@@ -327,12 +355,12 @@ fn text_captions_and_notices_count_every_visible_scalar() {
 fn native_caption_boundary_includes_supplementary_title_directory_and_body() {
     let title = SessionTitle::new("🚀");
     let directory = DirectoryLabel::new("📁").unwrap().unwrap();
-    // Four framing scalars plus 996 body scalars; 24 astral symbols add 24 UTF-16 units.
-    let body = "🚀".repeat(22) + &"a".repeat(974);
+    // Seven framing scalars plus 993 body scalars; 24 astral symbols add 24 UTF-16 units.
+    let body = "🚀".repeat(22) + &"a".repeat(971);
     let caption = format_caption(&title, Some(&directory), &body).unwrap();
     assert_eq!(caption.as_str().chars().count(), 1_000);
     assert_eq!(caption.as_str().encode_utf16().count(), 1_024);
-    let body = "🚀".repeat(23) + &"a".repeat(973);
+    let body = "🚀".repeat(23) + &"a".repeat(970);
     let details = length_details(format_caption(&title, Some(&directory), &body).unwrap_err());
     assert_eq!(details.actual_characters, 1_000);
     assert_eq!(details.actual_utf16_units, 1_025);
@@ -350,7 +378,7 @@ fn native_caption_boundary_includes_supplementary_title_directory_and_body() {
 #[test]
 fn normalization_precedes_length_checks_and_large_graphemes_are_not_shortened() {
     let title = SessionTitle::new(&format!(" \n{} discarded", "a".repeat(50)));
-    let body = "b".repeat(949);
+    let body = "b".repeat(946);
     assert_eq!(
         format_text(&title, None, &body)
             .unwrap()
@@ -367,14 +395,25 @@ fn normalization_precedes_length_checks_and_large_graphemes_are_not_shortened() 
         format_caption(&title, None, ""),
     ] {
         let details = length_details(result.unwrap_err());
-        assert_eq!(details.actual_characters, 1_001);
-        assert_eq!(details.actual_utf16_units, 1_001);
+        assert_eq!(details.actual_characters, 1_003);
+        assert_eq!(details.actual_utf16_units, 1_003);
     }
 }
 
 #[test]
 fn service_recognition_preserves_legacy_notices_and_rejects_other_bodies() {
     for text in [
+        format!("🔧 []\n{UNCONFIRMED_NOTICE}"),
+        format!("🔧 [ A ]\nworkspace/📁\n{UNCONFIRMED_NOTICE}"),
+        format!("🔧 [[]]\n\n{UNCONFIRMED_NOTICE}"),
+        format!("🔧 [[ A ]]\nworkspace/📁\n\n{UNCONFIRMED_NOTICE}"),
+        format!("🔧 [Title]\n\n{UNCONFIRMED_NOTICE}"),
+        format!("🔧 [Title]\nworkspace/📁\n\n{UNCONFIRMED_NOTICE}"),
+        format!(
+            "🔧 [{}]\n\n{UNCONFIRMED_NOTICE}",
+            SessionTitle::new(&"🚀".repeat(51)).as_str()
+        ),
+        format!("🔧 {}\n{UNCONFIRMED_NOTICE}", "a".repeat(50)),
         UNCONFIRMED_NOTICE.to_owned(),
         UNROUTABLE_NOTICE.to_owned(),
         format!("[Old title]\n{UNCONFIRMED_NOTICE}"),
@@ -405,5 +444,5 @@ fn diagnostics_expose_counts_and_guidance_without_input() {
     assert!(diagnostics.contains("TEXT_TOO_LONG"));
     assert!(diagnostics.contains("telegram_send_file"));
     let details = length_details(error);
-    assert_eq!(details.actual_characters, 2_224);
+    assert_eq!(details.actual_characters, 2_227);
 }

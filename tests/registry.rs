@@ -46,6 +46,31 @@ impl Drop for Fixture {
 }
 
 #[test]
+fn title_ellipsis_round_trips_without_inventing_old_truncated_input() {
+    let fixture = Fixture::new();
+    let limits = Limits::default();
+    let mut db = fixture.open(&limits);
+    let label = format!("{}…", "👩🏽‍💻".repeat(49));
+    let new = db
+        .register_session(Some("long"), None, &"👩🏽‍💻".repeat(51), None, 100)
+        .unwrap();
+    assert_eq!(new.title.as_str(), label);
+    // A fifty-grapheme persisted label is indistinguishable from an old truncated input.
+    let old = db
+        .register_session(Some("old"), None, &"a".repeat(50), None, 100)
+        .unwrap();
+    drop(db);
+    let mut db = fixture.open(&limits);
+    assert_eq!(db.session(&new.session_key).unwrap(), new);
+    assert_eq!(db.session(&old.session_key).unwrap(), old);
+    let resumed = db
+        .register_session(None, Some(&new.session_key), &label, None, 200)
+        .unwrap();
+    assert_eq!(resumed.title, new.title);
+    assert_eq!(resumed.session_key, new.session_key);
+}
+
+#[test]
 fn same_titles_interleaved_text_and_documents_survive_rename_and_restart() {
     let fixture = Fixture::new();
     let limits = Limits::default();
@@ -82,12 +107,12 @@ fn same_titles_interleaved_text_and_documents_survive_rename_and_restart() {
         .register_session(Some("thread-a"), None, " New\t title ", None, 300)
         .unwrap();
     assert_eq!(renamed.session_key, keys[0]);
-    assert_eq!(old_text.as_str(), "Same title\nSynthetic");
+    assert_eq!(old_text.as_str(), "[Same title]\n\nSynthetic");
     assert_eq!(
         format_text(&renamed.title, None, "Synthetic")
             .unwrap()
             .as_str(),
-        "New title\nSynthetic"
+        "[New title]\n\nSynthetic"
     );
     assert_eq!(
         renamed.inbox_uri(),
@@ -187,12 +212,12 @@ fn directory_display_updates_are_durable_bounded_and_do_not_change_old_routes() 
         .register_session(Some("same"), None, "T", Some("📁"), 200)
         .unwrap();
     assert_eq!(renamed.session_key, *key);
-    assert_eq!(old.as_str(), "T\nold\nbody");
+    assert_eq!(old.as_str(), "[T]\nold\n\nbody");
     assert_eq!(
         format_text(&renamed.title, renamed.directory_label.as_ref(), "body")
             .unwrap()
             .as_str(),
-        "T\n📁\nbody"
+        "[T]\n📁\n\nbody"
     );
     drop(database);
     let mut database = fixture.open(&limits);

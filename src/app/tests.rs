@@ -372,7 +372,7 @@ async fn composition_cleans_before_polling_and_shares_send_ingress_and_typing() 
         request = mock.next("sendMessage") => request,
         _ = &mut send => panic!("send completed before Telegram response"),
     };
-    assert_eq!(request.payload["text"], "Synthetic\nQuestion");
+    assert_eq!(request.payload["text"], "[Synthetic]\n\nQuestion");
     request.respond(
         json!({"ok":true,"result":{"message_id":5,"chat":{"id":-101},
         "date":unix_millis().unwrap()/1000}}),

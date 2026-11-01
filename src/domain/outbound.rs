@@ -36,9 +36,17 @@ pub(crate) fn is_service_notice(text: &str) -> bool {
             return true;
         }
         if let Some((header, UNCONFIRMED_NOTICE)) = text.rsplit_once('\n') {
+            // New framing adds a blank line; retain the old single-newline shapes.
+            let header = header.strip_suffix('\n').unwrap_or(header);
             let mut lines = header.split('\n');
             let title = lines.next().unwrap_or_default();
-            return SessionTitle::new(title).as_str() == title
+            // Brackets may belong to an old literal title rather than the new framing.
+            let valid_title = |label: &str| SessionTitle::new(label).as_str() == label;
+            return (valid_title(title)
+                || title
+                    .strip_prefix('[')
+                    .and_then(|s| s.strip_suffix(']'))
+                    .is_some_and(valid_title))
                 && lines.next().is_none_or(|directory| {
                     DirectoryLabel::new(directory)
                         .ok()
@@ -62,6 +70,7 @@ pub struct SessionTitle(String);
 
 impl SessionTitle {
     /// Collapse whitespace, strip unsafe controls and keep at most 50 graphemes.
+    /// Overlong labels reserve the last grapheme for a visible ellipsis.
     /// A single grapheme can contain many scalars; final output still needs validation.
     pub fn new(input: &str) -> Self {
         Self::normalize(input, true)
@@ -69,12 +78,16 @@ impl SessionTitle {
 
     fn normalize(input: &str, safe: bool) -> Self {
         let mut normalized = normalize_line(input, safe);
-        let end = normalized
-            .grapheme_indices(true)
-            .nth(TITLE_GRAPHEME_LIMIT)
-            .map_or(normalized.len(), |(offset, _)| offset);
-        normalized.truncate(end);
-        normalized.truncate(normalized.trim_end().len());
+        let mut graphemes = normalized.grapheme_indices(true);
+        let cutoff = graphemes
+            .nth(TITLE_GRAPHEME_LIMIT - 1)
+            .map(|(offset, _)| offset);
+        if graphemes.next().is_some() {
+            // An overlong label necessarily has the reserved fiftieth grapheme.
+            normalized.truncate(cutoff.unwrap_or(normalized.len()));
+            normalized.truncate(normalized.trim_end().len());
+            normalized.push('…');
+        }
         if normalized.is_empty() {
             normalized.push_str(FALLBACK_TITLE);
         }
@@ -225,7 +238,9 @@ fn format_outbound(
     // Unknown-session notices have no directory context either.
     let directory = directory.filter(|_| title.is_some());
     let separator = title.is_some() && !body.is_empty();
-    let framing = usize::from(separator) + usize::from(directory.is_some());
+    let framing = 2 * usize::from(title.is_some())
+        + 2 * usize::from(separator)
+        + usize::from(directory.is_some());
     let (actual_characters, actual_utf16_units) = prefix
         .chars()
         .chain(title.into_iter().flat_map(|title| title.as_str().chars()))
@@ -254,11 +269,13 @@ fn format_outbound(
         entities.push(MessageEntity {
             kind: EntityKind::Bold,
             offset: prefix.encode_utf16().count(),
-            length: title.as_str().encode_utf16().count(),
+            length: title.as_str().encode_utf16().count() + 2,
             url: None,
             language: None,
         });
+        text.push('[');
         text.push_str(title.as_str());
+        text.push(']');
     }
     if let Some(directory) = directory {
         text.push('\n');
@@ -272,7 +289,7 @@ fn format_outbound(
         text.push_str(directory.as_str());
     }
     if separator {
-        text.push('\n');
+        text.push_str("\n\n");
     }
     text.push_str(body);
     Ok(FormattedMessage { text, entities })

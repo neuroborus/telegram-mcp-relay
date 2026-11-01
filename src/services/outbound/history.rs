@@ -113,9 +113,9 @@ async fn confirmed_snapshots_and_documents_survive_cancellation_rename_restart_a
     assert_eq!(
         rows,
         vec![
-            ("界\nLiteral *🚀*".into(), "界".into(), None),
+            ("[界]\n\nLiteral *🚀*".into(), "界".into(), None),
             (
-                "Renamed\nmodule\nCaption".into(),
+                "[Renamed]\nmodule\n\nCaption".into(),
                 "Renamed".into(),
                 Some("module".into())
             )

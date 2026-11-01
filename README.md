@@ -75,12 +75,15 @@ session keys, fences, raw Telegram file IDs and file bytes. Own-reply `attachmen
 remains legacy-compatible JSON; use the additive safe `attachments` handles for downloads,
 never adapter identifiers from that metadata.
 
-`GuidanceResult` contains `version` (currently 2), `tools: [{name, description}]`,
+`GuidanceResult` contains `version` (currently 3), `tools: [{name, description}]`,
 `capabilities`, `limits` and `instructions: [string]`. The tools match actual registration;
 full schemas come from `tools/list`. Capabilities include `protocols: [{version,
 resource_subscriptions}]`, `wait_enabled`, `history_enabled`, `attachment_downloads_enabled`,
 `typing_enabled`, `guidance_handshake_required: false`, `host_concurrency_known: false` and
 `idle_host_wake_guaranteed: false`. No credentials, configured paths or allowlist IDs are disclosed.
+Standard server-wide instructions are also available before any tool call, in legacy
+2025-06-18 initialization and modern 2026-07-28 discovery. They summarize the policy in at
+most 500 Unicode scalars; guidance and relevant tool descriptions supply the full details.
 Configured limits remain visible when a capability is disabled:
 
 | Limit group | Fields in `limits` |
@@ -142,9 +145,11 @@ Fetch guidance, then register a synthetic conversation with `telegram_register`:
 
 Save `session_key` and `inbox_uri`. Resume with the same external ID or saved key; conflicting
 identities fail. Equal titles remain distinct. A title normalizes to one line of at most
-50 grapheme clusters; blank becomes `Agent Session`. Re-registration changes future framing
-only. Optional `directory_label` normalizes to at most 100 scalars, rejects excess, and clears
-when omitted/blank. It grants no path or routing authority.
+50 grapheme clusters; overlong new input keeps at most 49 graphemes plus `…`, while fitting
+titles and existing ellipses survive round trips. Blank becomes `Agent Session`. Previously
+truncated stored labels retain their existing text; lost input cannot be recovered.
+Re-registration changes future framing only. Optional `directory_label` normalizes to at most
+100 scalars, rejects excess, and clears when omitted/blank. It grants no path or routing authority.
 
 For a focused question, `telegram_ask` sends once and waits after route commit:
 
@@ -179,8 +184,10 @@ background calls. Allow client deadlines above 15 seconds of text-send network t
 ask's wait, or 600 seconds for an upload followed by the separate wait, with filesystem/SQLite/
 scheduling margin. Server admission budgets do not establish host support or automatic idle wake.
 
-Supply verbatim bodies/captions: the server adds native bold title and optional italic directory
-entities, with one newline before a nonempty body. No Markdown/HTML is parsed. Request rich
+Supply verbatim bodies/captions: the server adds a native bold `[title]` and optional italic
+directory on its own line, then one blank line (two newlines) before a nonempty body. An empty
+caption has only the header, without trailing blank lines. Brackets frame the label outside its
+50-grapheme limit and count toward outbound bounds. No Markdown/HTML is parsed. Request rich
 formatting using optional `entities` on send/ask or `caption_entities` on send_file; omitted or
 empty arrays preserve literal behavior on both protocols. For example:
 

@@ -128,6 +128,20 @@ The bounded Python mock now accepts the ordered `caption_entities` part and vali
 span boundaries without buffering documents. These cases passed in the accepted composition
 C6 above; live rendering remains unverified.
 
+## Server instructions and restored framing regressions
+
+`src/routes/guidance.rs` checks standard server instructions in actual legacy initialization
+and modern discovery before any guidance/tool call: matching policy, 500-scalar bound, essential
+recommendations within 512 characters, unchanged SQLite and zero Telegram requests.
+Domain cases protect bold brackets, separate italic directory, exactly one blank line before
+nonempty bodies, empty captions, cutoff ellipsis inside 50 whole graphemes and fitting-title
+round trips. `tests/registry.rs` reopens new ellipsis and old already-truncated labels without
+inventing lost input. Notice cases retain old plain/bracketed/native shapes and route precedence.
+Actual text/question JSON and document multipart fixtures include bracketed astral headers,
+shifted body entities, exact 1,000/1,001-scalar and 1,024/1,025-UTF-16 boundaries, final-text
+journaling and mixed-protocol document/wait composition. These source-defined changes require
+C1–C6 plus final-composition C11/R1 and C12/R2 in FINALIZE; no new HOST measurement is claimed.
+
 ## Explicit native body-entity regressions
 
 Domain cases cover supported kinds, metadata bounds, surrogate/range/overflow failures,
@@ -247,7 +261,8 @@ can still register without a handshake; later guidance discloses no new private 
 `services::guidance` tests nondefault lower limits, disabled features, database history opt-in
 and exclusion of synthetic private settings/paths/allowlist identities. Self-contained policy
 content is reviewed against specification §§5.4/14; the earlier version-1 cases passed in
-accepted complete C6. Version-2 body-entity contract validation remains pending.
+accepted complete C6. The current version-3 framing/body-entity composition requires fresh
+FINALIZE receipts.
 Source inspection does not establish named-client, live Telegram, host concurrency or idle wake.
 
 ## Final mixed-protocol composition regressions
@@ -674,8 +689,8 @@ the complete suite must also work from a read-only checkout.
 
 Unit tests in `domain::outbound::tests` cover whitespace/control normalization, blank fallback,
 50/51-grapheme titles (including combining marks, ZWJ emoji, flags and Hangul), unchanged
-multiline bodies and shared plain headers. They exercise final 1,000/1,001-scalar boundaries
-for ASCII, Cyrillic, combining marks and supplementary symbols, native 1,024/1,025-UTF-16-unit
+multiline bodies and shared native bracketed headers. They exercise final 1,000/1,001-scalar
+boundaries for ASCII, Cyrillic, combining marks and supplementary symbols, native 1,024/1,025-UTF-16-unit
 captions including the title, unusually large title graphemes and redacted structured errors.
 Text/question/notice formatting and caption validation are pure. Text/document services add
 zero-send/zero-route assertions; question integration is covered by `routes::tests::ask`.

@@ -476,18 +476,23 @@ accepted complete C6 covers synthetic wait cases. The separate
 ## Outbound formatting
 
 `SessionTitle` collapses Unicode whitespace to one ASCII space, trims edges, strips controls
-and unsafe invisible/directional formatting controls, and truncates at 50 extended grapheme
-clusters. Blank titles become `Agent Session`; emoji joiners and combining sequences remain
-intact. `DirectoryLabel` uses the same safe single-line normalization without truncation:
+and unsafe invisible/directional formatting controls. Titles exceeding 50 extended grapheme
+clusters keep at most 49 plus `…`; fitting titles and existing ellipses round-trip unchanged.
+Blank titles become `Agent Session`; emoji joiners and combining sequences remain intact.
+Persisted labels truncated by older releases lack their original input and remain compatible;
+no migration invents missing text. `DirectoryLabel` uses the same safe single-line normalization
+without truncation:
 more than 100 normalized Unicode scalars returns `REQUEST_INVALID`, while absent/blank values
 are omitted. Both are redacted display labels. Directory context is opt-in metadata, never
 file authorization, a filesystem instruction, host identity or routing input. Avoid personal
 absolute paths; the relay does not infer a working directory or a host conversation title.
 
 `format_text`, `format_caption` and `format_notice` return validated verbatim text plus native
-bold title and optional italic directory spans. The title is the first line, the directory
-is the optional second line, and a nonempty body follows one newline. An empty caption retains
-just these headers. Every service notice begins with exactly `🔧 ` before any title or body;
+bold `[title]` and optional italic directory spans. The complete bracketed title is bold on
+the first line; the optional italic directory occupies the second. A nonempty body follows
+one blank line (two newlines); an empty caption retains just the headers without trailing
+blank lines. Brackets are outside the title label limit. Every service notice begins with exactly
+`🔧 ` before any title or body;
 unknown-session notices have no title/directory. Entity offsets/lengths use UTF-16 code units,
 including that prefix. Text uses `entities`; multipart documents use `caption_entities`.
 No `parse_mode`, Markdown/HTML parser, body splitting or truncation is introduced. Callers
@@ -504,9 +509,9 @@ framing length; caller spans cannot reach header entities. Shape/type failures r
 invalid-params errors, while range/metadata/nesting failures return structured `REQUEST_INVALID`.
 
 Before allocating final output or admitting a send, these functions count every visible
-scalar and UTF-16 unit: prefix, title, directory, separators and full body. They enforce the
-fixed 1,000-scalar cap plus conservative native bounds of 4,096 UTF-16 units for text/notices
-and 1,024 for captions. A very large single title grapheme can cause rejection even with an
+scalar and UTF-16 unit: prefix, brackets, title/ellipsis, directory, separators and full body.
+They enforce the fixed 1,000-scalar cap plus conservative native bounds of 4,096 UTF-16 units
+for text/notices and 1,024 for captions. A very large single title grapheme can cause rejection even with an
 empty body. Native entity metadata adds no visible characters. These contracts follow the
 [Telegram entity](https://core.telegram.org/bots/api#messageentity),
 [text](https://core.telegram.org/bots/api#sendmessage) and
@@ -926,8 +931,12 @@ or permission to execute content. Complete composition/release checks passed; th
 ## Current agent guidance
 
 `telegram_guidance({})` is a typed, read-only tool available without an application session.
-Its current contract version is 2, including explicit native body/caption entities and literal
-defaults; the version-1 HOST observations below remain historical.
+Its current contract version is 3, including bracketed native headers, blank-line separation,
+ellipsis title cutoff and explicit body/caption entities with literal defaults. The version-1
+HOST observations below remain historical. Standard rmcp 3.8.0 `ServerConfig` instructions
+also expose a compact policy before tools, through legacy initialization and modern discovery.
+They fit 500 Unicode scalars and keep essential recommendations within the first 512 characters.
+No enforced handshake, adapter, secret or local path is added.
 `services::guidance` projects only nonsecret effective capabilities, finite limits and a
 versioned self-contained policy. The handler adds its actual production tool names/descriptions
 and supported protocol revisions; the independently maintained expected DTO catalog remains
@@ -1237,7 +1246,8 @@ network/protocol behavior and cancellation. Shared state contains handles, not d
 ## Durable delivery invariants
 
 - An agent session is an explicit persisted identity, independent of transport connections.
-  Titles are display labels, normalized and limited to 50 grapheme clusters.
+  Titles are display labels, normalized and limited to 50 graphemes including cutoff `…`;
+  bold brackets frame them outside that label limit.
 - Validate final outgoing text/captions at 1,000 Unicode scalars including the header before
   any send/route mutation. Captions also obey the conservative 1,024 UTF-16-unit native bound.
   Overlength returns `TEXT_TOO_LONG`; no splitting, truncation or implicit file creation.

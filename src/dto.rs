@@ -95,7 +95,7 @@ pub struct RegisterRequest {
     pub external_session_id: Option<String>,
     /// Saved handle to resume when no external identity is available.
     pub session_key: Option<String>,
-    /// Display label, normalized to at most 50 grapheme clusters.
+    /// Safe display label, at most 50 graphemes; overlong new input ends with an ellipsis.
     pub title: String,
     /// Opt-in directory display context, not file authority. Omitted/blank clears it.
     /// Normalized to one safe line, at most 100 Unicode scalars; avoid personal paths.
@@ -118,8 +118,8 @@ pub struct RegisterResult {
 pub struct SendRequest {
     pub session_key: String,
     /// Verbatim body; use entities for formatting, never implicit Markdown/HTML parsing.
-    /// The server adds native bold/italic headers. The complete visible
-    /// title, optional directory, separators and body must fit 1,000 Unicode scalars.
+    /// The server adds a bold `[title]`, optional italic directory and a blank line before nonempty text.
+    /// Complete visible framing and body must fit 1,000 Unicode scalars.
     pub text: String,
     /// Optional native entities, at most 100; UTF-16 offsets relative to text only.
     /// Omitted/empty means literal text. Do not include the server-owned header.
@@ -135,9 +135,9 @@ pub struct SendFileRequest {
     pub session_key: String,
     /// Absolute local path beneath a configured approved root, without symlinks.
     pub path: PathBuf,
-    /// Verbatim description; use caption_entities for formatting. The server adds the header.
-    /// The complete caption must fit
-    /// 1,000 scalars and 1,024 UTF-16 units.
+    /// Verbatim description; use caption_entities for formatting, with no implicit markup parsing.
+    /// The server adds a bold `[title]`, optional italic directory and a blank line before nonempty text.
+    /// The complete caption must fit 1,000 scalars and 1,024 UTF-16 units.
     #[serde(default)]
     pub caption: String,
     /// Optional native entities, at most 100; UTF-16 offsets relative to caption only.

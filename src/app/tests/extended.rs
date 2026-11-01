@@ -291,13 +291,18 @@ async fn shared_composition_preserves_claims_and_attachment_authority_across_pro
     let file = fixture.config.files.allowed_roots[0].join("report.bin");
     fs::write(&file, b"explicit synthetic report").unwrap();
     let sender = modern.clone();
-    let args = json!({"session_key":owner["session_key"],"path":file,"caption":"Literal <report>"});
+    let args = json!({"session_key":owner["session_key"],"path":file,"caption":"Literal <report>",
+        "caption_entities":[{"type":"code","offset":8,"length":8}]});
     let sent = tokio::spawn(async move { sender.tool("telegram_send_file", args).await });
     let request = mock.next("sendDocument").await;
-    assert_eq!(request.part("caption"), b"Same\nmodule\nLiteral <report>");
+    assert_eq!(
+        request.part("caption"),
+        b"[Same]\nmodule\n\nLiteral <report>"
+    );
     assert_eq!(
         serde_json::from_slice::<Value>(request.part("caption_entities")).unwrap(),
-        json!([{"type":"bold","offset":0,"length":4},{"type":"italic","offset":5,"length":6}])
+        json!([{"type":"bold","offset":0,"length":6},{"type":"italic","offset":7,"length":6},
+            {"type":"code","offset":23,"length":8}])
     );
     let mut accepted_file = accepted(11);
     accepted_file["result"]["document"] = json!({"file_id":"outgoing-file","file_unique_id":"outgoing-stable",

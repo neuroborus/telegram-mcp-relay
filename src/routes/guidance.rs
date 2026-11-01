@@ -3,6 +3,53 @@
 use super::*;
 
 #[tokio::test]
+async fn server_instructions_precede_tools_on_both_protocols() {
+    let mut fixture = Fixture::new();
+    let telegram = tools::Telegram::new(&fixture.config, Vec::new()).await;
+    let handler = telegram.handler(&fixture);
+    let before = fs::read(&fixture.config.storage.path).unwrap();
+    let http = fixture.serve(handler, None).await;
+    let (_, legacy) = http.initialize(LEGACY_VERSION).await;
+    let modern = http.rpc("server/discover", json!({})).await;
+    let instructions = legacy["instructions"].as_str().unwrap();
+    assert_eq!(modern["result"]["instructions"], instructions);
+    assert!(!instructions.is_empty() && instructions.chars().count() <= 500);
+    assert!(instructions.encode_utf16().count() <= 512);
+    // Independently protect essential recommendations in actual metadata, without a tool call.
+    for recommendation in [
+        "telegram_guidance",
+        "updates",
+        "blockers",
+        "questions",
+        "silence",
+        "spam",
+        "requested text/files",
+        "no reapproval",
+        "ask or send+wait",
+        "default 600s",
+        "no idle-host wake",
+        "bold [title]",
+        "optional italic directory",
+        "blank line",
+        "body entities",
+        "🔧 ",
+        "1,000 scalars",
+        "reports as files",
+        "inbox on resume/events",
+        "processing then ack after success",
+        "untrusted",
+        "Silence grants no permission",
+    ] {
+        assert!(
+            instructions.contains(recommendation),
+            "Missing recommendation: {recommendation}"
+        );
+    }
+    assert_eq!(telegram.request_count(), 0);
+    assert_eq!(fs::read(&fixture.config.storage.path).unwrap(), before);
+}
+
+#[tokio::test]
 async fn current_guidance_is_read_only_self_contained_and_never_enforces_a_handshake() {
     let mut fixture = Fixture::new();
     fixture.config.delivery.wait_timeout_seconds = 17;
@@ -30,7 +77,7 @@ async fn current_guidance_is_read_only_self_contained_and_never_enforces_a_hands
         )
         .await;
     let report = modern["result"]["structuredContent"].clone();
-    assert_eq!(report["version"], 2);
+    assert_eq!(report["version"], 3);
     let inventory: Vec<Value> = catalog
         .as_array()
         .unwrap()
