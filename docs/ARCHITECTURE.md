@@ -883,6 +883,26 @@ lifetime cannot exceed the authorized source. Each successful call materializes 
 copy; results claim only daemon-local filesystem access to untrusted bytes, never remote access
 or permission to execute content. Complete composition/release/HOST acceptance remains separate.
 
+## Current agent guidance
+
+`telegram_guidance({})` is a typed, read-only tool available without an application session.
+`services::guidance` projects only nonsecret effective capabilities, finite limits and a
+versioned self-contained policy. The handler adds its actual production tool names/descriptions
+and supported protocol revisions; the independently maintained expected DTO catalog remains
+separate. No configuration serialization, paths, allowlist identities, credentials, database
+reads at call time, Telegram requests, host metadata inspection or handshake state are added.
+
+Every interaction description requests guidance first per client conversation, including
+registration. Clients that omit it keep their existing access. The response distinguishes
+modern resource subscriptions from legacy tool/resource reads, and server budgets from unknown
+client concurrency/deadlines and idle-wake behavior. It explains identity/native headers,
+complete scalar/caption limits, explicit prepared-file reports, ask/send-file-then-wait without
+resend, startup/notification inbox recovery, current fences and saved-pair reconciliation,
+scoped sends, proactive focused communication, shared observation and daemon-local files.
+The [consumer policy](AGENT_POLICY.md) matches accepted specification section 14. Run-frozen
+contributor guidance stays unchanged until the authorized post-release follow-up. Guidance
+source/HTTP proofs await their FINALIZE gate; composition/releases and HOST remain separate.
+
 ## Reply ingestion
 
 `services::ingress::IngressService` accepts only allowlisted chats and non-bot senders with

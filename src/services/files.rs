@@ -12,7 +12,7 @@ use rustix::fs::{Mode, OFlags, ResolveFlags, open, openat2};
 use crate::{config::Files, error::AppError};
 
 // Telegram's cloud sendDocument limit is 50 MB. Use decimal MB conservatively.
-const CLOUD_DOCUMENT_BYTES: u64 = 50_000_000;
+pub(crate) const CLOUD_DOCUMENT_BYTES: u64 = 50_000_000;
 
 /// Pins at most 64 configured roots. All path components must be free of symlinks.
 /// Linux openat2 (5.6+) is required; unsupported or denied resolution fails closed.

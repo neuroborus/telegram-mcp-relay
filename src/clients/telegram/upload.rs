@@ -9,14 +9,13 @@ use reqwest::{
 };
 use tokio::io::AsyncReadExt;
 
-use super::{TelegramClient, send_error, validate_sent};
+use super::{TelegramClient, UPLOAD_TIMEOUT, send_error, validate_sent};
 use crate::{
     clients::telegram::SentMessage,
     domain::outbound::FormattedMessage,
     error::{AppError, TelegramError},
 };
 
-const UPLOAD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
 const CHUNK_BYTES: usize = 64 * 1_024;
 
 impl TelegramClient {

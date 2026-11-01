@@ -17,7 +17,8 @@ mod types;
 mod upload;
 pub use types::*;
 
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
+pub(crate) const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
+pub(crate) const UPLOAD_TIMEOUT: Duration = Duration::from_secs(600);
 const ATTEMPTS: usize = 3;
 const MAX_RETRY_DELAY: Duration = Duration::from_secs(30);
 

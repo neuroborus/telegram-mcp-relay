@@ -166,9 +166,9 @@ pub(super) fn failure(result: &Value, code: &str) {
 pub(super) fn assert_tool_catalog(catalog: &Value) {
     use crate::dto::{
         AckRequest, AckResult, AskResult, GetAttachmentRequest, GetAttachmentResult,
-        HistoryRequest, HistoryResult, InboxRequest, InboxResult, ProcessingRequest,
-        ProcessingResult, RegisterRequest, RegisterResult, SendFileRequest, SendRequest,
-        SendResult, WaitRequest, WaitResult,
+        GuidanceRequest, GuidanceResult, HistoryRequest, HistoryResult, InboxRequest, InboxResult,
+        ProcessingRequest, ProcessingResult, RegisterRequest, RegisterResult, SendFileRequest,
+        SendRequest, SendResult, WaitRequest, WaitResult,
     };
     use rmcp::{model::Tool, schemars::JsonSchema};
 
@@ -220,6 +220,10 @@ pub(super) fn assert_tool_catalog(catalog: &Value) {
         (
             schema::<GetAttachmentRequest, GetAttachmentResult>("telegram_get_attachment"),
             json!(["session_key", "attachment_handle"]),
+        ),
+        (
+            schema::<GuidanceRequest, GuidanceResult>("telegram_guidance"),
+            Value::Null,
         ),
     ];
     let tools = catalog.as_array().unwrap();

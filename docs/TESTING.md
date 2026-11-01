@@ -109,6 +109,17 @@ completed-result cancellation and writer-panic supervision/drainage. These cases
 dedicated complete C6 FINALIZE gate; no execution, release, live Telegram, filesystem deployment
 or HOST acceptance is inferred from source.
 
+## Current interaction guidance regressions
+
+`src/routes/guidance.rs` defines pre-registration guidance over both actual protocols, complete
+catalog/DTO bindings, guidance-first descriptions, read-only annotations, strict empty arguments,
+exact modern/legacy envelopes, unchanged SQLite bytes and zero Telegram effects. A fresh client
+can still register without a handshake; later guidance discloses no new private session data.
+`services::guidance` tests nondefault lower limits, disabled features, database history opt-in
+and exclusion of synthetic private settings/paths/allowlist identities. Self-contained policy
+content is reviewed against specification §§5.4/14; these cases await complete C6 FINALIZE.
+Source inspection does not establish named-client, live Telegram, host concurrency or idle wake.
+
 ## Repository gates
 
 Run `just check-repo` (or `python3 tools/check_repository.py`) after documentation, skills,

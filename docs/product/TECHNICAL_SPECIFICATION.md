@@ -14,9 +14,10 @@
 The owner authorized revisions for identity/presentation, after-send waiting, shared history,
 incoming attachments, agent guidance and their configuration, security and acceptance contracts.
 Other requirements remain in force. These are accepted requirements, **not proof of implemented
-or validated features**. Native headers have an implementation pending validation;
-`telegram_wait` also has an implementation pending validation. The shared journal/history tool,
-attachment downloads and `telegram_guidance` await their implementation and validation commits.
+or validated features**. Native headers, after-send waiting, shared journal/history reads,
+authorized attachment downloads and current guidance now have source implementations.
+Each changed revision still requires its dedicated validation and later composition/HOST gates;
+source availability does not establish extension acceptance.
 The unchecked acceptance criteria below describe obligations, not observed test results.
 See [architecture](../ARCHITECTURE.md) for implementation status and
 [testing](../TESTING.md) for separately recorded validation evidence. Historical measurements
@@ -245,8 +246,8 @@ Use clear JSON Schemas, structured results, and stable error codes. The followin
 | `telegram_get_attachment` (new) | Resolve an authorized retained opaque `attachment_handle` for the caller's `session_key`; lazily download to a confined private daemon-local path, with bounded byte count, expiry and display metadata. |
 | `telegram_guidance` (new) | No session required; return versioned, self-contained instructions and actual inventory plus nonsecret effective capabilities/limits. |
 
-`telegram_wait` has an implementation pending validation; the other new tools above remain
-pending implementation. History is disabled by default; downloads require explicitly configured private storage. Disabled
+The tools above have source implementations; execution and HOST evidence are recorded separately.
+History is disabled by default; downloads require explicitly configured private storage. Disabled
 capabilities must fail predictably without effects. Guidance must report their effective state.
 
 ### 5.1 Logical request/result examples
@@ -377,6 +378,15 @@ reads, current claim fences and lost-response-safe reconciliation, explicit wait
 actual host concurrency/deadlines, shared-read versus claim authority, safe files and uncertainty
 recovery. It must not promise automatic wake of an idle host. Publish matching source-level
 descriptions, copyable policy and public documentation as capabilities are implemented.
+
+The current typed result is `GuidanceResult { version, tools, capabilities, limits, instructions }`.
+`tools` contains actual names/descriptions; `tools/list` supplies their complete schemas.
+Capabilities distinguish both protocol revisions, modern subscriptions, wait/history/download/
+typing enablement and explicit absence of an enforced handshake or universal host guarantees.
+Limits contain nonsecret formatting, admission, network/wait, retention and file budgets,
+including configured budgets for disabled features. The implementation and owning policy are
+described in [architecture](../ARCHITECTURE.md#current-agent-guidance) and
+[agent policy](../AGENT_POLICY.md); source presence is not an executed validation claim.
 
 ---
 

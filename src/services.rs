@@ -9,6 +9,7 @@ pub(crate) mod attachments;
 pub mod cleanup;
 pub(crate) mod downloads;
 pub mod files;
+pub(crate) mod guidance;
 pub mod history;
 pub mod inbox;
 pub mod ingress;

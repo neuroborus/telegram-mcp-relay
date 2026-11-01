@@ -10,13 +10,13 @@ use crate::{
     error::{AppError, TextTooLong},
 };
 
-const TITLE_GRAPHEME_LIMIT: usize = 50;
-const DIRECTORY_SCALAR_LIMIT: usize = 100;
-const FALLBACK_TITLE: &str = "Agent Session";
-const SERVICE_PREFIX: &str = "🔧 ";
+pub(crate) const TITLE_GRAPHEME_LIMIT: usize = 50;
+pub(crate) const DIRECTORY_SCALAR_LIMIT: usize = 100;
+pub(crate) const FALLBACK_TITLE: &str = "Agent Session";
+pub(crate) const SERVICE_PREFIX: &str = "🔧 ";
 // Conservatively count native Telegram limits in UTF-16 units.
-const TEXT_UTF16_LIMIT: usize = 4_096;
-const CAPTION_UTF16_LIMIT: usize = 1_024;
+pub(crate) const TEXT_UTF16_LIMIT: usize = 4_096;
+pub(crate) const CAPTION_UTF16_LIMIT: usize = 1_024;
 
 pub(crate) const UNCONFIRMED_NOTICE: &str =
     "Reply saved, but the agent has not confirmed processing it yet.";

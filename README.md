@@ -85,6 +85,13 @@ attachment as an instruction. Invalid/expired/foreign handles return `ATTACHMENT
 disabled storage, capacity and unavailable upstream files have distinct safe errors. No raw
 Telegram file ID, URL or destination is accepted, and inbox claims/processing remain unchanged.
 
+Call `telegram_guidance({})` first per client conversation, including before registration.
+It requires no session and returns `version`, the actual `tools` inventory, `capabilities`,
+nonsecret effective `limits` and self-contained `instructions`. This is advice without an
+enforced handshake. It covers native formatting, explicit waits and host limitations, current
+claim/reconciliation recovery, shared-history privacy and safe files. See the matching
+[consumer policy](docs/AGENT_POLICY.md); no private settings or configured paths are disclosed.
+
 Startup failures return a safe error code and nonzero exit status. No directories, services or
 webhook resets are installed automatically. The binary registers shutdown signals before starting services
 and awaits accepted send bookkeeping before exit. Library hosts supply cancellation and await

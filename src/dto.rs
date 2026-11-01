@@ -8,6 +8,86 @@ use serde::{Deserialize, Serialize};
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[schemars(crate = "rmcp::schemars")]
+pub struct GuidanceRequest {}
+
+#[derive(Clone, Serialize, JsonSchema)]
+#[schemars(crate = "rmcp::schemars")]
+pub struct GuidanceResult {
+    /// Version of this instruction/result contract, independent of the MCP revision.
+    pub version: u32,
+    pub tools: Vec<GuidanceTool>,
+    pub capabilities: GuidanceCapabilities,
+    pub limits: GuidanceLimits,
+    pub instructions: Vec<String>,
+}
+
+#[derive(Clone, Serialize, JsonSchema)]
+#[schemars(crate = "rmcp::schemars")]
+pub struct GuidanceTool {
+    pub name: String,
+    pub description: String,
+}
+
+#[derive(Clone, Serialize, JsonSchema)]
+#[schemars(crate = "rmcp::schemars")]
+pub struct GuidanceProtocol {
+    pub version: String,
+    pub resource_subscriptions: bool,
+}
+
+#[derive(Clone, Serialize, JsonSchema)]
+#[schemars(crate = "rmcp::schemars")]
+pub struct GuidanceCapabilities {
+    pub protocols: Vec<GuidanceProtocol>,
+    pub wait_enabled: bool,
+    pub history_enabled: bool,
+    pub attachment_downloads_enabled: bool,
+    pub typing_enabled: bool,
+    pub guidance_handshake_required: bool,
+    pub host_concurrency_known: bool,
+    pub idle_host_wake_guaranteed: bool,
+}
+
+/// Nonsecret effective ceilings/budgets, including configured values for disabled features.
+#[derive(Clone, Serialize, JsonSchema)]
+#[schemars(crate = "rmcp::schemars")]
+pub struct GuidanceLimits {
+    pub title_graphemes: usize,
+    pub directory_scalars: usize,
+    pub text_scalars: usize,
+    pub text_utf16_units: usize,
+    pub caption_utf16_units: usize,
+    pub request_bytes: u32,
+    pub concurrent_requests: u32,
+    pub control_requests: usize,
+    pub background_sends: u32,
+    pub waiters: u32,
+    pub subscriptions: u32,
+    pub subscription_queue: u32,
+    pub wait_timeout_seconds: u64,
+    pub text_send_network_seconds: u64,
+    pub upload_network_seconds: u64,
+    pub claim_lease_seconds: u64,
+    pub typing_max_seconds: u64,
+    pub transport_idle_seconds: u64,
+    pub transport_abandon_seconds: u64,
+    pub upload_bytes: u64,
+    pub download_bytes: u64,
+    pub download_concurrency: u32,
+    pub download_total_bytes: u64,
+    pub download_files: u32,
+    pub download_timeout_seconds: u64,
+    pub download_retention_seconds: u64,
+    pub reply_retention_days: u64,
+    pub route_retention_days: u64,
+    pub history_retention_days: u64,
+    pub history_page_limit: u32,
+    pub history_response_bytes: u32,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(crate = "rmcp::schemars")]
 pub struct RegisterRequest {
     /// Stable conversation identity; preserve it across connections and restarts.
     pub external_session_id: Option<String>,
