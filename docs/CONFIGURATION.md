@@ -142,7 +142,7 @@ See [architecture](ARCHITECTURE.md#session-and-route-persistence).
 
 `[history]` enables capture of authorized incoming observations, including standalone and
 unroutable text/captions/documents/photos, and confirmed outgoing text/captions, returned document
-metadata and service-message context. Shared-read/download tools are not yet connected.
+metadata and service-message context. Shared reads use `telegram_history`; downloads remain pending.
 `enabled=false` is the default. Opt-in requires a configured MCP bearer source and
 an actually resolved bearer at daemon construction. Library callers use `Database::open_with_history`
 with the same explicit authentication requirement; `Database::open` keeps shared capture disabled.
@@ -166,8 +166,25 @@ ten document/photo metadata entries per message are admitted; no file bytes are 
 | `query_bytes` | 256 | 1–4,096 |
 | `scan_records` | 1,000 | 1–10,000 |
 
-Page/response/query/scan settings reserve the future read contract; no history tool is exposed
-yet. A record's body/display UTF-8 bytes fit `max_record_bytes`, which cannot exceed either
+`page_limit` bounds the requested/default result count. `response_bytes` bounds the complete
+structured history JSON, including escaped contents, coverage and reserved continuation framing;
+MCP's wrapper can repeat that bounded data. Too-small budgets return a safe structured error,
+never partial records or truncated bodies. Query input is UTF-8 bytes; empty means no search,
+NUL is rejected and substring search is literal/case-sensitive. A request scans at most
+`scan_records` raw journal rows plus one lookahead, with a byte budget of twice the larger of
+`response_bytes` and `max_record_bytes`. One older, larger record can exceed that scan-byte
+budget while remaining bounded by the original hard 1 MiB record limit. Attachments are
+separately bounded to ten metadata entries per record. Expired/unauthorized/nonmatching rows
+count toward the scan budget; bounded empty pages can therefore have a continuation.
+
+Repeat chat/display/query filters with a bookmark; limit may change within `page_limit`.
+Bookmarks expire within the configured retention window and cannot grant access after a
+policy change. Returned rows always use their stored expiry; changing retention affects new
+captures/bookmarks rather than extending stored records. The authorized per-chat observation
+start is unknown, reported as null; coverage and individual timestamps never promise complete
+Telegram history.
+
+A record's body/display UTF-8 bytes fit `max_record_bytes`, which cannot exceed either
 aggregate body or metadata budget. Query bytes fit response bytes; page size fits scan work.
 When enabled, aggregate history body/metadata plus inbox payload/metadata budgets must fit
 strictly below the main-file cap. No history body space is reserved when disabled. Attachment

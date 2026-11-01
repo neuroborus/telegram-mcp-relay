@@ -41,11 +41,13 @@ mod maintenance;
 pub use maintenance::DiskUsage;
 pub(crate) use maintenance::RECLAIM_PAGES;
 mod history;
+mod history_read;
 pub use history::{
     AttachmentInput, AttachmentKind, HistoryCoverage, HistoryUsage, JournalInput, MessageDirection,
     MessageSource, StoredMessage,
 };
 pub(crate) use history::{ConfirmedMessage, OutgoingJournal};
+pub(crate) use history_read::{HistoryPosition, HistoryRecord, HistoryScan, ScanDecision};
 
 const SCHEMA_VERSION: i64 = 9;
 const APPLICATION_ID: i64 = 0x544d4352; // TMCR

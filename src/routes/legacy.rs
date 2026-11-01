@@ -123,7 +123,7 @@ async fn initialization_negotiates_supported_handshake_and_fallback_without_regi
             listed["result"]["tools"],
             http.rpc("tools/list", json!({})).await["result"]["tools"]
         );
-        assert_eq!(listed["result"]["tools"].as_array().unwrap().len(), 8);
+        tools::assert_tool_catalog(&listed["result"]["tools"]);
         sessions.push(session);
     }
     // Initialization is allowed to supply its matching version header too.
@@ -278,13 +278,7 @@ async fn all_legacy_session_operations_require_bearer_and_safe_authority() {
         .send()
         .await
         .unwrap();
-    assert_eq!(
-        sse_message(response).await["result"]["tools"]
-            .as_array()
-            .unwrap()
-            .len(),
-        8
-    );
+    tools::assert_tool_catalog(&sse_message(response).await["result"]["tools"]);
     for request in [
         http.legacy_post(listing, Some("synthetic-unknown-session")),
         http.session_operation(http::Method::GET, "synthetic-unknown-session"),
@@ -390,12 +384,8 @@ async fn ambiguous_headers_and_conflicting_initialization_fail_before_session_cr
         response.json::<Value>().await.unwrap()["error"]["code"],
         -32020
     );
-    assert_eq!(
-        http.legacy_rpc(&session, "tools/list", json!({})).await["result"]["tools"]
-            .as_array()
-            .unwrap()
-            .len(),
-        8
+    tools::assert_tool_catalog(
+        &http.legacy_rpc(&session, "tools/list", json!({})).await["result"]["tools"],
     );
     http.finish().await;
 }
@@ -460,7 +450,7 @@ async fn matching_inline_metadata_cannot_discard_live_unknown_or_terminated_sess
         "io.modelcontextprotocol/protocolVersion":LEGACY_VERSION}}),
         )
         .await;
-    assert_eq!(listed["result"]["tools"].as_array().unwrap().len(), 8);
+    tools::assert_tool_catalog(&listed["result"]["tools"]);
     assert_eq!(
         status(http.session_operation(http::Method::DELETE, &session)).await,
         StatusCode::ACCEPTED
@@ -648,12 +638,8 @@ async fn session_lifecycle_preflight_preserves_declared_and_chunked_body_bounds(
             );
         }
     }
-    assert_eq!(
-        http.legacy_rpc(&session, "tools/list", json!({})).await["result"]["tools"]
-            .as_array()
-            .unwrap()
-            .len(),
-        8
+    tools::assert_tool_catalog(
+        &http.legacy_rpc(&session, "tools/list", json!({})).await["result"]["tools"],
     );
     http.finish().await;
 }
@@ -737,12 +723,6 @@ async fn modern_tools_still_require_per_request_metadata_and_headers() {
             -32020
         );
     }
-    assert_eq!(
-        http.rpc("tools/list", json!({})).await["result"]["tools"]
-            .as_array()
-            .unwrap()
-            .len(),
-        8
-    );
+    tools::assert_tool_catalog(&http.rpc("tools/list", json!({})).await["result"]["tools"]);
     http.finish().await;
 }

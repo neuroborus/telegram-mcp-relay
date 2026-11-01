@@ -349,7 +349,8 @@ expired/deleted source references independently, and indexed cleanup retires exp
 provenance in bounded batches. Journal pressure rolls back without consuming inbox quotas or
 evicting valid replies. Coverage starts at actual observation, not migration; restart marks
 possible gaps and cannot reconstruct older bodies. Confirmed outgoing text/captions and service
-messages now use the same journal when enabled; public read/download tools remain pending.
+messages now use the same journal when enabled. Authorized shared reads are available;
+attachment downloads remain pending.
 Returned document identifiers stay in private attachment provenance, never source paths or bytes. See
 [history settings and privacy](CONFIGURATION.md#opt-in-history-storage).
 
@@ -376,6 +377,41 @@ stored observation, not a promise of continuous chat coverage. Restarts, lower I
 failed polling or malformed batches mark possible gaps. The upstream unconsumed-update window
 is separately **at most 24 hours**; no Bot API general history retrieval or reconstruction of
 unseen/expired messages is provided.
+
+## Authorized shared history reads
+
+`HistoryService` applies authenticated opt-in, a retained caller identity, configured/default
+chat scope and current chat/user allowlists on every `telegram_history` call. Incoming records
+require retained authorized sender provenance; outgoing/service entries use confirmed bot
+provenance. Older journal rows are reused without inventing missing sources or bodies. Legacy
+routes/replies are not backfilled into history. Reads never query or mutate claim tokens,
+reconciliation grants, processing, acknowledgment, session activity or the ingress cursor.
+
+`repositories::history_read` walks `(chat_id, observed_at, message_handle)` through its existing
+index, one record at a time and one bounded lookahead. Every visited row counts, including
+expired, unauthorized and nonmatching rows. Record and byte ceilings bound sparse search;
+only authorized, retained attachment handles/display metadata are projected, at most ten per
+message. Private adapter file IDs never enter results. UTF-8 case-sensitive substring search
+covers bodies and display labels; public session display IDs filter without private keys.
+
+Versioned opaque bookmarks contain only filters, ordering and expiry. They are ordering hints,
+not credentials or authorization grants. Changing chat/display/query filters or using an expired
+bookmark fails; cleanup need not preserve the anchor row. Every returned record is reauthorized
+and checked against its own expiry. Pagination is a live keyset view, not a frozen chat snapshot;
+concurrent capture or clock changes can require a fresh query.
+
+Structured-result serialization reserves bounded continuation/framing space and accounts for
+escaped JSON without allocating a second serialized body. No record or attachment list is
+truncated. A page can stop before the next matching record; an oversized first match returns
+`HISTORY_RESPONSE_TOO_LARGE`. MCP framing can repeat the bounded structured data. An empty page
+with `scan_incomplete=true` is not the end of matching history; follow `next_cursor`.
+
+Coverage always describes local retained observations with possible gaps. Per-chat/current-user
+original observation start is not durably tracked, so `observation_start` is null. Individual
+`observed_at`/`expires_at` values are factual; `known_gaps` is the daemon's recorded gap flag,
+not evidence of continuous coverage when false. Stored expiry remains authoritative;
+`retention_days` describes current capture/bookmark policy. Bot visibility, unseen/expired data
+and Telegram's separate at-most-24-hour update window remain limitations, not a past-chat API.
 
 ## Bounded asks
 

@@ -13,6 +13,8 @@ use telegram_mcp_relay::{
 };
 
 const DAY: i64 = 86_400_000;
+#[path = "history/read.rs"]
+mod reads;
 const SOURCE: MessageSource = MessageSource {
     chat_id: -101,
     message_id: 7,

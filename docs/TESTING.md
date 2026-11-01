@@ -28,7 +28,7 @@ handles/display snapshots, redaction, deduplication/restart, independent expiry,
 provenance after disabling/acknowledgment, admission rollback and bounded cleanup/reclamation.
 Storage migration coverage preserves v1–v8 recovery data through v9 and checks transactional
 rollback of failed migrations. Configuration tests reject unsafe/inconsistent history
-budgets. Public history/download tools remain pending.
+budgets. Attachment download tools remain pending.
 
 Incoming observation cases in `tests/ingress.rs` define authorized standalone text/document/
 photo capture, absence of unauthorized/unsupported content, unchanged notice/loop/route
@@ -56,6 +56,19 @@ activity, coverage and capacity rollback without replay. Four-budget races cover
 incoming observation/cursor rollback. Notice cases define service context, atomic success-ID/journal
 rollback, pressure before attempt consumption, cancellation and restart-safe no-replay behavior.
 These new cases await FINALIZE; no executed or live result is inferred here.
+
+## Shared history read regressions
+
+`tests/history/read.rs` defines cross-session observation with unchanged processing/fencing/
+reconciliation, session, usage and coverage state, private-field exclusion, current-policy
+revocation, tied keysets, sparse continuations, expiry/cleanup, filter-bound/expired/malformed
+bookmarks, complete response-budget pagination and bounded search work. Authenticated HTTP
+cases in `src/routes/tools.rs` require bearer access through both protocols and preserve literal
+bodies. Result assertions require equal structured payload, content and error state, plus the
+modern `resultType: "complete"` and its legacy omission, rejecting other envelope differences.
+Catalog fixtures bind the complete expected inventory to full DTO-generated input/output
+schemas while retaining their authorization and lifecycle checks. These cases await FINALIZE;
+no execution or live historical retrieval is inferred from source inspection.
 
 ## Repository gates
 

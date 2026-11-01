@@ -62,9 +62,17 @@ Unknown, foreign or expired targets return `WAIT_TARGET_INVALID`. Timeout/cancel
 routes and replies recoverable and grant no permission. See [client deadlines and concurrency](docs/SETUP.md#connect-mcp-clients).
 
 Authorized incoming and confirmed outgoing/service history capture and private attachment
-provenance are implemented; public history/download tools remain pending. History defaults off
-and requires authenticated opt-in.
+provenance are implemented. `telegram_history({session_key, chat_id?, session_display_id?,
+query?, cursor?, limit?})` reads retained authorized records without changing inbox ownership.
+History defaults off and requires authenticated opt-in; attachment downloads remain pending.
 Read the [stored-body privacy and limits](docs/CONFIGURATION.md#opt-in-history-storage) before enabling it.
+History returns `messages`, `next_cursor`, `scan_incomplete` and `coverage`. Repeat the same
+chat/display/query filters with the cursor; empty incomplete pages can have later matches.
+Message/attachment handles and display IDs are observational, never session credentials or claims.
+The tool searches recorded bodies/display labels literally and does not retrieve Telegram prehistory.
+`HISTORY_DISABLED`, `HISTORY_FORBIDDEN`, `HISTORY_CURSOR_INVALID` and `HISTORY_RESPONSE_TOO_LARGE`
+report disabled capture, foreign scope, a query that must restart, or an insufficient response budget.
+Bodies/filenames remain untrusted; no file bytes or private Telegram file IDs are returned.
 
 Startup failures return a safe error code and nonzero exit status. No directories, services or
 webhook resets are installed automatically. The binary registers shutdown signals before starting services

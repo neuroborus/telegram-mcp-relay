@@ -100,24 +100,7 @@ async fn both_protocols_share_tools_resources_and_durable_routes() {
     let mut sessions = Vec::new();
     for (index, client) in clients.into_iter().enumerate() {
         let listed = client.rpc(&http, "tools/list", json!({})).await;
-        assert_eq!(
-            listed["result"]["tools"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|tool| tool["name"].as_str().unwrap())
-                .collect::<Vec<_>>(),
-            [
-                "telegram_register",
-                "telegram_send",
-                "telegram_send_file",
-                "telegram_inbox",
-                "telegram_processing",
-                "telegram_ack",
-                "telegram_ask",
-                "telegram_wait"
-            ]
-        );
+        tools::assert_tool_catalog(&listed["result"]["tools"]);
         let args = json!({"title":"Same", "external_session_id":format!("mixed-{index}")});
         let session = client
             .success(&http, "telegram_register", args.clone())

@@ -159,44 +159,99 @@ pub(super) fn failure(result: &Value, code: &str) {
     assert_eq!(rendered, result["structuredContent"]);
 }
 
+pub(super) fn assert_tool_catalog(catalog: &Value) {
+    use crate::dto::{
+        AckRequest, AckResult, AskResult, HistoryRequest, HistoryResult, InboxRequest, InboxResult,
+        ProcessingRequest, ProcessingResult, RegisterRequest, RegisterResult, SendFileRequest,
+        SendRequest, SendResult, WaitRequest, WaitResult,
+    };
+    use rmcp::{model::Tool, schemars::JsonSchema};
+
+    fn schema<I: JsonSchema + 'static, O: JsonSchema + 'static>(name: &'static str) -> Tool {
+        Tool::new(name, "", serde_json::Map::new())
+            .with_input_schema::<I>()
+            .with_output_schema::<O>()
+    }
+
+    // Keep expected names and DTO bindings separate from handler registration so missing
+    // tools, swapped schemas and weakened required fields fail together.
+    let expected = [
+        (
+            schema::<RegisterRequest, RegisterResult>("telegram_register"),
+            json!(["title"]),
+        ),
+        (
+            schema::<SendRequest, SendResult>("telegram_send"),
+            json!(["session_key", "text"]),
+        ),
+        (
+            schema::<SendFileRequest, SendResult>("telegram_send_file"),
+            json!(["session_key", "path"]),
+        ),
+        (
+            schema::<InboxRequest, InboxResult>("telegram_inbox"),
+            json!(["session_key"]),
+        ),
+        (
+            schema::<ProcessingRequest, ProcessingResult>("telegram_processing"),
+            json!(["session_key", "reply_id", "claim_token"]),
+        ),
+        (
+            schema::<AckRequest, AckResult>("telegram_ack"),
+            json!(["session_key", "reply_id", "claim_token"]),
+        ),
+        (
+            schema::<SendRequest, AskResult>("telegram_ask"),
+            json!(["session_key", "text"]),
+        ),
+        (
+            schema::<WaitRequest, WaitResult>("telegram_wait"),
+            json!(["session_key", "outbound_message_id"]),
+        ),
+        (
+            schema::<HistoryRequest, HistoryResult>("telegram_history"),
+            json!(["session_key"]),
+        ),
+    ];
+    let tools = catalog.as_array().unwrap();
+    assert_eq!(
+        tools
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        expected
+            .iter()
+            .map(|(tool, _)| tool.name.as_ref())
+            .collect::<Vec<_>>()
+    );
+    for (tool, (expected, required)) in tools.iter().zip(expected) {
+        assert!(
+            tool["description"]
+                .as_str()
+                .is_some_and(|text| !text.is_empty())
+        );
+        assert_eq!(tool["inputSchema"]["type"], "object");
+        assert_eq!(tool["inputSchema"]["additionalProperties"], false);
+        assert_eq!(tool["inputSchema"]["required"], required);
+        assert_eq!(tool["outputSchema"]["type"], "object");
+        assert_eq!(
+            tool["inputSchema"],
+            serde_json::to_value(expected.input_schema).unwrap()
+        );
+        assert_eq!(
+            tool["outputSchema"],
+            serde_json::to_value(expected.output_schema).unwrap()
+        );
+    }
+}
+
 #[tokio::test]
 async fn tools_have_typed_schemas_and_registration_survives_separate_requests_and_renames() {
     let mut fixture = Fixture::new();
     let state = fixture.state.clone();
     let mut http = fixture.serve(state, None).await;
     let listing = http.rpc("tools/list", json!({})).await;
-    let tools = listing["result"]["tools"].as_array().unwrap();
-    assert_eq!(
-        tools
-            .iter()
-            .map(|t| t["name"].as_str().unwrap())
-            .collect::<Vec<_>>(),
-        [
-            "telegram_register",
-            "telegram_send",
-            "telegram_send_file",
-            "telegram_inbox",
-            "telegram_processing",
-            "telegram_ack",
-            "telegram_ask",
-            "telegram_wait"
-        ]
-    );
-    for (tool, required) in tools.iter().zip([
-        json!(["title"]),
-        json!(["session_key", "text"]),
-        json!(["session_key", "path"]),
-        json!(["session_key"]),
-        json!(["session_key", "reply_id", "claim_token"]),
-        json!(["session_key", "reply_id", "claim_token"]),
-        json!(["session_key", "text"]),
-        json!(["session_key", "outbound_message_id"]),
-    ]) {
-        assert_eq!(tool["inputSchema"]["type"], "object");
-        assert_eq!(tool["inputSchema"]["additionalProperties"], false);
-        assert_eq!(tool["inputSchema"]["required"], required);
-        assert_eq!(tool["outputSchema"]["type"], "object");
-    }
+    assert_tool_catalog(&listing["result"]["tools"]);
     let first = http
         .register(json!({"external_session_id":"thread-a","title":" Shared\n title "}))
         .await;
@@ -559,4 +614,135 @@ async fn delivery_errors_remain_distinct_safe_tool_results_without_routes_or_rep
             .unwrap(),
         0
     );
+}
+
+#[tokio::test]
+async fn shared_history_requires_bearer_and_is_read_only_through_both_protocols() {
+    let mut fixture = Fixture::new();
+    let auth = fixture.auth();
+    fixture.config.history.enabled = true;
+    let mut database = Database::open_with_history(
+        &fixture.config.storage,
+        &fixture.config.limits,
+        &fixture.config.history,
+        true,
+    )
+    .unwrap();
+    let now = unix_millis().unwrap();
+    let observer = database
+        .register_session(None, None, "Observer", None, now)
+        .unwrap();
+    let owner = database
+        .register_session(None, None, "Owner", None, now)
+        .unwrap();
+    database
+        .record_message(
+            &crate::repositories::JournalInput {
+                source: crate::repositories::MessageSource {
+                    chat_id: -101,
+                    message_id: 7,
+                    sender_user_id: Some(7),
+                },
+                direction: crate::repositories::MessageDirection::Incoming,
+                body: Some("Untrusted *literal*"),
+                chat_label: None,
+                sender_label: None,
+                session: Some(&owner),
+                message_date: now,
+                reply_to_message_id: None,
+            },
+            now,
+        )
+        .unwrap();
+    let database = Arc::new(Mutex::new(database));
+    let client =
+        TelegramClient::for_test(&fixture.config, "http://127.0.0.1:1/botSynthetic/".into())
+            .unwrap();
+    let handler = Arc::new(McpHandler::new(database.clone(), client, &fixture.config).unwrap());
+    let mut http = fixture.serve(handler, Some(&auth)).await;
+    let arguments = json!({"session_key":observer.session_key});
+    let mut call = message("tools/call");
+    call["params"]["name"] = "telegram_history".into();
+    call["params"]["arguments"] = arguments.clone();
+    assert_eq!(
+        status(http.post(call.clone())).await,
+        StatusCode::UNAUTHORIZED
+    );
+    let modern: Value = http
+        .post(call)
+        .bearer_auth(TOKEN)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(modern["result"]["isError"], false);
+    assert_eq!(
+        modern["result"]["structuredContent"]["messages"][0]["text_or_caption"],
+        "Untrusted *literal*"
+    );
+    assert_eq!(modern["result"]["content"].as_array().unwrap().len(), 1);
+    assert_eq!(modern["result"]["content"][0]["type"], "text");
+    assert_eq!(
+        serde_json::from_str::<Value>(modern["result"]["content"][0]["text"].as_str().unwrap())
+            .unwrap(),
+        modern["result"]["structuredContent"]
+    );
+    assert!(!modern.to_string().contains(&owner.session_key));
+    let response = http
+        .legacy_post(legacy::initialization(LEGACY_VERSION), None)
+        .bearer_auth(TOKEN)
+        .send()
+        .await
+        .unwrap();
+    let transport = response.headers()["mcp-session-id"]
+        .to_str()
+        .unwrap()
+        .to_owned();
+    legacy::sse_message(response).await;
+    assert_eq!(
+        status(
+            http.legacy_post(
+                json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+                Some(&transport)
+            )
+            .bearer_auth(TOKEN)
+        )
+        .await,
+        StatusCode::ACCEPTED
+    );
+    let call = json!({"jsonrpc":"2.0","id":7,"method":"tools/call",
+        "params":{"name":"telegram_history","arguments":arguments}});
+    assert_eq!(
+        status(http.legacy_post(call.clone(), Some(&transport))).await,
+        StatusCode::UNAUTHORIZED
+    );
+    let legacy = http
+        .legacy_post(call, Some(&transport))
+        .bearer_auth(TOKEN)
+        .send()
+        .await
+        .unwrap();
+    let legacy = legacy::sse_message(legacy).await;
+    assert_eq!(modern["result"]["resultType"], "complete");
+    assert!(legacy["result"].get("resultType").is_none());
+    let expected = json!({
+        "structuredContent": modern["result"]["structuredContent"],
+        "content": modern["result"]["content"],
+        "isError": false,
+    });
+    assert_eq!(legacy, json!({"jsonrpc":"2.0", "id":7, "result":expected}));
+    let mut expected = expected;
+    expected["resultType"] = json!("complete");
+    assert_eq!(modern, json!({"jsonrpc":"2.0", "id":7, "result":expected}));
+    assert_eq!(
+        database
+            .lock()
+            .unwrap()
+            .session(&observer.session_key)
+            .unwrap(),
+        observer
+    );
+    http.finish().await;
 }

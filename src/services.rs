@@ -7,6 +7,7 @@ use crate::error::AppError;
 pub mod ask;
 pub mod cleanup;
 pub mod files;
+pub mod history;
 pub mod inbox;
 pub mod ingress;
 pub mod notices;

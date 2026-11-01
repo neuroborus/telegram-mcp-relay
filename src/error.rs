@@ -82,6 +82,9 @@ pub enum AppError {
     WaitCapacity,
     InvalidWaitTarget,
     HistoryDisabled,
+    HistoryForbidden,
+    InvalidHistoryCursor,
+    HistoryResponseTooLarge,
     AskWaitFailed {
         telegram_chat_id: i64,
         outbound_message_id: i64,
@@ -122,6 +125,9 @@ impl AppError {
             Self::WaitCapacity => "WAIT_CAPACITY",
             Self::InvalidWaitTarget => "WAIT_TARGET_INVALID",
             Self::HistoryDisabled => "HISTORY_DISABLED",
+            Self::HistoryForbidden => "HISTORY_FORBIDDEN",
+            Self::InvalidHistoryCursor => "HISTORY_CURSOR_INVALID",
+            Self::HistoryResponseTooLarge => "HISTORY_RESPONSE_TOO_LARGE",
             Self::AskWaitFailed { .. } => "ASK_WAIT_FAILED",
             Self::SendBookkeepingFailed => "SEND_BOOKKEEPING_FAILED",
             Self::RandomUnavailable => "RANDOM_UNAVAILABLE",
@@ -149,6 +155,21 @@ impl fmt::Display for AppError {
             Self::EmptyText => write!(f, "{}: outgoing text must not be empty", self.code()),
             Self::InvalidRequest(field) => write!(f, "{}: invalid {field}", self.code()),
             Self::HistoryDisabled => write!(f, "{}: shared history is disabled", self.code()),
+            Self::HistoryForbidden => write!(
+                f,
+                "{}: shared history is not authorized for this scope",
+                self.code()
+            ),
+            Self::InvalidHistoryCursor => write!(
+                f,
+                "{}: invalid or expired history cursor; start a new query",
+                self.code()
+            ),
+            Self::HistoryResponseTooLarge => write!(
+                f,
+                "{}: history result cannot fit the configured response budget",
+                self.code()
+            ),
             Self::FileUnavailable => write!(
                 f,
                 "{}: expected a readable regular file beneath an approved root without symlinks or traversal",

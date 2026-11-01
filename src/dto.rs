@@ -112,6 +112,79 @@ pub struct WaitResult {
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[schemars(crate = "rmcp::schemars")]
+pub struct HistoryRequest {
+    pub session_key: String,
+    /// Defaults to the configured chat; current allowlists apply to every page.
+    pub chat_id: Option<i64>,
+    /// Public display identity, never another session's private key.
+    pub session_display_id: Option<String>,
+    /// Literal case-sensitive substring in retained bodies or display labels.
+    pub query: Option<String>,
+    /// Opaque ordering bookmark; repeat the same chat/display/query filters.
+    pub cursor: Option<String>,
+    pub limit: Option<u32>,
+}
+
+#[derive(Serialize, JsonSchema)]
+#[schemars(crate = "rmcp::schemars")]
+pub struct HistoryAttachment {
+    pub attachment_handle: String,
+    pub kind: String,
+    pub filename: Option<String>,
+    pub mime_type: Option<String>,
+    pub file_size: Option<u64>,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    pub expires_at: i64,
+}
+
+#[derive(Serialize, JsonSchema)]
+#[schemars(crate = "rmcp::schemars")]
+pub struct HistoryMessage {
+    pub message_handle: String,
+    pub chat_id: i64,
+    pub message_id: i64,
+    pub direction: String,
+    pub sender_user_id: Option<u64>,
+    pub chat_label: Option<String>,
+    pub sender_label: Option<String>,
+    pub session_display_id: Option<String>,
+    pub session_title: Option<String>,
+    pub directory_label: Option<String>,
+    pub text_or_caption: Option<String>,
+    /// For service entries this identifies the triggering message, not a Telegram Reply.
+    pub related_message_id: Option<i64>,
+    pub message_date: i64,
+    pub observed_at: i64,
+    pub expires_at: i64,
+    pub attachments: Vec<HistoryAttachment>,
+}
+
+#[derive(Serialize, JsonSchema)]
+#[schemars(crate = "rmcp::schemars")]
+pub struct HistoryCoverage {
+    pub local_only: bool,
+    /// Per-chat/user observation start is not durably tracked; null means unknown.
+    pub observation_start: Option<i64>,
+    pub retention_days: u64,
+    pub possible_gaps: bool,
+    /// Daemon-level recorded gaps; false never guarantees complete chat coverage.
+    pub known_gaps: bool,
+}
+
+#[derive(Serialize, JsonSchema)]
+#[schemars(crate = "rmcp::schemars")]
+pub struct HistoryResult {
+    pub messages: Vec<HistoryMessage>,
+    pub next_cursor: Option<String>,
+    /// A bounded scan stopped; an empty page does not imply no later matches.
+    pub scan_incomplete: bool,
+    pub coverage: HistoryCoverage,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(crate = "rmcp::schemars")]
 pub struct InboxRequest {
     pub session_key: String,
     /// Claim 1–100 eligible replies, within the configured payload budget. Default: 100.
