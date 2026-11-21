@@ -21,8 +21,8 @@ async fn captions_validate_both_final_limits_without_http_routes_or_activity() {
         AppError::SessionNotFound
     );
     for (body, scalars, units) in [
-        ("a".repeat(996), 1_001, 1_001),
-        ("😀".repeat(509) + "aa", 516, 1_025),
+        ("a".repeat(994), 1_001, 1_001),
+        ("😀".repeat(508) + "aa", 517, 1_025),
     ] {
         let error = service
             .send_file(&session.session_key, fixture.file(b"private bytes"), &body)
@@ -148,7 +148,7 @@ async fn streams_original_handle_with_plain_caption_and_restart_visible_document
         .unwrap();
     fs::rename(&path, fixture.directory.join("original.bin")).unwrap();
     fs::write(&path, b"replacement").unwrap();
-    let caption = "a".repeat(995);
+    let caption = "a".repeat(993);
     service
         .send_file(&session.session_key, file, &caption)
         .await
@@ -157,23 +157,23 @@ async fn streams_original_handle_with_plain_caption_and_restart_visible_document
         .send_file(
             &session.session_key,
             fixture.file(b""),
-            &("😀".repeat(509) + "a"),
+            &("😀".repeat(508) + "a"),
         )
         .await
         .unwrap();
     {
         let requests = mock.requests.lock().unwrap();
         assert_eq!(requests.len(), 2);
-        for (request, description) in requests.iter().zip([caption, "😀".repeat(509) + "a"]) {
+        for (request, description) in requests.iter().zip([caption, "😀".repeat(508) + "a"]) {
             assert_eq!(request.method, "/botSynthetic/sendDocument");
             assert_eq!(request.part("chat_id").1, b"-101");
             assert_eq!(
                 request.part("caption").1,
-                format!("[界]\n\n{description}").as_bytes()
+                format!("[界]\np\n\n{description}").as_bytes()
             );
             assert_eq!(
                 serde_json::from_slice::<Value>(request.part("caption_entities").1).unwrap(),
-                json!([{"type":"bold","offset":0,"length":3}])
+                json!([{"type":"bold","offset":0,"length":3},{"type":"italic","offset":4,"length":1}])
             );
             let (headers, _) = request.part("document");
             assert!(
@@ -228,7 +228,7 @@ async fn multipart_upload_delivers_every_chunk_and_the_final_partial_chunk() {
     assert_eq!(requests[0].part("document").1, bytes);
     assert_eq!(
         requests[0].part("caption").1,
-        "[界]\n\nMultichunk report".as_bytes()
+        "[界]\np\n\nMultichunk report".as_bytes()
     );
     let route = database
         .lock()
@@ -346,7 +346,7 @@ async fn canceled_document_caller_keeps_shared_capacity_until_bookkeeping_finish
     ));
     assert_eq!(
         mock.requests.lock().unwrap()[0].part("caption").1,
-        "[界]".as_bytes()
+        "[界]\np".as_bytes()
     );
     release.send(()).unwrap();
     let idle = service.admission.acquire().await.unwrap();

@@ -14,7 +14,7 @@ use super::{
     Database, Session,
     registry::{expiry, random_key, usage},
 };
-use crate::error::AppError;
+use crate::{domain::outbound::DirectoryLabel, error::AppError};
 
 // Maximum file ID, unique ID, filename and MIME bytes validated by insert_attachment.
 const DOCUMENT_METADATA_BYTES: u64 = 4_096 + 512 + 1_024 + 256;
@@ -181,7 +181,8 @@ impl Database {
             return Ok(None);
         }
         let display = session.map_or(0, |s| {
-            s.title.as_str().len() + s.directory_label.as_ref().map_or(0, |d| d.as_str().len())
+            s.display_title().map_or(0, str::len)
+                + s.display_directory_label().map_or(0, |d| d.as_str().len())
         }) as u64;
         if body.len() as u64 + display > u64::from(self.history.max_record_bytes) {
             return Err(AppError::StorageCapacity);
@@ -355,10 +356,11 @@ pub(super) fn insert_message(
     {
         return Err(AppError::InvalidRequest("journal source"));
     }
-    let title = input.session.map(|s| s.title.as_str());
+    let title = input.session.and_then(Session::display_title);
     let directory = input
         .session
-        .and_then(|s| s.directory_label.as_ref().map(|d| d.as_str()));
+        .and_then(Session::display_directory_label)
+        .map(DirectoryLabel::as_str);
     let display_bytes = bounded_fields(&[
         (input.chat_label, 1_024),
         (input.sender_label, 1_024),

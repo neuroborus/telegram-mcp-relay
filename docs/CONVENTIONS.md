@@ -53,7 +53,7 @@ SDK owns route wiring; do not duplicate an HTTP server to imitate this tree.
   Do not hold synchronous database locks across `.await`; measure SQLite impact before adding
   a dedicated bounded worker. Avoid loading whole files or histories into RAM.
 - Preserve verbatim Telegram bodies with explicit optional body-relative native entities,
-  isolated from server-owned bold `[title]` and optional italic directory entities. Separate
+  isolated from server-owned bold `[title]` and italic project label entities. Separate
   the header from a nonempty body with one blank line; service messages begin `🔧 `. Do not introduce implicit Markdown/HTML parsing. Default to
   loopback binding and explicit allowlists. Configuration is TOML plus protected secret sources,
   validated once at startup. Never commit actual bot tokens.

@@ -26,7 +26,7 @@ impl Http {
     }
 }
 
-fn seed(fixture: &Fixture, session: &Value, parent: i64, ids: &[i64]) {
+pub(super) fn seed(fixture: &Fixture, session: &Value, parent: i64, ids: &[i64]) {
     let mut database = Database::open(&fixture.config.storage, &fixture.config.limits).unwrap();
     let now = unix_millis().unwrap();
     let reservation = database
@@ -66,8 +66,12 @@ async fn stable_templates_and_direct_paginated_snapshots_never_claim_or_enumerat
     );
     let listing = http.rpc("resources/list", json!({})).await;
     assert_eq!(listing["result"]["resources"], json!([]));
-    let first = http.register(json!({"title":"Same"})).await;
-    let second = http.register(json!({"title":"Same"})).await;
+    let first = http
+        .register(json!({"title":"Same","directory_label":"p"}))
+        .await;
+    let second = http
+        .register(json!({"title":"Same","directory_label":"p"}))
+        .await;
     seed(&fixture, &first, 5, &[11, 12, 13]);
     seed(&fixture, &second, 6, &[14]);
     let database = Database::open(&fixture.config.storage, &fixture.config.limits).unwrap();
@@ -136,9 +140,11 @@ async fn competing_inbox_claims_reconcile_and_complete_durably_through_mcp() {
     let state = fixture.state.clone();
     let mut http = fixture.serve(state, None).await;
     let session = http
-        .register(json!({"external_session_id":"thread","title":"Same"}))
+        .register(json!({"external_session_id":"thread","title":"Same","directory_label":"p"}))
         .await;
-    let other = http.register(json!({"title":"Same"})).await;
+    let other = http
+        .register(json!({"title":"Same","directory_label":"p"}))
+        .await;
     seed(&fixture, &session, 5, &[11, 12]);
     let key = &session["session_key"];
     let (a, b) = tokio::join!(
@@ -229,7 +235,9 @@ async fn invalid_inbox_uris_and_claim_arguments_fail_safely_without_effects() {
     let mut fixture = Fixture::new();
     let state = fixture.state.clone();
     let http = fixture.serve(state, None).await;
-    let session = http.register(json!({"title":"Same"})).await;
+    let session = http
+        .register(json!({"title":"Same","directory_label":"p"}))
+        .await;
     seed(&fixture, &session, 5, &[11]);
     let uri = session["inbox_uri"].as_str().unwrap();
     for invalid in [

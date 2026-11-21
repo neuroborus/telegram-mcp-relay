@@ -95,10 +95,19 @@ pub struct RegisterRequest {
     pub external_session_id: Option<String>,
     /// Saved handle to resume when no external identity is available.
     pub session_key: Option<String>,
-    /// Safe display label, at most 50 graphemes; overlong new input ends with an ellipsis.
+    /// Use the real host conversation title when valid, otherwise a concise label grounded
+    /// in the task or project. Blank and generic placeholder titles are rejected.
+    /// After skipping leading whitespace, opening brackets, quotes and backticks,
+    /// the title cannot begin with an absolute or home path, even if prose follows.
+    /// Overlong input ends with an ellipsis within the 50-grapheme limit.
     pub title: String,
-    /// Opt-in directory display context, not file authority. Omitted/blank clears it.
-    /// Normalized to one safe line, at most 100 Unicode scalars; avoid personal paths.
+    /// Supply a project or workspace name, with up to 100 Unicode scalars, such as org/repo.
+    /// After skipping leading whitespace, opening brackets, quotes and backticks, the label
+    /// cannot begin with an absolute or home path, even if prose follows.
+    /// If host metadata is unavailable, use a short name from the current work.
+    /// Required for new sessions. On resume, omission keeps the saved label and a supplied
+    /// label replaces it. For SESSION_METADATA_REQUIRED, re-register with the same session_key
+    /// or external_session_id and supply both fields.
     pub directory_label: Option<String>,
 }
 
@@ -118,7 +127,7 @@ pub struct RegisterResult {
 pub struct SendRequest {
     pub session_key: String,
     /// Verbatim body; use entities for formatting, never implicit Markdown/HTML parsing.
-    /// The server adds a bold `[title]`, optional italic directory and a blank line before nonempty text.
+    /// The server adds a bold `[title]`, an italic project line and a blank line before nonempty text.
     /// Complete visible framing and body must fit 1,000 Unicode scalars.
     pub text: String,
     /// Optional native entities, at most 100; UTF-16 offsets relative to text only.
@@ -136,7 +145,7 @@ pub struct SendFileRequest {
     /// Absolute local path beneath a configured approved root, without symlinks.
     pub path: PathBuf,
     /// Verbatim description; use caption_entities for formatting, with no implicit markup parsing.
-    /// The server adds a bold `[title]`, optional italic directory and a blank line before nonempty text.
+    /// The server adds a bold `[title]`, an italic project line and a blank line before nonempty text.
     /// The complete caption must fit 1,000 scalars and 1,024 UTF-16 units.
     #[serde(default)]
     pub caption: String,
@@ -380,6 +389,8 @@ pub struct ProcessingRequest {
     pub reply_id: String,
     pub claim_token: String,
     /// Supply either active or reconcile_request_id, never both. False preserves ownership.
+    /// For SESSION_METADATA_REQUIRED on start, re-register the same session with a valid
+    /// title and directory_label, then retry with the current claim token.
     pub active: Option<bool>,
     /// Explicit resume: save a fresh random ID (1–64 UTF-8 bytes) and current token before
     /// calling. Retry with the same pair after response loss; preserve the returned token.

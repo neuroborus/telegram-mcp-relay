@@ -118,15 +118,29 @@ early/force push, new branch, remote/identity change or history rewrite is autho
 
 ## Native header and service-prefix regressions
 
-Native-header regressions cover bold/italic UTF-16 spans, literal bodies,
-optional safe 100-scalar directory metadata, complete 1,000-scalar/1,024-unit caption limits,
+The composition baseline covered bold/italic UTF-16 spans, literal bodies, optional
+100-scalar directory metadata, complete 1,000-scalar/1,024-unit caption limits,
 metadata admission and v1–v6 migration/restart continuity. Domain tests own Unicode/entity
 boundaries; registry/storage tests own persistence; MCP and outbound/document fixtures inspect
 actual JSON/multipart entity fields. Notice fixtures retain durable grace/processing arbitration,
 exact `🔧 ` framing, known-ID suppression and lost-ID recognition of both new and legacy notices.
 The bounded Python mock now accepts the ordered `caption_entities` part and validates native
-span boundaries without buffering documents. These cases passed in the accepted composition
-C6 above; live rendering remains unverified.
+span boundaries without buffering documents. The accepted composition C6 above covers the
+original cases. The current sources define the required project line for text, questions and
+captions, with the same final limits. Live rendering remains unverified.
+
+The RELAY-003/004 cases in `src/routes/tools.rs` exercise registration and recovery without
+fetching guidance on both MCP revisions. They cover blank and placeholder titles, path prefixes
+after opening wrappers with or without closing delimiters and trailing prose, paths later in
+valid titles, required project labels, private retention of invalid saved labels on omission
+and effect-free legacy rejections before file opening or waiter admission. Recovery
+under either stable identity keeps routes and pending replies and preserves the existing claim.
+Domain cases cover invisible formatting, supported Unicode wrappers, relative labels and
+bracketed placeholders, including legacy cutoffs and placeholders exposed by title truncation.
+The notice fixture checks safe framing, native spans, journal admission and authorized reads of
+new incoming and service snapshots on synthetic routes. Current results
+await C1–C3 and C7–C8 (P1/P2) through Native FINALIZE and the existing Runner-trusted C4–C6 vectors
+through Runner FINALIZE. The locked releases belong to final integration.
 
 ## Server instructions and restored framing regressions
 
@@ -160,7 +174,8 @@ or resending across both protocols, shared ask/wait admission and single claims,
 ownership/expiry rejection, disabled outcomes, and cancellation/600-second timeout/shutdown with
 late-reply restart recovery. Saturated HTTP and legacy work retain processing/ack/inbox capacity;
 forged headers cannot send through the recovery lane. Existing ask/event arming-race proofs
-exercise the shared wait loop. These cases passed in accepted C6; no live acceptance is claimed.
+exercise the shared wait loop. The accepted composition C6 covers the original cases.
+Live acceptance remains separate.
 
 ## History storage regressions
 
@@ -176,7 +191,8 @@ photo capture, absence of unauthorized/unsupported content, unchanged notice/loo
 arbitration, failure at journal/attachment/cursor boundaries, whole-transaction capacity rollback,
 and source deduplication across restart/lower IDs and completion with history disabled.
 Existing photo fixtures now include actual photo dimensions; v1–v8 migration fixtures preserve
-older recovery state through v9. These cases passed in accepted C6; no live bot coverage is inferred.
+older recovery state through v9. The accepted composition C6 covers the original cases.
+Live bot coverage remains separate.
 Reused-ID regressions cover distinct standalone/routed/unroutable sources, tied inbox pages,
 separate notice decisions and acknowledgment receipts, rollback and restart. Actual v8-schema
 fixtures preserve reconciliation/token grants and attachment references through the key rebuild,
@@ -186,7 +202,7 @@ Retention recovery assertions track private attachment provenance with history d
 source/ownership and independent reply deadline, orphan removal after acknowledgment, capacity
 recovery, and exact accounting/foreign-key rollback across restart. Scheduler coverage awaits
 complete startup readiness before advancing paused time, including any yielding reclamation.
-These regressions passed in accepted C6; source inspection alone would not establish execution.
+The accepted composition C6 covers the original cases.
 
 ## Confirmed outbound journal regressions
 
@@ -196,7 +212,7 @@ restart and independent expiry. Its rejection/uncertainty/SQL/metadata-failure c
 activity, coverage and capacity rollback without replay. Four-budget races cover other sends and
 incoming observation/cursor rollback. Notice cases define service context, atomic success-ID/journal
 rollback, pressure before attempt consumption, cancellation and restart-safe no-replay behavior.
-These cases passed in accepted C6; they establish no live result.
+The accepted composition C6 covers the original cases. Live acceptance remains separate.
 
 ## Shared history read regressions
 
@@ -208,8 +224,8 @@ cases in `src/routes/tools.rs` require bearer access through both protocols and 
 bodies. Result assertions require equal structured payload, content and error state, plus the
 modern `resultType: "complete"` and its legacy omission, rejecting other envelope differences.
 Catalog fixtures bind the complete expected inventory to full DTO-generated input/output
-schemas while retaining their authorization and lifecycle checks. These cases passed in
-accepted C6; they establish no live historical retrieval.
+schemas while retaining their authorization and lifecycle checks. The accepted composition C6
+covers the original cases. Live retrieval remains separate.
 
 ## Private cloud download regressions
 
@@ -294,8 +310,8 @@ can still register without a handshake; later guidance discloses no new private 
 `services::guidance` tests nondefault lower limits, disabled features, database history opt-in
 and exclusion of synthetic private settings/paths/allowlist identities. Self-contained policy
 content is reviewed against specification §§5.4/14; the earlier version-1 cases passed in
-accepted complete C6. The current version-3 framing/body-entity composition requires fresh
-FINALIZE receipts.
+accepted complete C6. Current version-4 metadata and framing results require their own
+Runner FINALIZE receipts.
 Source inspection does not establish named-client, live Telegram, host concurrency or idle wake.
 
 ## Final mixed-protocol composition regressions
@@ -322,7 +338,7 @@ and idle/abandonment lifetimes (`routes::sessions::tests`), mixed question cance
 single-claim recovery (`routes::tests::mixed`), and path/size/expiry boundaries in the attachment
 and storage suites. The new scenario combines these components without duplicating those
 boundary proofs. Complete unfiltered C6 and both locked daemon/resource-probe release builds
-(R1/C11 and R2/C12 in the global inventory) passed in the accepted composition FINALIZE above.
+(R1/C11 and R2/C12 in the global inventory) passed for the recorded composition baseline.
 Named-client/HOST, live API and wake outcomes remain separate; source inspection or no-run
 compilation alone would not establish execution. Historical benchmark evidence stays separate.
 
@@ -450,14 +466,15 @@ tests do not duplicate those proofs. The separate HOST capture is recorded in
 
 [Driver tests](../tools/tests/test_measure_driver.py) substitute MCP transports, HTTP peers,
 split control streams, clocks and phase controls. They cover modern per-request headers/metadata,
-discovery/registration/send result rejection, bounded fixed/chunked response parsing, direct
+the exact registration identity, title and project label, discovery/registration/send result
+rejection, bounded fixed/chunked response parsing, direct
 numeric-loopback policy, cancellation and deadlines, control EOF/ordering, partial/blocked output
 and redacted CLI failures. Private-file cases check the exact sparse workload size, exclusive
 creation, confined mode-0700 roots, symlink/mutation rejection and descriptor closure on failed
 preparation. Files remain controller-owned until all peers retire; no test starts a child, binds
-a socket, installs signal handlers or samples a daemon. These tests belong to the unchanged
-P1/P2 FINALIZE gates. Actual MCP upload/committed-route assertions remain in C6; quantitative
-evidence comes from the separate HOST capture.
+a socket, installs signal handlers or samples a daemon. The changed driver requires P1/P2 in
+FINALIZE. Actual MCP upload/committed-route assertions remain in C6. Quantitative evidence remains
+bound to the separate recorded HOST capture.
 
 ## Recorded validation evidence
 
@@ -465,8 +482,8 @@ The coordinator export for independent run `5852c1b2-e9ae-4736-a7fd-c1a541cfacf9
 aggregate finalization success at public revision 889, independent confirmation at 898 and
 verified commit `968802371f94f51eedab66998eff6031762db5ea` at the settled pause, revision 948.
 The source/tree, manifest/lock and toolchain agree with the
-[bound HOST record](MEASUREMENTS.md#provenance-and-release-identity). This reconciles the
-earlier source-defined pending-execution statements for the suites below. The evidence is a
+[bound HOST record](MEASUREMENTS.md#provenance-and-release-identity). This resolves the earlier
+pending-execution statements for tests at that baseline. The evidence is a
 trusted coordinator export of public aggregate observations, not fresh check execution,
 cryptographic attestation, per-test counts or separate per-command logs/timings.
 
@@ -496,8 +513,10 @@ success, absent idle wake and canonical-unit runtime failure; it supplies no ext
 readiness followed by real MCP registration/send, caller cancellation and accepted-route
 draining/reopen, plus credential/remote-peer/listener rejection before storage or Telegram
 effects and failed cleanup without readiness. The example's pure argument tests reject DNS,
-remote/unspecified/zero-port peers and extra/missing arguments. They are included in the
-recorded C6 outcome; the HOST probe capture is separate and establishes no live Telegram claim.
+remote/unspecified/zero-port peers and extra/missing arguments. The
+[recorded C6 outcome](#recorded-validation-evidence) covers the original probe cases. The
+current MCP probe cases use the required project label and require their own Runner FINALIZE
+receipts for execution evidence. The HOST probe capture covers a separate synthetic workload.
 
 Binary tests in `src/main.rs` launch isolated test subprocesses using the binary's shutdown
 signal registration. They send actual SIGINT and SIGTERM after a readiness gate, hold synthetic
@@ -579,7 +598,7 @@ terminated session IDs without registration effects, preserve partial legacy met
 and exercise session-owned cancellation/DELETE with controlled handler signals. The preflight
 retains inclusive declared/chunked body bounds and shutdown cancellation during a partial body.
 Supplied `Mcp-Method` initialization cases follow the SDK's legacy/modern header semantics.
-These cases passed in accepted complete C6. The separate
+Accepted complete C6 covers the baseline cases. The separate
 [HOST record](MEASUREMENTS.md#agent-experience-host-acceptance) verifies fresh eleven-tool
 metadata discovery and legacy initialization/catalog/guidance, not all model-driven tool effects.
 The prior modern-only version-list assertion is
@@ -609,8 +628,8 @@ paused time advances the abandonment deadline without sleeps or retrying admissi
 `app::tests::recovery` also defines production-composition shutdown with a legacy question,
 modern send and connected modern resource listener. Mock Telegram responses hold both admitted
 sends across admission closure; shutdown waits for durable route bookkeeping, and both routes
-accept recoverable replies afterward without implicit acknowledgment. These mixed-protocol
-cases passed in accepted complete C6. Source inspection or no-run compilation does not
+accept recoverable replies afterward without implicit acknowledgment. The accepted composition C6
+covers the original mixed-protocol cases. Source inspection or no-run compilation does not
 establish a passing test outcome, real Codex discovery, live Telegram operation or fresh
 resource measurements. After Runner DONE and ownership retirement, the coordinator separately
 [recorded](MEASUREMENTS.md#agent-experience-host-acceptance) fresh eleven-tool Codex metadata
@@ -622,8 +641,8 @@ independent visual rendering remain unverified.
 requests and a separate synthetic Bot API. It covers typed input/output discovery, stable
 tool listings, normalized registration, external-ID/saved-handle resume through a new handler,
 same-title isolation, text at the final scalar boundary and document captions at the native
-boundary (including the default title-only caption). Successful sends return committed
-composite text/document routes visible through a reopened database. Semantic validation
+boundary (including a caption with just the title and project label). Successful sends return
+committed composite text/document routes visible through a reopened database. Semantic validation
 failures leave Telegram requests, routes and session activity unchanged. Malformed/unknown
 arguments/tools remain JSON-RPC errors; application failures are structured tool errors with
 redacted counts/guidance. Tool-call fixtures supply the required matching `Mcp-Name`; missing
@@ -720,8 +739,8 @@ Temporary fixtures must honor `TMPDIR`, use exclusive randomized mode-0700 direc
 clean up on drop. Tests must not write into the source checkout, including ignored directories;
 the complete suite must also work from a read-only checkout.
 
-Unit tests in `domain::outbound::tests` cover whitespace/control normalization, blank fallback,
-50/51-grapheme titles (including combining marks, ZWJ emoji, flags and Hangul), unchanged
+Unit tests in `domain::outbound::tests` cover whitespace/control normalization, blank and
+placeholder title rejection, legacy notice recognition, 50/51-grapheme titles (including combining marks, ZWJ emoji, flags and Hangul), unchanged
 multiline bodies and shared native bracketed headers. They exercise final 1,000/1,001-scalar
 boundaries for ASCII, Cyrillic, combining marks and supplementary symbols, native 1,024/1,025-UTF-16-unit
 captions including the title, unusually large title graphemes and redacted structured errors.
@@ -851,12 +870,12 @@ routes, redacted errors, atomic rollback, released admission and restart-visible
 routes with seconds-to-milliseconds conversion. An explicitly gated HTTP response allows
 caller cancellation while a send remains admitted; competing sends stay bounded and the
 detached task finishes durable bookkeeping. Fixtures honor TMPDIR and use private randomized
-directories. The recorded complete C6 outcome covers these cases; source review alone does
-not attest execution.
+directories. The recorded complete C6 outcome covers the baseline cases. The current
+project-label cases require their own Runner FINALIZE receipts.
 
 `services::outbound::tests::documents` adds actual multipart HTTP/SQLite scenarios: complete
 caption scalar/native rejection without effects, exact 1,000-scalar/1,024-UTF-16-unit captions,
-title-only captions, binary/empty and multichunk documents, growth and replacement after
+header-only captions, binary/empty and multichunk documents, growth and replacement after
 validated opening, restart-visible document routes, shared storage/task pressure, definitive rate-limit/rejection,
 lost/malformed/mismatched responses, post-send rollback, truncation, deadline and cancellation.
 The tests check no replay, no invented routes, released permits/reservations and no outbound
@@ -880,10 +899,11 @@ disconnects, malformed/oversized and chunked bodies, redirects, webhook conflict
 and server errors. They cover request JSON, typed reply/attachment metadata, pre-I/O outbound
 validation, redaction, bounded retries and no replay of ambiguous sends. A test-only retry
 recorder replaces sleep and asserts the actual chosen delays; a paused Tokio clock covers a
-response stalled after headers. Mock tasks are canceled on fixture drop. The complete,
-unfiltered `cargo test --locked --workspace` suite passed in Runner FINALIZE through the
-read-only trusted route, exercising all seven HTTP tests and the pure retry-policy test
-without skips. Earlier Native attempts failed before HTTP requests at loopback `bind` with
+response stalled after headers. Mock tasks are canceled on fixture drop. The historical
+Runner FINALIZE for the recorded baseline ran the complete, unfiltered
+`cargo test --locked --workspace` suite through the read-only trusted route. It exercised
+the original seven HTTP tests and the pure retry-policy test without skips. Earlier Native
+attempts failed before HTTP requests at loopback `bind` with
 `Operation not permitted`. These fixtures establish no live Telegram result; see the separate
 [baseline text trial](MEASUREMENTS.md#dated-baseline-host-observations) and
 [architecture](ARCHITECTURE.md#telegram-http-client).
@@ -900,6 +920,7 @@ mark the unchanged product specification accepted or establish named-client/live
 | Acceptance / traceability contract | Owning proof |
 | --- | --- |
 | Three concurrent sessions; same-title identity; normalized rename; old text/document Replies; multiple distinct ordered Replies (§§4.1–4.3, 16, 19) | [Daemon conversation](../src/app/tests/conversations.rs), `three_sessions_route_interleaved_old_text_and_document_replies_after_rename`; [registry tests](../tests/registry.rs) retain cross-chat message-ID collision and identity/restart proofs |
+| Meaningful titles, mandatory project labels and effect-free legacy recovery (§§4.1–4.2, 5, 16) | [MCP tools](../src/routes/tools.rs) define registration and recovery cases on both protocols without a guidance call. [Outbound domain tests](../src/domain/outbound/tests.rs) cover display-label normalization and valid framing |
 | Attachment-only document and photo-caption metadata; resource reads and inbox claims preserve original-session routing (§§6, 9, 16, 19) | The daemon conversation above; [ingress](../tests/ingress.rs) and [MCP inbox](../src/routes/inbox.rs) retain authorization, rollback, pagination and fencing boundaries |
 | Title graphemes, final scalar/native caption limits, structured rejection without splitting/truncation or effects (§§4.2, 9, 16, 19) | [Outbound domain tests](../src/domain/outbound/tests.rs), [MCP tools](../src/routes/tools.rs) and [ask tests](../src/routes/ask.rs) |
 | Streamed, confined, Reply-routable files without source copies/default outbound history (§§9, 12, 16, 19) | Daemon conversation checks actual multipart contents, routes and persisted files; [file tests](../src/services/files/tests.rs), [document tests](../src/services/outbound/documents.rs) and [upload tests](../src/clients/telegram/upload.rs) retain path-race, mutation and bounded-read proofs |
@@ -915,22 +936,23 @@ mark the unchanged product specification accepted or establish named-client/live
 | One native daemon, one poller, no vendor adapters/agent management, external database, broker, Node.js or Docker requirement; no public HTTPS/webhook needed (§§1–3, 13, 16, 19) | [Application](../src/app.rs), application/poller tests and [architecture](ARCHITECTURE.md) define and exercise the composition; [setup](SETUP.md) documents locked builds and optional user deployment. [HOST record](MEASUREMENTS.md#recorded-host-capture) preserves the resource result and initial failed/later successful static unit verification |
 | Concise agent text/file policy; no periodic agent polling and no universal LLM wake promise (§§2, 6, 14, 16, 19) | Complete copyable section 14 [agent policy](AGENT_POLICY.md), token/reconciliation instructions and [client timeout guidance](SETUP.md#connect-mcp-clients); existing [contributor policy](../AGENTS.md) is preserved |
 | Telegram at-most-24-hour unconsumed backlog, independent TTLs and reconnect limitations explained to users (§§10–11, 16, 19) | [Setup/recovery](SETUP.md#recovery-and-retention), [README](../README.md), [architecture](ARCHITECTURE.md) and [configuration](CONFIGURATION.md) explain the independent limits and webhook-safe setup |
-| Protocol support and actual client capabilities (§§5–6, 16–19) | [Subscription](../src/routes/subscriptions.rs), transport and daemon recovery fixtures cover synthetic MCP 2026-07-28 clients. [Legacy HTTP fixtures](../src/routes/legacy.rs), [mixed clients](../src/routes/mixed.rs) and [extended composition](../src/app/tests/extended.rs) passed in accepted complete C6, including negotiation, full DTO catalog, observation/downloads and recovery/shutdown. [Client requirements](SETUP.md#connect-mcp-clients) separate later HOST protocol/discovery/bounded live effects from unverified model concurrency/catalog refresh and universal wake; legacy events remain unsupported |
+| Protocol support and actual client capabilities (§§5–6, 16–19) | [Subscription](../src/routes/subscriptions.rs), transport and daemon recovery fixtures cover synthetic MCP 2026-07-28 clients. [Legacy HTTP fixtures](../src/routes/legacy.rs), [mixed clients](../src/routes/mixed.rs) and [extended composition](../src/app/tests/extended.rs) passed at the recorded composition baseline, including negotiation, full DTO catalog, observation/downloads and recovery/shutdown. [Client requirements](SETUP.md#connect-mcp-clients) separate later HOST protocol/discovery/bounded live effects from unverified model concurrency/catalog refresh and universal wake; legacy events remain unsupported |
 | Near-zero idle CPU, best-effort idle RSS below approximately 30 MB, startup, near-limit upload peak RSS, stripped locked release size and dependency profile (§§3, 9, 16–19) | [Recorded HOST benchmark](MEASUREMENTS.md#workload-and-observed-resources) gives actual probe/mock/driver figures, startup and sampled/lifetime limits; [build identity](MEASUREMENTS.md#provenance-and-release-identity) records stripped daemon/probe sizes and distinct profiles. Unit tests retain bounded-read/idle-scheduler proofs without asserting resource targets |
 
 ## Section 17 deliverable coverage
 
-The original ten deliverables remain in scope. Their presence and prior checks are distinct
-from current documentation finalization and full operational acceptance.
+The original ten deliverables remain in scope. Historical checks apply to their recorded
+baselines. Current changes require their bound FINALIZE receipts. Operational acceptance has
+separate evidence.
 
 | Deliverable | Location / evidence and remaining limit |
 | --- | --- |
-| 1. Minimal working Rust source | [Architecture](ARCHITECTURE.md), `src/`, recorded complete C4–C6 and mocked daemon interactions |
-| 2. Lock, reproducible release instructions, sample configuration | [Cargo.lock](../Cargo.lock), [setup](SETUP.md), [sample TOML](../config/relay.example.toml), recorded R1/R2 and bound offline HOST materialization |
+| 1. Minimal working Rust source | [Architecture](ARCHITECTURE.md), `src/`, and mocked daemon interactions. The composition baseline records complete C4–C6 |
+| 2. Lock, reproducible release instructions, sample configuration | [Cargo.lock](../Cargo.lock), [setup](SETUP.md), [sample TOML](../config/relay.example.toml), composition-baseline R1/R2 and bound offline HOST materialization |
 | 3. SQLite initialization/migrations, cleanup, restart-safe cursor | [Repositories](../src/repositories.rs), storage/retention/maintenance/ingress/poller suites above |
-| 4. MCP tools/resources/subscriptions with tested current protocol | Accepted complete mixed-protocol C6, including guidance/history/attachments and complete independent DTO catalog; legacy resource events remain unsupported |
+| 4. MCP tools/resources/subscriptions with tested current protocol | Mixed-protocol composition-baseline C6 covered guidance/history/attachments and the independent DTO catalog. Legacy resource events remain unsupported |
 | 5. Single poller, strict final text/caption limits, safe documents | Client/domain/file/outbound suites above; historical mocked upload and separately dated real native-framed text/file/history/download observations; visual rendering and general live cases remain outside that bounded trial |
-| 6. Unit/integration tests using mock Telegram | Recorded complete unfiltered C6 and controlled P1/P2; no real messages or credentials used |
+| 6. Unit/integration tests using mock Telegram | Complete unfiltered C6 at the composition baseline and controlled P1/P2 at the recorded measurement baseline. Fixtures use synthetic messages and credentials |
 | 7. README/setup covering bot, allowlists, URL, secrets, registration, wait caveat, notices | [README](../README.md), [setup/client guidance](SETUP.md), [configuration](CONFIGURATION.md); separate baseline and extension discovery/live records retain their model-catalog, concurrency and wake limits |
 | 8. Contributor or copyable section 14 agent policy | Preserved [AGENTS.md](../AGENTS.md) and complete copyable [agent policy](AGENT_POLICY.md), including file reports, no periodic inbox polling and explicit completion |
 | 9. Example user unit and protected environment-file approach | [Unit](../deploy/telegram-mcp-relay.service), [environment template](../deploy/relay.env.example), [setup](SETUP.md#optional-systemd-user-service); static verification failed then passed after binary installation; later installed canonical unit failed at runtime with `218/CAPABILITIES`, separate from transient one-process text operation |
@@ -947,8 +969,9 @@ mock/driver and receipt-gated HOST controller. `tools/tests/test_measure_resourc
 controlled processes, pipes and clocks for prerequisite/profile rejection, phase coordination,
 PID identity, artifact changes, retirement and exclusive failure reporting. It opens no network
 sockets or Cargo build processes. These tests belong to the existing P1/P2 FINALIZE gates;
-their prior successful outcome is recorded above. Actual resource values come from the
-separate bound HOST capture. Source/build checks do not attest runtime measurements; existing
+the [recorded P1/P2 results](#recorded-validation-evidence) apply to the measurement baseline.
+Actual resource values come from the separate bound HOST capture. Source/build checks do not
+attest runtime measurements; existing
 complete C6 owns actual HTTP/routing proofs. The original unit failure is historical; later
 verification passed after binary installation as [recorded](MEASUREMENTS.md#unit-verification-and-remaining-acceptance).
 That benchmark/static trial exercised no service activation or live behavior. Later baseline

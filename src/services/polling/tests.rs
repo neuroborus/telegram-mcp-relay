@@ -53,7 +53,7 @@ impl Fixture {
         let mut db = database.lock().unwrap();
         let now = unix_millis().unwrap();
         let key = db
-            .register_session(None, None, "Synthetic", None, now)
+            .register_session(None, None, "Synthetic", Some("p"), now)
             .unwrap()
             .session_key;
         let reservation = db.reserve_route(&key).unwrap();

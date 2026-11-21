@@ -109,7 +109,7 @@ async fn shutdown_and_service_failure_drain_disconnected_sends_and_preserve_ingr
         let key = {
             let mut db = fixture.database();
             let key = db
-                .register_session(None, None, "Drain", None, now)
+                .register_session(None, None, "Drain", Some("p"), now)
                 .unwrap()
                 .session_key;
             let reservation = db.reserve_route(&key).unwrap();
@@ -349,7 +349,7 @@ async fn composition_cleans_before_polling_and_shares_send_ingress_and_typing() 
         let mut database = fixture.database();
         for _ in 0..105 {
             database
-                .register_session(None, None, "Expired", None, 0)
+                .register_session(None, None, "Expired", Some("p"), 0)
                 .unwrap();
         }
     }
@@ -360,7 +360,12 @@ async fn composition_cleans_before_polling_and_shares_send_ingress_and_typing() 
     assert_eq!(fixture.count("sessions"), 0); // Entire multi-batch startup sweep finished.
     webhook.respond(json!({"ok":true,"result":{"url":"", "pending_update_count":0}}));
     let poll = mock.next("getUpdates").await;
-    let registration = tool(address, "telegram_register", json!({"title":"Synthetic"})).await;
+    let registration = tool(
+        address,
+        "telegram_register",
+        json!({"title":"Synthetic","directory_label":"p"}),
+    )
+    .await;
     let key = registration["session_key"].as_str().unwrap();
     let send = tool(
         address,
@@ -372,7 +377,7 @@ async fn composition_cleans_before_polling_and_shares_send_ingress_and_typing() 
         request = mock.next("sendMessage") => request,
         _ = &mut send => panic!("send completed before Telegram response"),
     };
-    assert_eq!(request.payload["text"], "[Synthetic]\n\nQuestion");
+    assert_eq!(request.payload["text"], "[Synthetic]\np\n\nQuestion");
     request.respond(
         json!({"ok":true,"result":{"message_id":5,"chat":{"id":-101},
         "date":unix_millis().unwrap()/1000}}),
@@ -446,7 +451,7 @@ async fn recovered_notice_dispatch_and_terminal_poll_failure_are_supervised() {
     let key = {
         let mut db = fixture.database();
         let key = db
-            .register_session(None, None, "Recovered", None, now)
+            .register_session(None, None, "Recovered", Some("p"), now)
             .unwrap()
             .session_key;
         let reservation = db.reserve_route(&key).unwrap();

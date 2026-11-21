@@ -7,7 +7,7 @@ use rusqlite::{Connection, OptionalExtension, TransactionBehavior};
 use super::{
     Database,
     inbox::{TOKEN_BYTES, ensure_session},
-    registry::{expiry, random_key, usage},
+    registry::{expiry, random_key, session_by, usage},
 };
 use crate::error::AppError;
 
@@ -49,7 +49,13 @@ impl Database {
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        ensure_session(&transaction, session_key)?;
+        if active {
+            session_by(&transaction, "session_key", session_key)?
+                .ok_or(AppError::SessionNotFound)?
+                .outbound_directory_label()?;
+        } else {
+            ensure_session(&transaction, session_key)?;
+        }
         let mut owned = owned_reply(&transaction, session_key, reply_id, claim_token, now)?;
         let started = active && owned.status.processing_started_at.is_none();
         if started {

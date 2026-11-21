@@ -79,7 +79,7 @@ impl AskService {
         validate_body_entities(text, entities)?;
         let subscription = if self.timeout.is_some() {
             let database = self.database.lock().map_err(|_| AppError::StorageFailure)?;
-            database.session(session_key)?;
+            database.session(session_key)?.outbound_directory_label()?;
             Some(self.notifications.waiter(session_key.to_owned())?)
         } else {
             None

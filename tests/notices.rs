@@ -56,7 +56,7 @@ impl Fixture {
 
     fn seed(&self, db: &mut Database) -> String {
         let key = db
-            .register_session(None, None, "Same", None, 100)
+            .register_session(None, None, "Same", Some("p"), 100)
             .unwrap()
             .session_key;
         let reservation = db.reserve_route(&key).unwrap();
@@ -419,7 +419,7 @@ fn notice_batch_and_ingress_failures_roll_back_all_decisions() {
 #[test]
 fn notice_admission_shares_receipt_metadata_and_outstanding_send_budgets() {
     let fixture = Fixture::new(Limits {
-        metadata_bytes: 900,
+        metadata_bytes: 901,
         ..Limits::default()
     });
     let mut db = fixture.open();

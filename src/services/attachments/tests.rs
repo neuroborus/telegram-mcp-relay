@@ -40,11 +40,11 @@ impl Fixture {
                 .unwrap();
         let now = unix_millis().unwrap();
         let owner = db
-            .register_session(None, None, "Owner", None, now)
+            .register_session(None, None, "Owner", Some("p"), now)
             .unwrap()
             .session_key;
         let observer = db
-            .register_session(None, None, "Observer", None, now)
+            .register_session(None, None, "Observer", Some("p"), now)
             .unwrap()
             .session_key;
         let reservation = db.reserve_route(&owner).unwrap();

@@ -50,7 +50,7 @@ impl Fixture {
 
     fn session(&self, db: &mut Database, chat: i64) -> String {
         let key = db
-            .register_session(None, None, "Same", None, 100)
+            .register_session(None, None, "Same", Some("p"), 100)
             .unwrap()
             .session_key;
         self.route(db, &key, chat, 5);
@@ -310,7 +310,7 @@ fn expired_replies_are_excluded_and_claim_leases_never_extend_retention() {
 #[test]
 fn token_admission_counts_send_reservations_and_rotation_replaces_existing_bytes() {
     let fixture = Fixture::new(Limits {
-        metadata_bytes: 196 + 192 + 2 * 256 + 192 + 64,
+        metadata_bytes: 197 + 192 + 2 * 256 + 192 + 64,
         ..Limits::default()
     });
     let mut db = fixture.open();
@@ -927,7 +927,7 @@ fn receipt_pressure_preserves_processing_payload_and_valid_ack_retry_is_free() {
 
 #[test]
 fn reconciliation_and_ack_account_for_replacement_bytes_and_outstanding_sends() {
-    const BASE: u32 = 196 + 192 + 256 + 64;
+    const BASE: u32 = 197 + 192 + 256 + 64;
     const PROOF: u32 = 64 + 6; // Prior token plus the UTF-8 request ID "resume".
     let mut fixture = Fixture::new(Limits {
         metadata_bytes: BASE + PROOF + 192 - 1,

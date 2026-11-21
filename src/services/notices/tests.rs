@@ -12,8 +12,9 @@ use tokio::{
 
 use crate::{
     config::Storage,
+    dto::HistoryRequest,
     repositories::{IngestOutcome, RouteKind},
-    services::{inbox::InboxService, ingress::IngressService},
+    services::{history::HistoryService, inbox::InboxService, ingress::IngressService},
 };
 
 struct Fixture(Config);
@@ -67,7 +68,7 @@ impl Fixture {
     fn seed(&self, db: &Arc<Mutex<Database>>, title: &str) -> String {
         let mut db = db.lock().unwrap();
         let key = db
-            .register_session(None, None, title, None, 100)
+            .register_session(None, None, title, Some("p"), 100)
             .unwrap()
             .session_key;
         let route = db.reserve_route(&key).unwrap();
@@ -355,7 +356,7 @@ async fn complete_notice_length_is_validated_without_truncation_or_replay() {
         let db = fixture.open();
         let title = format!(
             "a{}",
-            "\u{301}".repeat(length - UNCONFIRMED_NOTICE.chars().count() - 7)
+            "\u{301}".repeat(length - UNCONFIRMED_NOTICE.chars().count() - 9)
         );
         fixture.seed(&db, &title);
         fixture.ingest(&db, 11, json!({"message_id":5}));
@@ -369,7 +370,7 @@ async fn complete_notice_length_is_validated_without_truncation_or_replay() {
                 request["text"]
                     .as_str()
                     .unwrap()
-                    .starts_with(&format!("🔧 [{title}]\n\n"))
+                    .starts_with(&format!("🔧 [{title}]\np\n\n"))
             );
             assert_eq!(work.await.unwrap(), Ok(()));
         } else {
@@ -415,7 +416,7 @@ async fn ordinary_routes_win_and_untrusted_or_unrelated_wording_is_not_a_service
     let key = db
         .lock()
         .unwrap()
-        .register_session(None, None, "Other", None, 100)
+        .register_session(None, None, "Other", Some("p"), 100)
         .unwrap()
         .session_key;
     let pending = db.lock().unwrap().reserve_route(&key).unwrap();
@@ -655,6 +656,111 @@ async fn confirmed_service_history_keeps_admitted_context_without_routes_or_dupl
     service.dispatch_one(62_000).await.unwrap();
     assert!(mock.requests.try_recv().is_err());
     assert_eq!(fixture.count("journal_records"), 4);
+}
+
+#[tokio::test]
+async fn routed_reply_and_notice_keep_safe_history_without_exposing_legacy_paths() {
+    for (title, label) in [
+        ("\u{200d}‹/example/private›", "《~/project》"),
+        ("»/example/private«", "›~/project‹"),
+        ("[/example]—CI/CD review", "[/example/release].draft]"),
+    ] {
+        assert_safe_legacy_history(title, label).await;
+    }
+}
+
+async fn assert_safe_legacy_history(path_title: &str, path_label: &str) {
+    let mut fixture = Fixture::new();
+    fixture.0.telegram.chat_id = -101;
+    fixture.0.server.auth_token_env = Some("SYNTHETIC_AUTH".into());
+    fixture.0.history.enabled = true;
+    let text = format!("🔧 [Agent Session]\n\n{UNCONFIRMED_NOTICE}");
+    // Exactly enough for the safe notice body. Neither legacy field should be charged.
+    fixture.0.history.max_record_bytes = text.len().try_into().unwrap();
+    let db = fixture.open();
+    let key = fixture.seed(&db, "Synthetic");
+    fixture
+        .sql()
+        .execute(
+            "UPDATE sessions SET title = ?1, directory_label = ?2 WHERE session_key = ?3",
+            (path_title, path_label, &key),
+        )
+        .unwrap();
+    let IngestOutcome::ReplyStored {
+        reply_id,
+        session_key,
+    } = fixture.ingest(&db, 11, json!({"message_id":5}))
+    else {
+        panic!("expected a routed reply");
+    };
+    assert_eq!(session_key, key);
+
+    let mut mock = Mock::new(&fixture.0).await;
+    let service = fixture.service(db.clone(), mock.client.clone());
+    let work = dispatch(&service);
+    let request = tokio::time::timeout(Duration::from_secs(2), mock.answer(200, sent(201)))
+        .await
+        .unwrap();
+    work.await.unwrap().unwrap();
+    assert_eq!(request["text"], text);
+    assert_eq!(
+        request["entities"],
+        json!([{"type":"bold","offset":3,"length":15}])
+    );
+    service.dispatch_one(62_000).await.unwrap();
+    assert!(mock.requests.try_recv().is_err());
+    assert_eq!(fixture.count("notice_attempts"), 1);
+
+    let database = db.lock().unwrap();
+    let history = HistoryService::new(&fixture.0)
+        .unwrap()
+        .read(
+            &database,
+            &HistoryRequest {
+                session_key: key.clone(),
+                chat_id: None,
+                session_display_id: None,
+                query: None,
+                cursor: None,
+                limit: None,
+            },
+            62_000,
+        )
+        .unwrap();
+    assert_eq!(history.messages.len(), 2);
+    let reply = &history.messages[0];
+    let notice = &history.messages[1];
+    assert_eq!(notice.direction, "service");
+    assert_eq!(notice.related_message_id, Some(111));
+    assert_eq!(notice.text_or_caption.as_deref(), Some(text.as_str()));
+    assert_eq!(reply.direction, "incoming");
+    assert_eq!(reply.text_or_caption.as_deref(), Some("Synthetic reply"));
+    assert!(reply.session_display_id.is_some());
+    assert_eq!(reply.session_display_id, notice.session_display_id);
+    for message in &history.messages {
+        assert!(message.session_title.is_none());
+        assert!(message.directory_label.is_none());
+    }
+    let inbox = database.inbox_snapshot(&key, None, 10, 62_000).unwrap();
+    assert_eq!(inbox.replies[0].reply_id, reply_id);
+    assert!(database.route(-101, 201, 62_000).unwrap().is_none());
+    assert_eq!(
+        database
+            .route(-101, 5, 62_000)
+            .unwrap()
+            .unwrap()
+            .session_key,
+        key
+    );
+    let stored: (String, String) = fixture
+        .sql()
+        .query_row(
+            "SELECT title, directory_label FROM sessions WHERE session_key = ?1",
+            [&key],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(stored, (path_title.to_owned(), path_label.to_owned()));
 }
 
 #[tokio::test]

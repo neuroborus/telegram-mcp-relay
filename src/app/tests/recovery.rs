@@ -178,7 +178,7 @@ async fn shutdown_drains_legacy_question_and_modern_send_with_a_connected_resour
     let session = tool(
         address,
         "telegram_register",
-        json!({"title":"Mixed shutdown"}),
+        json!({"title":"Mixed shutdown","directory_label":"p"}),
     )
     .await;
     let key = session["session_key"].as_str().unwrap();
@@ -195,7 +195,7 @@ async fn shutdown_drains_legacy_question_and_modern_send_with_a_connected_resour
     .unwrap();
     assert_eq!(older.status(), http::StatusCode::OK);
     let question = mock.next("sendMessage").await;
-    assert_eq!(question.payload["text"], "[Mixed shutdown]\n\nQuestion");
+    assert_eq!(question.payload["text"], "[Mixed shutdown]\np\n\nQuestion");
     let send_key = key.to_owned();
     let modern = tokio::spawn(async move {
         tool(
@@ -206,7 +206,7 @@ async fn shutdown_drains_legacy_question_and_modern_send_with_a_connected_resour
         .await
     });
     let send = mock.next("sendMessage").await;
-    assert_eq!(send.payload["text"], "[Mixed shutdown]\n\nResult");
+    assert_eq!(send.payload["text"], "[Mixed shutdown]\np\n\nResult");
     running.stop.cancel();
     running.retired.cancelled().await;
     assert!(!running.task.is_finished());
@@ -266,7 +266,7 @@ async fn subscribed_ask_and_inbox_claims_reconcile_and_recover_missed_acknowledg
         address,
         "telegram_register",
         json!({
-        "external_session_id":"recovery-thread","title":"Recovery"}),
+        "external_session_id":"recovery-thread","title":"Recovery","directory_label":"p"}),
     )
     .await;
     let uri = session["inbox_uri"].as_str().unwrap();
@@ -282,7 +282,7 @@ async fn subscribed_ask_and_inbox_claims_reconcile_and_recover_missed_acknowledg
         request = mock.next("sendMessage") => request,
         _ = &mut asked => panic!("ask completed before Telegram response"),
     };
-    assert_eq!(send.payload["text"], "[Recovery]\n\nQuestion");
+    assert_eq!(send.payload["text"], "[Recovery]\np\n\nQuestion");
     send.respond(accepted(5));
     let updates = vec![
         incoming(10, 5, Some("First")),
@@ -430,7 +430,12 @@ async fn committed_reply_without_a_wakeup_or_next_poll_recovers_after_restart() 
     let address = fixture.config.server.listen;
     let (mut running, poll) = begin(&mut fixture, &mut mock).await;
     assert!(poll.payload.get("offset").is_none());
-    let session = tool(address, "telegram_register", json!({"title":"Recovery"})).await;
+    let session = tool(
+        address,
+        "telegram_register",
+        json!({"title":"Recovery","directory_label":"p"}),
+    )
+    .await;
     let key = session["session_key"].as_str().unwrap();
     let uri = session["inbox_uri"].as_str().unwrap();
     let mut events = Events::listen(address, uri).await;

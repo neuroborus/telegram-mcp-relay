@@ -28,7 +28,7 @@ fn body_entities_validate_supported_kinds_metadata_and_utf16_boundaries() {
         }
         let span = entity(value);
         validate_body_entities("😀e\u{301}", std::slice::from_ref(&span)).unwrap();
-        let text = format_text(&SessionTitle::new("🚀"), None, "😀e\u{301}")
+        let text = format_text(&SessionTitle::parse("🚀").unwrap(), None, "😀e\u{301}")
             .unwrap()
             .with_body_entities("😀e\u{301}", &[span])
             .unwrap();
@@ -114,7 +114,7 @@ fn body_entities_enforce_containment_without_code_or_quote_nesting() {
 #[test]
 fn rich_bodies_preserve_final_bounds_and_service_prefix_offsets() {
     use serde_json::json;
-    let title = SessionTitle::new("T");
+    let title = SessionTitle::parse("T").unwrap();
     for (caption, body, units) in [
         (false, "a".repeat(995), 995),
         (true, "😀".repeat(509) + "a", 1_019),
@@ -138,12 +138,16 @@ fn rich_bodies_preserve_final_bounds_and_service_prefix_offsets() {
         assert_eq!(message.entities()[1].offset, 5);
         assert_eq!(format(&(body + "a")).unwrap_err().code(), "TEXT_TOO_LONG");
     }
-    let directory = DirectoryLabel::new("📁").unwrap().unwrap();
+    let directory = DirectoryLabel::parse("📁").unwrap();
     let span = entity(json!({"type":"italic","offset":0,"length":2}));
-    let notice = format_notice(Some(&SessionTitle::new("🚀")), Some(&directory), "😀")
-        .unwrap()
-        .with_body_entities("😀", &[span])
-        .unwrap();
+    let notice = format_notice(
+        Some(&SessionTitle::parse("🚀").unwrap()),
+        Some(&directory),
+        "😀",
+    )
+    .unwrap()
+    .with_body_entities("😀", &[span])
+    .unwrap();
     assert_eq!(notice.as_str(), "🔧 [🚀]\n📁\n\n😀");
     assert_eq!(
         notice
@@ -167,10 +171,8 @@ fn length_details(error: AppError) -> TextTooLong {
 }
 
 #[test]
-fn titles_normalize_whitespace_remove_controls_and_fall_back() {
+fn titles_normalize_whitespace_and_remove_controls() {
     for (input, expected) in [
-        ("", "Agent Session"),
-        (" \t\r\n\u{0}\u{7f}\u{85}\u{2028}\u{a0}", "Agent Session"),
         (
             "  Alpha\t\r\n Beta\u{0}\u{7f}\u{2003}Gamma\u{2029} ",
             "Alpha Beta Gamma",
@@ -178,10 +180,137 @@ fn titles_normalize_whitespace_remove_controls_and_fall_back() {
         ("a\u{0}b\u{1b}c", "abc"),
         (" [A] *bold* <tag> ", "[A] *bold* <tag>"),
     ] {
-        let title = SessionTitle::new(input);
+        let title = SessionTitle::parse(input).unwrap();
         assert_eq!(title.as_str(), expected);
-        assert_eq!(SessionTitle::new(title.as_str()), title);
+        assert_eq!(SessionTitle::parse(title.as_str()).unwrap(), title);
     }
+}
+
+#[test]
+fn registration_rejects_blank_and_placeholder_titles_while_notices_recognize_them() {
+    for input in [
+        "",
+        " \t\u{202e}\u{0}",
+        " [ ] ",
+        "[\u{200d}\u{fe0f}]",
+        "\u{2800}",
+        "\u{200d}[ Agent \u{200c} Session ]\u{fe0f}",
+        "Agent\u{34f} Session",
+        "Agent\u{2800}Session",
+        "agent session",
+        "SESSION",
+        "aGeNt",
+        "untitled",
+        "new chat",
+        "new session",
+        "conversation",
+        "chat",
+        "[[ New\nChat ]]",
+        "(Agent Session)",
+        "【Agent Session】",
+        "【( Agent\u{200c} Session )】",
+    ] {
+        assert_eq!(SessionTitle::parse(input), Err(AppError::InvalidTitle));
+        assert!(!SessionTitle::from_stored(input).is_meaningful());
+    }
+    assert!(SessionTitle::parse("Agent session recovery").is_ok());
+    let title = SessionTitle::from_stored("");
+    let label = DirectoryLabel::from_stored("/home/example/project").unwrap();
+    let notice = format_notice(Some(&title), Some(&label), UNCONFIRMED_NOTICE).unwrap();
+    assert!(is_service_notice(notice.as_str()));
+}
+
+#[test]
+fn titles_and_labels_reject_path_prefixes_after_wrappers_or_invisible_formatting() {
+    for input in [
+        "/example/project",
+        r"C:\workspace\project",
+        "z:/workspace/project",
+        r"\\server\project",
+        "~/project",
+        "'/example/project with spaces'",
+        r#"("C:\workspace\project")"#,
+        r#"“\\server\project”"#,
+        "’/example/private’",
+        "”~/project”",
+        "`~example/project`",
+        "「/example/project」",
+        r#"【„C:\workspace\project“】"#,
+        "（~/project）",
+        "‹/example/private›",
+        "《~/project》",
+        "»/example/private«",
+        "›~/project‹",
+        r"([C:\workspace\release]])",
+        "[/example/release].draft]",
+        "[/example]—CI/CD review",
+        r#""/example/project" is ready for "review""#,
+        "\u{200d}\u{2800}[ \u{2066}/example/project ]",
+        "{ C\u{34f}:\\workspace\\project }",
+        "[/example/old-cutoff…",
+        "‹《~/project/old-cutoff…",
+    ] {
+        assert_eq!(SessionTitle::parse(input), Err(AppError::InvalidTitle));
+        assert_eq!(
+            DirectoryLabel::parse(input),
+            Err(AppError::InvalidDirectoryLabel)
+        );
+        assert!(!SessionTitle::from_stored(input).is_meaningful());
+        assert!(
+            !DirectoryLabel::from_stored(input)
+                .unwrap()
+                .is_project_label()
+        );
+    }
+
+    let long_path = format!("( /example/{} )", "a".repeat(80));
+    assert_eq!(SessionTitle::parse(&long_path), Err(AppError::InvalidTitle));
+    assert!(!SessionTitle::from_stored(&long_path).is_meaningful());
+    for input in [
+        "org/repo",
+        "Review /example/project",
+        "[Review] /example/project",
+        "”Review /example/project”",
+        "「Release review」",
+        "Review CI/CD",
+        r"org\repo",
+        "C: Release notes",
+        "👩🏽‍💻 [Build]!",
+        "【(Agent session recovery)】",
+    ] {
+        assert_eq!(SessionTitle::parse(input).unwrap().as_str(), input);
+        assert!(SessionTitle::from_stored(input).is_meaningful());
+        assert_eq!(DirectoryLabel::parse(input).unwrap().as_str(), input);
+    }
+}
+
+#[test]
+fn agent_titles_need_visible_content_after_truncation() {
+    let padding = "\u{2800}".repeat(TITLE_GRAPHEME_LIMIT - 1);
+    for input in [format!("{padding}Release notes"), format!("{padding}…")] {
+        assert_eq!(SessionTitle::parse(&input), Err(AppError::InvalidTitle));
+        assert!(!SessionTitle::from_stored(&input).is_meaningful());
+    }
+}
+
+#[test]
+fn truncation_cannot_leave_a_placeholder_title() {
+    let padding = "\u{2800}".repeat(TITLE_GRAPHEME_LIMIT - 1 - "Agent Session".len());
+    let bracketed_padding = "\u{2800}".repeat(TITLE_GRAPHEME_LIMIT - 3 - "Agent Session".len());
+    let retained = format!("Agent Session{padding}…");
+    for input in [
+        format!("Agent Session{padding}Release notes"),
+        format!("[Agent Session{padding}Release notes]"),
+        format!("【(Agent Session{bracketed_padding}Release notes)】"),
+        retained.clone(),
+        "[Agent Session]…".into(),
+        "[Agent Session …]".into(),
+        "【(Agent Session…".into(),
+    ] {
+        assert_eq!(SessionTitle::parse(&input), Err(AppError::InvalidTitle));
+        assert!(!SessionTitle::from_stored(&input).is_meaningful());
+    }
+    assert_eq!(SessionTitle::from_stored(&retained).as_str(), retained);
 }
 
 #[test]
@@ -196,11 +325,11 @@ fn title_cutoff_preserves_whole_extended_graphemes() {
         "\u{1100}\u{1161}\u{11a8}",
     ] {
         let fifty = grapheme.repeat(50);
-        assert_eq!(SessionTitle::new(&fifty).as_str(), fifty);
-        let shortened = SessionTitle::new(&grapheme.repeat(51));
+        assert_eq!(SessionTitle::parse(&fifty).unwrap().as_str(), fifty);
+        let shortened = SessionTitle::parse(&grapheme.repeat(51)).unwrap();
         assert_eq!(shortened.as_str(), format!("{}…", grapheme.repeat(49)));
         assert_eq!(shortened.as_str().graphemes(true).count(), 50);
-        assert_eq!(SessionTitle::new(shortened.as_str()), shortened);
+        assert_eq!(SessionTitle::parse(shortened.as_str()).unwrap(), shortened);
         let notice = format_notice(Some(&shortened), None, "😀")
             .unwrap()
             .with_body_entities(
@@ -227,17 +356,15 @@ fn title_cutoff_preserves_whole_extended_graphemes() {
     // A separator at the truncation boundary must not leave trailing whitespace.
     let input = format!("{} b", "a".repeat(49));
     assert_eq!(
-        SessionTitle::new(&input).as_str(),
+        SessionTitle::parse(&input).unwrap().as_str(),
         format!("{}…", "a".repeat(49))
     );
 }
 
 #[test]
 fn native_headers_use_utf16_coordinates_and_leave_bodies_literal() {
-    let title = SessionTitle::new(" \t 🚀[Review] *draft*\n ");
-    let directory = DirectoryLabel::new(" workspace/📁 <tag> ")
-        .unwrap()
-        .unwrap();
+    let title = SessionTitle::parse(" \t 🚀[Review] *draft*\n ").unwrap();
+    let directory = DirectoryLabel::parse(" workspace/📁 <tag> ").unwrap();
     let body = "  <code> & *literal*\n\nNext line\r\n ";
     let expected = format!("[🚀[Review] *draft*]\nworkspace/📁 <tag>\n\n{body}");
     let text = format_text(&title, Some(&directory), body).unwrap();
@@ -274,29 +401,62 @@ fn native_headers_use_utf16_coordinates_and_leave_bodies_literal() {
 }
 
 #[test]
-fn directory_labels_are_opt_in_bounded_safe_single_lines() {
-    for input in ["", " \t\r\n\u{0}\u{202e}\u{2066}"] {
-        assert_eq!(DirectoryLabel::new(input).unwrap(), None);
+fn directory_labels_are_bounded_safe_single_lines() {
+    for input in [
+        "",
+        " \t\r\n\u{0}\u{202e}\u{2066}",
+        "\u{200c} \u{fe0f}",
+        "\u{2800}",
+        "\u{2800}\u{3164}\u{ffa0}",
+        "\u{200d} /home/example/project",
+        "\u{2800}/home/example/project",
+        "/home/example/project",
+        "~/project",
+        r"\\server\project",
+        r"C:\workspace\project",
+        "C\u{34f}:\\workspace\\project",
+        "C\u{fe0f}:\\workspace\\project",
+        "  z:/workspace/project",
+    ] {
+        assert_eq!(
+            DirectoryLabel::parse(input),
+            Err(AppError::InvalidDirectoryLabel)
+        );
+        if let Some(legacy) = DirectoryLabel::from_stored(input) {
+            assert!(!legacy.is_project_label());
+        }
     }
-    let label = DirectoryLabel::new("  workspace\r\n📁\u{202e}\u{2066}\u{0} <b> ")
-        .unwrap()
-        .unwrap();
-    assert_eq!(label.as_str(), "workspace 📁 <b>");
-    assert_eq!(SessionTitle::new("a\u{202e}b\u{2066}c").as_str(), "abc");
-    let hundred = "📁".repeat(100);
     assert_eq!(
-        DirectoryLabel::new(&hundred).unwrap().unwrap().as_str(),
-        hundred
+        DirectoryLabel::parse(" org/repo ").unwrap().as_str(),
+        "org/repo"
     );
-    let error = DirectoryLabel::new(&(hundred + "x")).unwrap_err();
-    assert_eq!(error, AppError::InvalidRequest("directory_label"));
+    assert_eq!(
+        DirectoryLabel::parse("👩🏽‍💻 tooling").unwrap().as_str(),
+        "👩🏽‍💻 tooling"
+    );
+    assert_eq!(
+        DirectoryLabel::parse("Build\u{34f}\u{2800}tools")
+            .unwrap()
+            .as_str(),
+        "Build\u{34f}\u{2800}tools"
+    );
+    let label = DirectoryLabel::parse("  workspace\r\n📁\u{202e}\u{2066}\u{0} <b> ").unwrap();
+    assert_eq!(label.as_str(), "workspace 📁 <b>");
+    assert_eq!(
+        SessionTitle::parse("a\u{202e}b\u{2066}c").unwrap().as_str(),
+        "abc"
+    );
+    let hundred = "📁".repeat(100);
+    assert_eq!(DirectoryLabel::parse(&hundred).unwrap().as_str(), hundred);
+    let error = DirectoryLabel::parse(&(hundred + "x")).unwrap_err();
+    assert_eq!(error, AppError::InvalidDirectoryLabel);
     assert!(!format!("{label:?} {error:?}").contains("workspace"));
 }
 
 #[test]
 fn text_captions_and_notices_count_every_visible_scalar() {
-    let title = SessionTitle::new("T");
-    let directory = DirectoryLabel::new("📁").unwrap().unwrap();
+    let title = SessionTitle::parse("T").unwrap();
+    let directory = DirectoryLabel::parse("📁").unwrap();
     for unit in ["a", "Я", "e\u{301}", "👨‍👩‍👧‍👦", "𐐀", "line\n"] {
         for (notice, with_directory, framing) in [
             (false, false, 5),
@@ -353,8 +513,8 @@ fn text_captions_and_notices_count_every_visible_scalar() {
 
 #[test]
 fn native_caption_boundary_includes_supplementary_title_directory_and_body() {
-    let title = SessionTitle::new("🚀");
-    let directory = DirectoryLabel::new("📁").unwrap().unwrap();
+    let title = SessionTitle::parse("🚀").unwrap();
+    let directory = DirectoryLabel::parse("📁").unwrap();
     // Seven framing scalars plus 993 body scalars; 24 astral symbols add 24 UTF-16 units.
     let body = "🚀".repeat(22) + &"a".repeat(971);
     let caption = format_caption(&title, Some(&directory), &body).unwrap();
@@ -377,7 +537,7 @@ fn native_caption_boundary_includes_supplementary_title_directory_and_body() {
 
 #[test]
 fn normalization_precedes_length_checks_and_large_graphemes_are_not_shortened() {
-    let title = SessionTitle::new(&format!(" \n{} discarded", "a".repeat(50)));
+    let title = SessionTitle::parse(&format!(" \n{} discarded", "a".repeat(50))).unwrap();
     let body = "b".repeat(946);
     assert_eq!(
         format_text(&title, None, &body)
@@ -388,7 +548,7 @@ fn normalization_precedes_length_checks_and_large_graphemes_are_not_shortened() 
         1_000
     );
     let huge_grapheme = format!("a{}", "\u{301}".repeat(1_000));
-    let title = SessionTitle::new(&huge_grapheme);
+    let title = SessionTitle::parse(&huge_grapheme).unwrap();
     assert_eq!(title.as_str(), huge_grapheme);
     for result in [
         format_text(&title, None, ""),
@@ -409,9 +569,10 @@ fn service_recognition_preserves_legacy_notices_and_rejects_other_bodies() {
         format!("🔧 [[ A ]]\nworkspace/📁\n\n{UNCONFIRMED_NOTICE}"),
         format!("🔧 [Title]\n\n{UNCONFIRMED_NOTICE}"),
         format!("🔧 [Title]\nworkspace/📁\n\n{UNCONFIRMED_NOTICE}"),
+        format!("🔧 [[/example]—CI/CD review]\n[/example/release].draft]\n\n{UNCONFIRMED_NOTICE}"),
         format!(
             "🔧 [{}]\n\n{UNCONFIRMED_NOTICE}",
-            SessionTitle::new(&"🚀".repeat(51)).as_str()
+            SessionTitle::parse(&"🚀".repeat(51)).unwrap().as_str()
         ),
         format!("🔧 {}\n{UNCONFIRMED_NOTICE}", "a".repeat(50)),
         UNCONFIRMED_NOTICE.to_owned(),
@@ -436,7 +597,7 @@ fn service_recognition_preserves_legacy_notices_and_rejects_other_bodies() {
 
 #[test]
 fn diagnostics_expose_counts_and_guidance_without_input() {
-    let title = SessionTitle::new("synthetic-private-title");
+    let title = SessionTitle::parse("synthetic-private-title").unwrap();
     let body = "synthetic-private-body".repeat(100);
     let error = format_text(&title, None, &body).unwrap_err();
     let diagnostics = format!("{error} {error:?} {title:?}");

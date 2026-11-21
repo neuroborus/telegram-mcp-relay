@@ -106,7 +106,8 @@ The same checksum-verified reqwest archive confirms `Part::stream_with_length`,
 `Body::wrap_stream` and streaming multipart construction. The additional MIME and WASM-stream
 lock entries come from that archive's upstream lockfile, preserving existing pinned versions.
 Their locally provisioned archives match the committed lockfile checksums. This is source/API
-inspection; the recorded C4–C6 and release-build outcomes cover the resulting locked source.
+inspection. The recorded C4–C6 and release-build outcomes cover the locked source at the
+[composition baseline](TESTING.md#agent-experience-composition-validation).
 
 Offline lock generation resolved the HTTP/TLS/platform dependency closure without changing
 previously locked versions. The manifest and lock additions accompany the adapter to preserve
@@ -120,8 +121,9 @@ cached published registry metadata. Its cached archive now matches the checksum 
 `Cargo.lock`; source inspection confirms `UnicodeSegmentation::grapheme_indices(true)`,
 the declared minimum and the absence of runtime dependencies. Native bounds below match
 specification §9.3 and the saved official Telegram API reference, with conservative UTF-16
-counting. Accepted tests cover native entity layout. Telegram accepted native-framed text and
-a document in the later HOST trial; independent visual rendering inspection was not performed.
+counting. The [composition baseline](TESTING.md#agent-experience-composition-validation) tested
+native entity layout. The [2026-11-01 HOST trial](MEASUREMENTS.md#agent-experience-host-acceptance)
+records Telegram acceptance of native-framed text and a document, with visual rendering unverified.
 
 Feature unification also enables Tokio I/O utilities, synchronization and time, and tracing
 attributes through the SDK. It does not enable Tokio's multi-thread runtime or the SDK's
@@ -236,19 +238,24 @@ transport retirement plus outstanding handler contexts. Receiver registration us
 lock as the retirement sweep; channels arriving after cancellation are released immediately.
 Accepted outbound sends retain their existing bounded completion/bookkeeping path and daemon
 drain. SDK service response draining
-can add its existing grace period; no short deadline aborts admitted sends. Synthetic adapter
-regressions cover these ownership rules within the accepted complete composition C6.
+can add its existing grace period; no short deadline aborts admitted sends. The accepted
+composition C6 covers the original synthetic adapter regressions for these ownership rules.
 
 ## MCP registration and outbound tools
 
 `McpHandler::new` shares one SQLite handle, outbound service and pinned file-root opener
-across per-request SDK handlers. `telegram_register` accepts a required title and optional
-`external_session_id`/saved `session_key` and opt-in `directory_label`, using the transactional
-registration path. It returns `session_key`, normalized `title`, nullable `directory_label`
-and stable readable `inbox_uri`. Omitted or blank directory labels clear future display context.
-Missing both identities creates a fresh session. Supplying
-both requires an existing match. Renaming affects future sends only, and equal titles never
-merge identities. Registration does not change resource listings or processing ownership.
+across per-request SDK handlers. `telegram_register` validates a meaningful title on every call
+and a project or workspace `directory_label` for each new session. Omitting the label on resume
+keeps the saved value. Both fields reject leading absolute and home paths under the shared
+[display validation rule](#outbound-formatting). The response includes `session_key`, normalized `title`,
+`directory_label` (null for a missing or invalid saved label) and stable `inbox_uri`. Missing both identifiers
+creates a new session. Supplying both requires an existing match. Renaming affects future sends.
+Equal titles keep separate identities.
+
+Sending text, questions or files and starting processing require valid stored metadata.
+`SESSION_METADATA_REQUIRED` prompts re-registration with a valid title and label under the
+same identity. The existing transaction keeps routes, inbox replies and processing ownership
+with that identity.
 
 `telegram_send` accepts `session_key`/`text`; `telegram_send_file` accepts `session_key`, an
 absolute approved local `path` and an optional `caption` (empty by default). The handlers
@@ -266,8 +273,8 @@ and `details`, mirrored in text content. Length errors retain exact counts/guida
 errors retain byte limits/counts; Telegram rejections retain numeric code/retry delay.
 Uncertain delivery and confirmed-send bookkeeping failure remain distinct and explicitly
 forbid automatic resending. Supplied paths, keys, bodies and upstream descriptions are never
-included in errors. Synthetic MCP-to-mocked-Telegram tests are included in the recorded C6
-outcome; those synthetic fixtures alone do not establish named-client interoperability.
+included in errors. The recorded C6 outcome covers the original synthetic MCP and Telegram
+fixtures. Named-client interoperability has separate evidence.
 The separate [dated HOST trial](MEASUREMENTS.md#agent-experience-host-acceptance) records
 fresh eleven-tool discovery and bounded real text/file/history/download effects.
 
@@ -308,8 +315,8 @@ request ID and prior token. Registration alone never rotates ownership.
 `telegram_ack({session_key, reply_id, claim_token})` removes the successfully handled payload
 through the existing bounded receipt transaction and returns `reply_id`/`acknowledged=true`.
 Identical valid-token retries succeed while the receipt remains valid; stale or wrong-session
-claims return `CLAIM_INVALID`. MCP interaction tests are included in the recorded C6 outcome;
-named-client interoperability is not established by these resources.
+claims return `CLAIM_INVALID`. The recorded C6 outcome covers the original synthetic MCP
+interaction cases. Named-client interoperability has separate evidence.
 
 ## MCP resource subscriptions
 
@@ -343,10 +350,10 @@ The SDK acknowledges before entering the application listener. The listener arms
 then sends one initial invalidation per accepted inbox to cover commits during that setup gap.
 Clients read SQLite-backed resources or claim through `telegram_inbox`, including after
 reconnect/restart; signals are neither persistent nor replayed and never claim or acknowledge.
-There is no guarantee that a host wakes an idle LLM. Actual HTTP protocol tests are defined in
-[testing](TESTING.md) and included in the recorded C6 outcome. Live named-client subscription/
-event delivery remains unverified; later capability advertisement and bounded non-subscription
-HOST effects are [recorded separately](MEASUREMENTS.md#agent-experience-host-acceptance).
+There is no guarantee that a host wakes an idle LLM. The recorded C6 outcome covers the
+original [synthetic HTTP protocol tests](TESTING.md). Live named-client subscription and event
+delivery remain unverified. Later capability advertisement and bounded HOST effects are
+[recorded separately](MEASUREMENTS.md#agent-experience-host-acceptance).
 
 ## Bounded observation storage
 
@@ -358,7 +365,8 @@ IDs and opaque message handles. Raw attachment adapter IDs remain in private pro
 rows and existing own-reply metadata. Journal records have no fields for raw file IDs,
 credentials, recovery tokens, local source paths or file bytes. Lazy display mappings are
 private and expire with sessions; stored display snapshots survive without pinning private
-recovery identities.
+recovery identities. New incoming, outgoing and service snapshots omit invalid legacy titles
+and project labels. Admission charges the same safe display fields used for insertion.
 
 Own-reply provenance requires a retained matching reply even when history is disabled;
 shared provenance requires an enabled retained matching journal source. Foreign keys clear
@@ -452,7 +460,7 @@ acknowledges work, starts processing, interrupts agents or emits Telegram notice
 with responses recover under the existing lease. Post-send `ASK_WAIT_FAILED` includes committed
 outbound IDs and inbox recovery guidance, never permission to resend. Clients may need tool
 timeouts exceeding wait plus send time; the bridge cannot configure them or guarantee a new
-LLM turn. Synthetic ask/event tests are included in the recorded C6 outcome in
+LLM turn. The recorded C6 result covers the original synthetic ask/event cases in
 [testing](TESTING.md).
 
 `telegram_wait({session_key, outbound_message_id})` arms the same targeted wait after an
@@ -469,7 +477,7 @@ and `wait_timeout`. The default 600-second deadline starts when the authorized w
 Cancellation, timeout and shutdown retire only the interest; no route/reply deletion, resend,
 processing start, acknowledgment or timeout notice occurs. Recover a lost claim response through
 normal inbox leases. Both protocols expose the tool; modern events remain independent. The
-accepted complete C6 covers synthetic wait cases. The separate
+accepted complete C6 covers the original synthetic wait cases. The separate
 [HOST trial](MEASUREMENTS.md#agent-experience-host-acceptance) completed a post-file wait with
 `wait_timeout` after 600.003 seconds, without resend; it establishes no automatic idle-host wake.
 
@@ -477,24 +485,26 @@ accepted complete C6 covers synthetic wait cases. The separate
 
 `SessionTitle` collapses Unicode whitespace to one ASCII space, trims edges, strips controls
 and unsafe invisible/directional formatting controls. Titles exceeding 50 extended grapheme
-clusters keep at most 49 plus `…`; fitting titles and existing ellipses round-trip unchanged.
-Blank titles become `Agent Session`; emoji joiners and combining sequences remain intact.
-Persisted labels truncated by older releases lack their original input and remain compatible;
-no migration invents missing text. `DirectoryLabel` uses the same safe single-line normalization
-without truncation:
-more than 100 normalized Unicode scalars returns `REQUEST_INVALID`, while absent/blank values
-are omitted. Both are redacted display labels. Directory context is opt-in metadata, never
-file authorization, a filesystem instruction, host identity or routing input. Avoid personal
-absolute paths; the relay does not infer a working directory or a host conversation title.
+clusters keep at most 49 plus `…`. Valid titles within the limit round-trip unchanged.
+Registration rejects blank titles and generic placeholders, including bracketed variations and
+titles whose retained text is blank or a placeholder apart from the truncation ellipsis.
+The validation comparison ignores invisible modifiers such as joiners, variation selectors
+and the combining grapheme joiner. It treats blank Braille and Hangul spaces as whitespace.
+Valid labels preserve these characters when rendered. Persisted titles retain their stored
+truncation. `DirectoryLabel` requires 1–100 normalized Unicode scalars. Both fields reject
+absolute Unix, Windows, UNC and home-path prefixes after leading whitespace, opening brackets,
+quotes and backticks. The check stops at the prefix, including when a closing delimiter or prose
+follows. The same rule gates stored metadata, notice framing and new journal snapshots.
+Both labels are redacted in diagnostics and grant no file or routing authority. Request
+validation uses `REQUEST_INVALID` and identifies the field to correct.
 
-`format_text`, `format_caption` and `format_notice` return validated verbatim text plus native
-bold `[title]` and optional italic directory spans. The complete bracketed title is bold on
-the first line; the optional italic directory occupies the second. A nonempty body follows
-one blank line (two newlines); an empty caption retains just the headers without trailing
-blank lines. Brackets are outside the title label limit. Every service notice begins with exactly
-`🔧 ` before any title or body;
-unknown-session notices have no title/directory. Entity offsets/lengths use UTF-16 code units,
-including that prefix. Text uses `entities`; multipart documents use `caption_entities`.
+`format_text` and `format_caption` return validated verbatim text with a native bold `[title]`
+on the first line and the italic project label on the second. A nonempty body follows one blank
+line (two newlines). An empty caption retains just the header. Brackets are outside the title
+label limit. `format_notice` retains the exact `🔧 ` prefix and adds the known-session header
+when available. Notice recognition accepts the headers issued for older sessions.
+Entity offsets and lengths use UTF-16 code units, including the service prefix. Text uses
+`entities` and multipart documents use `caption_entities`.
 No `parse_mode`, Markdown/HTML parser, body splitting or truncation is introduced. Callers
 supply the body and never reproduce server-owned headers. Optional `entities` on send/ask and
 `caption_entities` on send_file add explicit native formatting; omitted/empty arrays stay literal.
@@ -709,7 +719,9 @@ route transaction fails returns `SEND_BOOKKEEPING_FAILED`, explicitly warning th
 accepted it but reply routing could not be saved. Neither outcome authorizes automatic
 resending. Failures from detached work log only a static error code. Successful completion
 requires a committed route; reservations and task permits release on completion/failure.
-Service tests are included in the recorded complete C6 outcome.
+The [recorded C6 outcome](TESTING.md#recorded-validation-evidence) covers the original text
+delivery cases. The current tests define assertions for required project framing and final
+length boundaries. Their execution evidence comes from the applicable Runner FINALIZE receipts.
 
 ## Confined outbound files
 
@@ -766,8 +778,10 @@ with the existing five-second connect limit. Consistent 4xx rejection, ambiguous
 post-send bookkeeping failure retain the text service's distinct errors. Read failure,
 truncation or timeout during an attempted upload is conservatively uncertain; none authorizes
 automatic replay or a fabricated route. Caller cancellation leaves admitted work running to
-bookkeeping completion. Graceful daemon shutdown drains the same tracked work. Synthetic
-document tests are included in the recorded C6 outcome. The
+bookkeeping completion. Graceful daemon shutdown drains the same tracked work. The
+[recorded C6 outcome](TESTING.md#recorded-validation-evidence) covers the original synthetic
+document cases. The current tests define project-line framing and caption boundaries. Their
+execution evidence comes from the applicable Runner FINALIZE receipts. The
 [HOST capture](MEASUREMENTS.md#workload-and-observed-resources) records a near-limit streamed
 upload through the probe and loopback mock, not a live Telegram upload. The separate
 [2026-11-01 HOST trial](MEASUREMENTS.md#agent-experience-host-acceptance) accepted one real
@@ -953,10 +967,11 @@ authorized same-host 44-byte cloud round trip under the original deployment cond
 ## Current agent guidance
 
 `telegram_guidance({})` is a typed, read-only tool available without an application session.
-Its current contract version is 3, including bracketed native headers, blank-line separation,
-ellipsis title cutoff and explicit body/caption entities with literal defaults. The version-1
-HOST observations below remain historical. Standard rmcp 3.8.0 `ServerConfig` instructions
-also expose a compact policy before tools, through legacy initialization and modern discovery.
+Version 4 adds the meaningful title and project label requirements and their recovery path.
+Native headers, blank-line separation, the title cutoff and explicit body/caption entities
+with literal defaults remain part of the contract. The HOST observations below cover version 1.
+Standard rmcp 3.8.0 `ServerConfig` instructions expose a compact policy before tools through
+legacy initialization and modern discovery.
 They fit 500 Unicode scalars and keep essential recommendations within the first 512 characters.
 No enforced handshake, adapter, secret or local path is added.
 `services::guidance` projects only nonsecret effective capabilities, finite limits and a
@@ -966,9 +981,10 @@ separate. No configuration serialization, paths, allowlist identities, credentia
 reads at call time, Telegram requests, host metadata inspection or handshake state are added.
 
 Every interaction description requests guidance first per client conversation, including
-registration. Clients that omit it keep their existing access. The response distinguishes
-modern resource subscriptions from legacy tool/resource reads, and server budgets from unknown
-client concurrency/deadlines and idle-wake behavior. It explains identity/native headers,
+registration. Title and label validation applies whether the client reads guidance or skips it.
+The response distinguishes modern resource subscriptions from legacy tool/resource reads and
+server budgets from unknown client concurrency, deadlines and idle-wake behavior. It explains
+identity/native headers,
 complete scalar/caption limits, explicit prepared-file reports, ask/send-file-then-wait without
 resend, startup/notification inbox recovery, current fences and saved-pair reconciliation,
 scoped sends, proactive focused communication, shared observation and daemon-local files.
@@ -983,10 +999,11 @@ on both protocols against the actual daemon. It combines native document/wait de
 ask/inbox/event contention, observational shared history, authorized own/shared downloads,
 shutdown cleanup and saved-fence recovery under changed history policy after restart. It reuses
 the complete independent expected catalog and preserves exact protocol envelope differences.
-Feature-local saturation/active-call/confinement proofs remain in the complete suite. The
-[accepted validation record](TESTING.md#agent-experience-composition-validation) includes complete
-C6 and both locked release builds. Those checks establish no new HOST, live-client, filesystem
-deployment or performance outcome.
+Feature-local saturation, active-call and confinement proofs remain in the complete suite.
+Complete C6 and both locked release builds apply to the recorded baseline.
+See the [accepted validation record](TESTING.md#agent-experience-composition-validation).
+The current metadata cases await their Runner FINALIZE receipts. HOST, live-client,
+filesystem and performance outcomes have separate evidence.
 
 ## Reply ingestion
 
@@ -1044,9 +1061,10 @@ alongside the other child tables without changing their independent deadlines or
 `services::notices::NoticeService` holds one scheduler lease per shared database handle.
 One global one-second sweep admits at most one eligible attempt, with one bounded HTTP send
 at a time and no per-reply tasks/timers. Startup recovers eligibility from SQLite. The current
-chat allowlist and complete final Unicode limits are checked before sending. Known sessions
-use native title/directory entities and factual unconfirmed-processing wording; unknown routes use
-the concise instruction to Reply to a newer agent message. All notices begin with `🔧 `.
+chat allowlist and complete final Unicode limits are checked before sending. Known sessions use
+a native bold title and factual unconfirmed-processing wording. Unsafe legacy titles render as
+`Agent Session` in the notice. A valid project label appears as a separate italic line. Unknown
+routes use the concise instruction to Reply to a newer agent message. All notices begin with `🔧 `.
 Invalid final lengths consume the attempt without sending, splitting or truncating. Disabled
 categories remain untouched.
 
@@ -1185,7 +1203,7 @@ Storage pressure uses the same bounded local backoff. Shutdown, loss of the supe
 sender or dropping the run future cancels HTTP and waits, releases the lease and preserves
 committed replies/cursor. The next consumer resumes from SQLite. Daemon supervision stops peer
 services on terminal poll failure, then drains already admitted sends before returning the failure.
-Poller tests are included in the recorded complete C6 outcome.
+The recorded complete C6 outcome covers the original poller cases.
 
 ## Runtime and ownership
 
@@ -1319,7 +1337,7 @@ and an installed canonical unit that failed at runtime; it does not establish ex
 The implementation advertises MCP `2025-06-18` initialization/tools/read-only resources and
 `2026-07-28` discovery/tools/resources/`subscriptions/listen` through locked rmcp 3.8.0.
 [Legacy HTTP fixtures](../src/routes/legacy.rs) define negotiation, security and shared-handler
-regressions; complete C6 passed with the accepted mixed-protocol composition. Existing modern
+regressions. Complete C6 passed for the original mixed-protocol composition baseline. Existing modern
 event proofs remain in place. The [dated HOST record](MEASUREMENTS.md#agent-experience-host-acceptance)
 now records eleven-tool discovery in a fresh Codex metadata probe, legacy initialization,
 both protocols' catalogs/guidance and bounded modern HTTP text/file/history/download/post-file-wait

@@ -284,7 +284,7 @@ async fn shared_composition_preserves_claims_and_attachment_authority_across_pro
     let observer = legacy
         .tool(
             "telegram_register",
-            json!({"external_session_id":"extended-observer","title":"Same"}),
+            json!({"external_session_id":"extended-observer","title":"Same","directory_label":"p"}),
         )
         .await;
     assert_ne!(owner["session_key"], observer["session_key"]);

@@ -583,7 +583,13 @@ async fn partial_write_and_size_failure_remove_owned_output_and_keep_other_durab
     let session = db
         .lock()
         .unwrap()
-        .register_session(Some("synthetic-session"), None, "Preserved", None, 1_000)
+        .register_session(
+            Some("synthetic-session"),
+            None,
+            "Preserved",
+            Some("p"),
+            1_000,
+        )
         .unwrap();
     let store = fixture.store(db.clone());
     for oversized in [false, true] {

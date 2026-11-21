@@ -21,6 +21,7 @@ import time
 VERSION = "2026-07-28"
 TITLE = "Resource measurement"
 EXTERNAL_ID = "resource-measurement-v1"
+PROJECT_LABEL = "relay-probe"
 CAPTION = "Synthetic near-limit upload."
 CHAT_ID = -101
 UPLOAD_BYTES = 49_999_999
@@ -235,10 +236,12 @@ class Client:
         return result["structuredContent"]
 
     def register(self):
-        result = self.tool("telegram_register", {"external_session_id": EXTERNAL_ID, "title": TITLE})
+        result = self.tool("telegram_register", {
+            "external_session_id": EXTERNAL_ID, "title": TITLE, "directory_label": PROJECT_LABEL})
         key = result.get("session_key")
         require(type(key) is str and re.fullmatch(r"[0-9a-f]{64}", key) is not None)
         require(result.get("title") == TITLE and
+                result.get("directory_label") == PROJECT_LABEL and
                 result.get("inbox_uri") == f"telegram-bridge://sessions/{key}/inbox")
         return key
 

@@ -10,13 +10,19 @@ repository contributor instructions remain separate. Configure the client using 
 - Fetch `telegram_guidance` first for each client conversation, including before
   registration. Follow its current capabilities, limits and actual schemas.
 - Register/resume a stable `external_session_id` or saved private `session_key`.
-  Obtain the REAL current conversation title from public host metadata when available;
-  otherwise use an honest explicit fallback, never a model name or invented title.
-  The relay cannot universally discover the host title/thread/working directory.
-  Preserve the returned session key privately; transport IDs are not agent identity.
-- Optional `directory_label` is opt-in display context only: prefer a short nonpersonal
-  label; omit unavailable/blank values. It grants no file, identity or routing authority.
-- The server owns the bold `[title]`, optional italic directory on its own line and
+  Use the real conversation title from public host metadata when available and valid.
+  Otherwise choose a concise label grounded in the actual task or project, such as
+  “Review CI/CD” when the host title begins with a path.
+  Skip leading whitespace, opening brackets, quotes and backticks when checking either
+  display field. If it starts with an absolute or home path, it is invalid even if prose follows.
+  Preserve the returned session key privately across transport connections.
+- Set `directory_label` to a short project or workspace name, such as `org/repo`,
+  or choose a name from the current work when host project metadata is unavailable.
+  Omitting the field on resume keeps the saved
+  label. If Relay returns `SESSION_METADATA_REQUIRED`, re-register with the same
+  identity and supply both a valid title and label. Existing routes and replies stay
+  with that identity. Display context grants no file or routing authority.
+- The server owns the bold `[title]`, italic project label on its own line and
   one blank line before a nonempty body. Empty captions add no trailing blank line.
   Titles fit 50 graphemes; overlong new titles end with `…` inside that limit.
   Supply verbatim bodies/captions; do not manually repeat headers or add service notices.
@@ -77,10 +83,10 @@ repository contributor instructions remain separate. Configure the client using 
 
 ## Implementation details for consumers
 
-`telegram_guidance({})` returns version 3 of its self-contained current policy plus `tools`,
+`telegram_guidance({})` returns version 4 of its self-contained current policy plus `tools`,
 `capabilities` and `limits`. It is read-only and available before registration. Descriptions
-request it first per conversation without enforcing a handshake, so older clients can still
-register and use the existing tools. It reports server limits, not an assertion that the host
+request it first per conversation. Title and label validation applies even if clients skip
+that call. It reports server limits, not an assertion that the host
 supports concurrent/background calls or automatic wake. Configured budgets for disabled
 features remain visible alongside their explicit disabled capability flags. Standard server-wide
 instructions summarize this policy within 500 Unicode scalars in legacy initialization and modern
@@ -95,15 +101,15 @@ an external ID. Equal titles do not merge sessions. Retain handles/tokens privat
 include them in Telegram text, logs or shared reports. The normalized title is at most
 50 grapheme clusters; overlong new input ends with `…` inside the limit, while fitting labels
 and existing ellipses survive round trips. Old stored truncation cannot recover missing input.
-A blank title becomes `Agent Session`. Re-registering updates future presentation only;
-omitting `directory_label` clears it. Final text/questions/captions include
+Registration rejects blank and placeholder titles. On resume, a supplied project label
+replaces the saved label. Final text/questions/captions include
 the automatic headers/separators and must fit 1,000 Unicode **scalars**; captions also fit
 1,024 UTF-16 units. No auto-splitting,
 truncation or automatic report-file creation occurs.
 
 To bold `OK`, send `{"session_key":"SAVED_KEY","text":"OK","entities":[{"type":"bold","offset":0,"length":2}]}`
 to `telegram_send`. Offsets exclude the automatic header. The complete `[title]` is bold on
-the first line, the optional directory is italic on the second, and a nonempty body follows
+the first line, the project label is italic on the second, and a nonempty body follows
 one blank line (two newlines). Brackets count toward outbound limits, outside the label limit.
 See the [public reference](../README.md#synthetic-workflows) for supported styles, metadata and nesting.
 

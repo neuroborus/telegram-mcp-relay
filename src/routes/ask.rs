@@ -97,7 +97,7 @@ impl Mock {
         database
             .lock()
             .unwrap()
-            .register_session(None, None, "界", None, unix_millis().unwrap())
+            .register_session(None, None, "界", Some("p"), unix_millis().unwrap())
             .unwrap()
     }
 
@@ -164,7 +164,9 @@ async fn handler_shutdown_drains_an_active_ask_and_resource_listener() {
     let mut mock = Mock::new(&fixture.config).await;
     let (database, state) = mock.shared(&fixture);
     let http = fixture.serve(state.clone(), None).await;
-    let session = http.register(json!({"title":"Shutdown"})).await;
+    let session = http
+        .register(json!({"title":"Shutdown","directory_label":"p"}))
+        .await;
     let key = session["session_key"].as_str().unwrap();
     let uri = session["inbox_uri"].as_str().unwrap();
     let filter = json!({"resourceSubscriptions":[uri]});
@@ -227,13 +229,15 @@ async fn waiter_and_events_share_one_reply_and_inbox_cannot_claim_it_twice() {
     let mut mock = Mock::new(&fixture.config).await;
     let (database, state) = mock.shared(&fixture);
     let http = fixture.serve(state, None).await;
-    let session = http.register(json!({"title":"界"})).await;
+    let session = http
+        .register(json!({"title":"界","directory_label":"p"}))
+        .await;
     let key = session["session_key"].as_str().unwrap();
     let uri = session["inbox_uri"].as_str().unwrap();
     let filter = json!({"resourceSubscriptions":[uri]});
     let mut events = http.listen(filter.clone(), filter).await;
     events.updated(uri).await;
-    let asked = http.start_ask(key, &"a".repeat(995));
+    let asked = http.start_ask(key, &"a".repeat(993));
     let respond = mock.next().await;
     failure(
         &http
@@ -286,8 +290,12 @@ async fn slow_listener_overflow_preserves_a_healthy_stream_waiter_and_claims() {
     let mut mock = Mock::new(&fixture.config).await;
     let (database, state) = mock.shared(&fixture);
     let http = fixture.serve(state, None).await;
-    let a = http.register(json!({"title":"Same"})).await;
-    let b = http.register(json!({"title":"Same"})).await;
+    let a = http
+        .register(json!({"title":"Same","directory_label":"p"}))
+        .await;
+    let b = http
+        .register(json!({"title":"Same","directory_label":"p"}))
+        .await;
     let key = a["session_key"].as_str().unwrap();
     let other_key = b["session_key"].as_str().unwrap();
     let uri = a["inbox_uri"].as_str().unwrap();
@@ -479,7 +487,9 @@ async fn disabled_wait_keeps_events_and_invalid_questions_have_zero_effects() {
     let mut mock = Mock::new(&fixture.config).await;
     let (database, state) = mock.shared(&fixture);
     let http = fixture.serve(state, None).await;
-    let session = http.register(json!({"title":"界"})).await;
+    let session = http
+        .register(json!({"title":"界","directory_label":"p"}))
+        .await;
     let key = session["session_key"].as_str().unwrap();
     let uri = session["inbox_uri"].as_str().unwrap();
     let filter = json!({"resourceSubscriptions":[uri]});
@@ -487,7 +497,7 @@ async fn disabled_wait_keeps_events_and_invalid_questions_have_zero_effects() {
     events.updated(uri).await;
     let before = database.lock().unwrap().session(key).unwrap();
     for (key, text, code) in [
-        (key, "a".repeat(996), "TEXT_TOO_LONG"),
+        (key, "a".repeat(994), "TEXT_TOO_LONG"),
         ("private", "private".into(), "SESSION_NOT_FOUND"),
     ] {
         let error = http
@@ -534,7 +544,9 @@ async fn failed_wait_reports_the_committed_question_and_preserves_unclaimed_repl
     let mut mock = Mock::new(&fixture.config).await;
     let (database, state) = mock.shared(&fixture);
     let http = fixture.serve(state, None).await;
-    let session = http.register(json!({"title":"界"})).await;
+    let session = http
+        .register(json!({"title":"界","directory_label":"p"}))
+        .await;
     let key = session["session_key"].as_str().unwrap();
     let asked = http.start_ask(key, "Question");
     mock.accept(&database, 7).await;
@@ -712,7 +724,7 @@ async fn validation_and_rejected_sends_release_waiter_admission_without_routes_o
     let asks = mock.asks(&fixture, database.clone());
     let hub = database.lock().unwrap().inbox_notifications.clone();
     assert!(matches!(
-        asks.ask(&session.session_key, &"😀".repeat(996)).await,
+        asks.ask(&session.session_key, &"😀".repeat(994)).await,
         Err(AppError::TextTooLong(_))
     ));
     drop(hub.waiter(session.session_key.clone()).unwrap());

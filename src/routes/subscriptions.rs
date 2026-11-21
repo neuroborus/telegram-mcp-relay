@@ -130,8 +130,12 @@ async fn accepted_filters_fan_out_only_authorized_committed_inboxes() {
     fixture.config.limits.concurrent_requests = 8;
     let (database, state) = shared(&fixture);
     let http = fixture.serve(state, None).await;
-    let a = http.register(json!({"title":"Same"})).await;
-    let b = http.register(json!({"title":"Same"})).await;
+    let a = http
+        .register(json!({"title":"Same","directory_label":"p"}))
+        .await;
+    let b = http
+        .register(json!({"title":"Same","directory_label":"p"}))
+        .await;
     let uri = a["inbox_uri"].as_str().unwrap();
     let other = b["inbox_uri"].as_str().unwrap();
     let key = a["session_key"].as_str().unwrap();
@@ -323,13 +327,19 @@ async fn listener_capacity_disconnect_overflow_and_restart_preserve_durable_repl
     let session = database
         .lock()
         .unwrap()
-        .register_session(Some("thread"), None, "Same", None, unix_millis().unwrap())
+        .register_session(
+            Some("thread"),
+            None,
+            "Same",
+            Some("p"),
+            unix_millis().unwrap(),
+        )
         .unwrap();
     route(&database, &session.session_key, 1);
     let other = database
         .lock()
         .unwrap()
-        .register_session(None, None, "Same", None, unix_millis().unwrap())
+        .register_session(None, None, "Same", Some("p"), unix_millis().unwrap())
         .unwrap();
     route(&database, &other.session_key, 2);
     let uri = session.inbox_uri();
@@ -413,7 +423,9 @@ async fn empty_unknown_and_oversized_filters_are_not_retained() {
     fixture.config.limits.subscriptions = 1;
     let (_, state) = shared(&fixture);
     let http = fixture.serve(state, None).await;
-    let session = http.register(json!({"title":"Same"})).await;
+    let session = http
+        .register(json!({"title":"Same","directory_label":"p"}))
+        .await;
     let uri = &session["inbox_uri"];
     for filter in [
         json!({}),

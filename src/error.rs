@@ -63,6 +63,8 @@ pub enum AppError {
     EmptyText,
     TextTooLong(TextTooLong),
     InvalidRequest(&'static str),
+    InvalidTitle,
+    InvalidDirectoryLabel,
     FileUnavailable,
     DownloadUnavailable,
     DownloadWriteFailed,
@@ -76,6 +78,7 @@ pub enum AppError {
     },
     SessionNotFound,
     SessionIdentityConflict,
+    SessionMetadataRequired,
     InvalidClaim,
     RouteConflict,
     RoutePending,
@@ -114,7 +117,9 @@ impl AppError {
             Self::SecretUnavailable(_) => "SECRET_UNAVAILABLE",
             Self::EmptyText => "TEXT_EMPTY",
             Self::TextTooLong(_) => "TEXT_TOO_LONG",
-            Self::InvalidRequest(_) => "REQUEST_INVALID",
+            Self::InvalidRequest(_) | Self::InvalidTitle | Self::InvalidDirectoryLabel => {
+                "REQUEST_INVALID"
+            }
             Self::FileUnavailable => "FILE_UNAVAILABLE",
             Self::DownloadUnavailable => "DOWNLOAD_UNAVAILABLE",
             Self::DownloadWriteFailed => "DOWNLOAD_WRITE_FAILED",
@@ -125,6 +130,7 @@ impl AppError {
             Self::FileTooLarge { .. } => "FILE_TOO_LARGE",
             Self::SessionNotFound => "SESSION_NOT_FOUND",
             Self::SessionIdentityConflict => "SESSION_IDENTITY_CONFLICT",
+            Self::SessionMetadataRequired => "SESSION_METADATA_REQUIRED",
             Self::InvalidClaim => "CLAIM_INVALID",
             Self::RouteConflict => "ROUTE_CONFLICT",
             Self::RoutePending => "ROUTE_PENDING",
@@ -166,6 +172,16 @@ impl fmt::Display for AppError {
             }
             Self::EmptyText => write!(f, "{}: outgoing text must not be empty", self.code()),
             Self::InvalidRequest(field) => write!(f, "{}: invalid {field}", self.code()),
+            Self::InvalidTitle => write!(
+                f,
+                "{}: invalid title. Use the real conversation title, else a concise task/project label. The title cannot start with an absolute or home path after skipping leading whitespace, opening brackets, quotes and backticks.",
+                self.code()
+            ),
+            Self::InvalidDirectoryLabel => write!(
+                f,
+                "{}: supply directory_label as a project or workspace name of 1–100 Unicode scalars, such as org/repo. The label cannot start with an absolute or home path after skipping leading whitespace, opening brackets, quotes and backticks.",
+                self.code()
+            ),
             Self::HistoryDisabled => write!(f, "{}: shared history is disabled", self.code()),
             Self::HistoryForbidden => write!(
                 f,
@@ -225,6 +241,11 @@ impl fmt::Display for AppError {
             Self::SessionIdentityConflict => {
                 write!(f, "{}: session identities disagree", self.code())
             }
+            Self::SessionMetadataRequired => write!(
+                f,
+                "{}: call telegram_register again with the same session_key or external_session_id, a meaningful title and a project or workspace directory_label. If the host title starts with an absolute or home path, use a concise task/project label.",
+                self.code()
+            ),
             Self::InvalidClaim => write!(
                 f,
                 "{}: claim is absent, expired or no longer current",

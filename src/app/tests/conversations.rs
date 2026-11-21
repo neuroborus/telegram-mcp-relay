@@ -55,17 +55,17 @@ async fn three_sessions_route_interleaved_old_text_and_document_replies_after_re
         tool(
             address,
             "telegram_register",
-            json!({"external_session_id":"a","title":"Shared"})
+            json!({"external_session_id":"a","title":"Shared","directory_label":"p"})
         ),
         tool(
             address,
             "telegram_register",
-            json!({"external_session_id":"b","title":"Shared"})
+            json!({"external_session_id":"b","title":"Shared","directory_label":"p"})
         ),
         tool(
             address,
             "telegram_register",
-            json!({"external_session_id":"c","title":"Shared"})
+            json!({"external_session_id":"c","title":"Shared","directory_label":"p"})
         ),
     );
     let keys: HashSet<_> = [&a, &b, &c]
@@ -103,15 +103,15 @@ async fn three_sessions_route_interleaved_old_text_and_document_replies_after_re
             _ = &mut sends => panic!("sends completed before Telegram responses"),
         };
         let id = if request.method == "sendDocument" {
-            assert_document(&request, &format!("[Shared]\n\n{CAPTION}"));
+            assert_document(&request, &format!("[Shared]\np\n\n{CAPTION}"));
             102
         } else {
             assert_eq!(request.method, "sendMessage");
             assert_eq!(request.payload["chat_id"], -101);
-            if request.payload["text"] == format!("[Shared]\n\n{TEXT_A}") {
+            if request.payload["text"] == format!("[Shared]\np\n\n{TEXT_A}") {
                 101
             } else {
-                assert_eq!(request.payload["text"], format!("[Shared]\n\n{TEXT_C}"));
+                assert_eq!(request.payload["text"], format!("[Shared]\np\n\n{TEXT_C}"));
                 103
             }
         };
@@ -168,10 +168,10 @@ async fn three_sessions_route_interleaved_old_text_and_document_replies_after_re
             assert_eq!(request.method, "sendMessage");
             assert_eq!(
                 request.payload,
-                json!({"chat_id":-101,"text":format!("[{title}]\n\n{TEXT_B}"),"entities":[{"type":"bold","offset":0,"length":title.encode_utf16().count()+2}]})
+                json!({"chat_id":-101,"text":format!("[{title}]\np\n\n{TEXT_B}"),"entities":[{"type":"bold","offset":0,"length":title.encode_utf16().count()+2},{"type":"italic","offset":title.encode_utf16().count()+3,"length":1}]})
             );
         } else {
-            assert_document(&request, &format!("[{title}]\n\n{CAPTION}"));
+            assert_document(&request, &format!("[{title}]\np\n\n{CAPTION}"));
         }
         request.respond(accepted(id));
         assert_eq!(
@@ -190,7 +190,7 @@ async fn three_sessions_route_interleaved_old_text_and_document_replies_after_re
     let mut attachment_only = incoming(200, 102, None);
     attachment_only["message"]["document"] = document.clone();
     let mut old_text = incoming(201, 101, Some("A first reply to old text"));
-    old_text["message"]["reply_to_message"]["text"] = format!("[Shared]\n\n{TEXT_A}").into();
+    old_text["message"]["reply_to_message"]["text"] = format!("[Shared]\np\n\n{TEXT_A}").into();
     let mut photo_reply = incoming(202, 103, None);
     photo_reply["message"]["caption"] = "C photo caption".into();
     photo_reply["message"]["photo"] = photos.clone();

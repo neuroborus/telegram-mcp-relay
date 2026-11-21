@@ -66,7 +66,7 @@ argument; it is not part of the field name. Examples below show tool arguments, 
 | Tool | Arguments | Successful structured result |
 | --- | --- | --- |
 | `telegram_guidance` | `{}` | `GuidanceResult`: current policy, inventory, capabilities and effective limits |
-| `telegram_register` | `title`, `external_session_id?`, `session_key?`, `directory_label?` | `{session_key, title, directory_label, inbox_uri}`; directory is nullable |
+| `telegram_register` | `title`, `external_session_id?`, `session_key?`, `directory_label?` (required for new sessions) | `{session_key, title, directory_label, inbox_uri}`; resume returns a null label when the saved label is missing or invalid |
 | `telegram_send` | `session_key`, `text`, `entities?` | `SendResult`: `{telegram_chat_id, outbound_message_id}` after acceptance **and** route commit |
 | `telegram_send_file` | `session_key`, `path`, `caption?` (default empty), `caption_entities?` | `SendResult`; absolute daemon-local path beneath an approved outbound root |
 | `telegram_ask` | `session_key`, `text`, `entities?` | `{telegram_chat_id, outbound_message_id, status, reply}`; `status` is `sent` when waiting is disabled, otherwise `reply_received` or `wait_timeout`; `reply` is a nullable `ClaimedReplyResult` |
@@ -95,7 +95,7 @@ session keys, fences, raw Telegram file IDs and file bytes. Own-reply `attachmen
 remains legacy-compatible JSON; use the additive safe `attachments` handles for downloads,
 never adapter identifiers from that metadata.
 
-`GuidanceResult` contains `version` (currently 3), `tools: [{name, description}]`,
+`GuidanceResult` contains `version` (currently 4), `tools: [{name, description}]`,
 `capabilities`, `limits` and `instructions: [string]`. The tools match actual registration;
 full schemas come from `tools/list`. Capabilities include `protocols: [{version,
 resource_subscriptions}]`, `wait_enabled`, `history_enabled`, `attachment_downloads_enabled`,
@@ -152,8 +152,9 @@ startup/resume and notifications without periodic agent polling.
 
 ## Synthetic workflows
 
-Use real public host conversation metadata for the title, or an honest fallback when unavailable;
-the relay cannot discover every host's title/thread/directory. These examples use synthetic
+Use the real conversation title from public host metadata when available and valid. If it begins
+with a path, choose a concise title grounded in the task or project, such as “Review CI/CD”.
+Use the same approach when the host provides no usable title. These examples use synthetic
 values. Replace `SESSION`, `REPLY`, `TOKEN`, `HANDLE` and returned IDs with privately saved
 results. Never send those private values as message bodies.
 
@@ -165,11 +166,21 @@ Fetch guidance, then register a synthetic conversation with `telegram_register`:
 
 Save `session_key` and `inbox_uri`. Resume with the same external ID or saved key; conflicting
 identities fail. Equal titles remain distinct. A title normalizes to one line of at most
-50 grapheme clusters; overlong new input keeps at most 49 graphemes plus `…`, while fitting
-titles and existing ellipses survive round trips. Blank becomes `Agent Session`. Previously
-truncated stored labels retain their existing text; lost input cannot be recovered.
-Re-registration changes future framing only. Optional `directory_label` normalizes to at most
-100 scalars, rejects excess, and clears when omitted/blank. It grants no path or routing authority.
+50 grapheme clusters. Overlong new input keeps at most 49 graphemes plus `…`. Valid titles
+within the limit survive round trips. Blank titles, generic placeholders including bracketed
+variations, and titles that retain only blank space or a placeholder before the ellipsis return
+`REQUEST_INVALID`.
+Supply a short project or workspace name, such as `org/repo`, even when host project metadata
+is unavailable. `directory_label` must normalize to 1–100 scalars. After skipping leading
+whitespace, opening brackets, quotes and backticks, either field returns `REQUEST_INVALID` if
+it begins with an absolute Unix, Windows, UNC or home path, even if a closing delimiter or prose
+follows. “[/example]—CI/CD review” is rejected. “Review /example/project” and “[Release review]”
+are valid titles. On resume, omission keeps the saved label and a valid supplied label replaces it.
+Presentation metadata grants no path or routing authority.
+
+If send, ask, send_file or processing start returns `SESSION_METADATA_REQUIRED`, re-register
+with the same `session_key` or `external_session_id` and supply both a valid title and project
+label. Re-registration updates future framing and preserves existing routes and inbox replies.
 
 For a focused question, `telegram_ask` sends once and waits after route commit:
 
@@ -204,8 +215,8 @@ background calls. Allow client deadlines above 15 seconds of text-send network t
 ask's wait, or 600 seconds for an upload followed by the separate wait, with filesystem/SQLite/
 scheduling margin. Server admission budgets do not establish host support or automatic idle wake.
 
-Supply verbatim bodies/captions: the server adds a native bold `[title]` and optional italic
-directory on its own line, then one blank line (two newlines) before a nonempty body. An empty
+Supply verbatim bodies/captions: the server adds a native bold `[title]` and an italic
+project label on its own line, then one blank line (two newlines) before a nonempty body. An empty
 caption has only the header, without trailing blank lines. Brackets frame the label outside its
 50-grapheme limit and count toward outbound bounds. No Markdown/HTML is parsed. Request rich
 formatting using optional `entities` on send/ask or `caption_entities` on send_file; omitted or
@@ -306,11 +317,13 @@ dispatch; an expired legacy transport needs fresh initialization. See [transport
 
 | Stable error codes | Meaning and safe next action |
 | --- | --- |
-| `TEXT_EMPTY`, `TEXT_TOO_LONG`, `REQUEST_INVALID` | Correct arguments; move a long report to an explicitly prepared file. Length details include `limit`, `actual_characters` (scalars), `native_limit_utf16`, `actual_utf16_units`, `guidance`. |
+| `TEXT_EMPTY`, `TEXT_TOO_LONG` | Supply text or move a long report to an explicitly prepared file. Length details include `limit`, `actual_characters` (scalars), `native_limit_utf16`, `actual_utf16_units`, `guidance`. |
+| `REQUEST_INVALID` | Correct the named argument. For registration, use a valid host title or a task/project label and supply a short workspace name for a new session. Neither field may begin with an absolute or home path after leading whitespace, opening brackets, quotes or backticks. |
 | `FILE_UNAVAILABLE`, `FILE_TOO_LARGE` | Check approved local root, regular file, confinement and size. Size details contain `limit_bytes`, `actual_bytes`. |
 | `ATTACHMENT_UNAVAILABLE`, `DOWNLOAD_UNAVAILABLE` | Missing/expired/foreign provenance or unavailable upstream file; no arbitrary-ID/URL fallback. Refresh an authorized source if it still exists. |
 | `DOWNLOAD_DISABLED`, `DOWNLOAD_CAPACITY`, `DOWNLOAD_STORAGE_UNAVAILABLE`, `DOWNLOAD_WRITE_FAILED` | Respect disabled capability; let bounded work/retention retire or ask the operator to repair private storage/identity. Do not broaden roots or OS permissions. |
 | `SESSION_NOT_FOUND`, `SESSION_IDENTITY_CONFLICT` | Register/resume the correct stable identity; do not merge sessions by title or guess a replacement key. |
+| `SESSION_METADATA_REQUIRED` | Re-register under the same `session_key` or `external_session_id` with a valid title and project label before sending or starting processing. Retained routes and replies stay with that identity. |
 | `CLAIM_INVALID` | Fence absent, stale or expired; reconcile durable ownership/effects before acquiring or acting on work. |
 | `WAIT_TARGET_INVALID`, `WAIT_CAPACITY`, `SEND_CAPACITY`, `ROUTE_PENDING`, `ROUTE_CONFLICT` | Invalid target, bounded admission or route bookkeeping conflict; recover through durable state, without automatically resending. |
 | `HISTORY_DISABLED`, `HISTORY_FORBIDDEN`, `HISTORY_CURSOR_INVALID`, `HISTORY_RESPONSE_TOO_LARGE` | Respect opt-in/current authorization; restart a query after cursor failure; operator review is needed if a record cannot fit the response budget. |

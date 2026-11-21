@@ -131,8 +131,7 @@ impl McpHandler {
             inbox_uri: session.inbox_uri(),
             title: session.title.as_str().to_owned(),
             directory_label: session
-                .directory_label
-                .as_ref()
+                .display_directory_label()
                 .map(|label| label.as_str().to_owned()),
             session_key: session.session_key,
         })
@@ -171,6 +170,12 @@ impl McpHandler {
 
     async fn send_file(&self, request: SendFileRequest) -> Result<SendResult, AppError> {
         validate_body_entities(&request.caption, &request.caption_entities)?;
+        // Require metadata recovery before opening the supplied path.
+        self.database
+            .lock()
+            .map_err(|_| AppError::StorageFailure)?
+            .session(&request.session_key)?
+            .outbound_directory_label()?;
         let file = self.files.open(&request.path)?;
         let sent = self
             .outbound
@@ -391,11 +396,11 @@ impl ServerHandler for McpHandler {
 
 fn tools() -> Vec<Tool> {
     let mut catalog = vec![
-        Tool::new("telegram_register", "Register or resume a stable conversation; preserve the returned session key. Use the real host title when available, otherwise an honest fallback. Optional directory_label is display context only, not file authority; avoid personal paths. Titles fit 50 graphemes, with … ending overlong new input. The server owns bold [title], optional italic directory and blank-line framing.", serde_json::Map::new())
+        Tool::new("telegram_register", "Register or resume a stable conversation and save the returned session key. Use the real host conversation title when valid, otherwise a concise task or project label. Blank and generic titles are rejected. For new sessions, supply directory_label as a short project or workspace name. After skipping leading whitespace, opening brackets, quotes and backticks, neither field may start with an absolute or home path, even if prose follows. On resume omission keeps the saved label. To recover SESSION_METADATA_REQUIRED, re-register with the same session_key or external_session_id and supply both a valid title and label. Titles fit 50 graphemes, including … on shortened input.", serde_json::Map::new())
             .with_input_schema::<RegisterRequest>().with_output_schema::<RegisterResult>(),
-        Tool::new("telegram_send", "Send a concise body with a durable reply route; this does not arm waiting. An explicit requested send needs no reapproval. Use telegram_wait with the successful outbound ID without resending. Optional entities request native formatting (at most 100; body-relative UTF-16 offsets/lengths); omitted/empty remains literal, with no Markdown/HTML parsing. The server adds a bold [title], optional italic directory line and one blank line before a nonempty body; do not reproduce them. Complete visible text must fit 1,000 Unicode scalars; prepare long reports as files. Never automatically retry an uncertain send.", serde_json::Map::new())
+        Tool::new("telegram_send", "Send a concise body with a durable reply route; this does not arm waiting. An explicit requested send needs no reapproval. Use telegram_wait with the successful outbound ID without resending. Optional entities request native formatting (at most 100; body-relative UTF-16 offsets/lengths); omitted/empty remains literal, with no Markdown/HTML parsing. The server adds a bold [title], italic project line and one blank line before a nonempty body; do not reproduce them. Complete visible text must fit 1,000 Unicode scalars; prepare long reports as files. Never automatically retry an uncertain send.", serde_json::Map::new())
             .with_input_schema::<SendRequest>().with_output_schema::<SendResult>(),
-        Tool::new("telegram_send_file", "Stream an existing approved local file with a short caption and durable reply route; this does not arm waiting. An explicit requested send needs no reapproval. Use telegram_wait with the successful outbound ID without uploading again. Optional caption_entities request native formatting (at most 100; caption-relative UTF-16 offsets/lengths); omitted/empty remains literal, with no Markdown/HTML parsing. The server adds a bold [title], optional italic directory line and one blank line before a nonempty body; do not reproduce them. Complete captions must fit 1,000 scalars and 1,024 UTF-16 units. Never automatically retry an uncertain send.", serde_json::Map::new())
+        Tool::new("telegram_send_file", "Stream an existing approved local file with a short caption and durable reply route; this does not arm waiting. An explicit requested send needs no reapproval. Use telegram_wait with the successful outbound ID without uploading again. Optional caption_entities request native formatting (at most 100; caption-relative UTF-16 offsets/lengths); omitted/empty remains literal, with no Markdown/HTML parsing. The server adds a bold [title], italic project line and one blank line before a nonempty body; do not reproduce them. Complete captions must fit 1,000 scalars and 1,024 UTF-16 units. Never automatically retry an uncertain send.", serde_json::Map::new())
             .with_input_schema::<SendFileRequest>().with_output_schema::<SendResult>(),
         Tool::new("telegram_inbox", "Atomically claim eligible replies on startup, resume or notification; preserve reply IDs and tokens. Never poll periodically. Read resources for snapshots without claiming.", serde_json::Map::new())
             .with_input_schema::<InboxRequest>().with_output_schema::<InboxResult>(),
@@ -403,7 +408,7 @@ fn tools() -> Vec<Tool> {
             .with_input_schema::<ProcessingRequest>().with_output_schema::<ProcessingResult>(),
         Tool::new("telegram_ack", "Acknowledge successful handling with the current session, reply ID and token. Identical valid-token retries are idempotent; stale tokens cannot complete work.", serde_json::Map::new())
             .with_input_schema::<AckRequest>().with_output_schema::<AckResult>(),
-        Tool::new("telegram_ask", "Send a concise question body; the server adds a bold [title], optional italic directory line and one blank line before a nonempty body; never reproduce them. Optional entities request native formatting (at most 100; body-relative UTF-16 offsets/lengths); omitted/empty remains literal, with no Markdown/HTML parsing. Complete visible questions must fit 1,000 Unicode scalars; prepare long reports as files. When enabled, wait for a matching reply up to the server timeout (default 600 seconds); no automatic idle-host wake is promised. Events stay active. Preserve the reply ID and token; confirm processing and acknowledge separately. Timeout grants no permission and later replies remain valid. Never automatically retry an uncertain send.", serde_json::Map::new())
+        Tool::new("telegram_ask", "Send a concise question body; the server adds a bold [title], italic project line and one blank line before a nonempty body; never reproduce them. Optional entities request native formatting (at most 100; body-relative UTF-16 offsets/lengths); omitted/empty remains literal, with no Markdown/HTML parsing. Complete visible questions must fit 1,000 Unicode scalars; prepare long reports as files. When enabled, wait for a matching reply up to the server timeout (default 600 seconds); no automatic idle-host wake is promised. Events stay active. Preserve the reply ID and token; confirm processing and acknowledge separately. Timeout grants no permission and later replies remain valid. Never automatically retry an uncertain send.", serde_json::Map::new())
             .with_input_schema::<SendRequest>().with_output_schema::<AskResult>(),
         Tool::new("telegram_wait", "Wait for one reply to your saved successful text/document send in the configured chat, without resending. Sending alone does not arm waiting. Default enabled wait is 600 seconds; disabled waiting never claims. Events stay active. Preserve the returned reply ID/current token and process/ack separately. Timeout or cancellation grants no permission and preserves later inbox recovery. Use concurrent work only when your host supports it.", serde_json::Map::new())
             .with_input_schema::<WaitRequest>().with_output_schema::<WaitResult>(),
@@ -427,8 +432,16 @@ fn tools() -> Vec<Tool> {
 
 fn arguments<T: DeserializeOwned>(request: &CallToolRequestParams) -> Result<T, ErrorData> {
     // Serde diagnostics can quote supplied field names/values; never return them.
-    serde_json::from_value(Value::Object(request.arguments.clone().unwrap_or_default()))
-        .map_err(|_| ErrorData::invalid_params("Invalid tool arguments", None))
+    serde_json::from_value(Value::Object(request.arguments.clone().unwrap_or_default())).map_err(
+        |_| {
+            let message = if request.name.as_ref() == "telegram_register" {
+                "Supply a title string and a project or workspace directory_label for a new session. See telegram_register in tools/list for accepted arguments."
+            } else {
+                "Invalid tool arguments"
+            };
+            ErrorData::invalid_params(message, None)
+        },
+    )
 }
 
 fn tool_result<T: Serialize>(result: Result<T, AppError>) -> Result<CallToolResult, ErrorData> {

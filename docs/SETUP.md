@@ -265,22 +265,24 @@ does not update that catalog. No automatic reload mechanism or universal idle wa
 
 | Capability | Evidence and limitation |
 | --- | --- |
-| Legacy initialization, tool listing, calls and private inbox reads | [2025-06-18 fixtures](../src/routes/legacy.rs) and mixed-protocol daemon coverage passed in accepted C6; the later HOST trial verified initialization, eleven-tool listing, guidance and transport deletion, not every live tool effect |
+| Legacy initialization, tool listing, calls and private inbox reads | [2025-06-18 fixtures](../src/routes/legacy.rs) and mixed-protocol daemon coverage passed in the recorded composition baseline; the later HOST trial verified initialization, eleven-tool listing, guidance and transport deletion, not every live tool effect |
 | Modern discovery, typed tools, private inbox reads | Existing rmcp 3.8.0 / MCP 2026-07-28 fixtures in [transport tests](../src/routes/tests.rs) and [daemon scenarios](../src/app/tests/recovery.rs); see the [coverage map](TESTING.md#specification-1619-coverage-map) for evidence boundaries |
 | Resource events | POST SSE `subscriptions/listen`, accepted `notifications.resourceSubscriptions` filters and `notifications/resources/updated` are covered by [subscription fixtures](../src/routes/subscriptions.rs); older subscription APIs are unsupported |
-| Concurrent asks/inbox/events and reconnect recovery | [Daemon recovery](../src/app/tests/recovery.rs), [mixed-protocol fixtures](../src/routes/mixed.rs) and [extended composition](../src/app/tests/extended.rs) passed with complete C6; synthetic coverage does not certify a live client |
+| Concurrent asks/inbox/events and reconnect recovery | [Daemon recovery](../src/app/tests/recovery.rs), [mixed-protocol fixtures](../src/routes/mixed.rs) and [extended composition](../src/app/tests/extended.rs) passed in the recorded composition baseline; synthetic coverage does not certify a live client |
 | Extended-runtime named clients/live Telegram and idle-host wake | Fresh Codex public app-server discovery exposed eleven tools without a model turn; separate HTTP/Telegram/file probes are scoped in the HOST record. Resumed model-catalog refresh, model concurrency and universal idle wake are not established |
 
 Call `telegram_guidance({})` first per client conversation, including before registration;
 inspect the actual tool schemas with `tools/list`. Guidance is self-contained read-only advice,
 without a required handshake. Standard policy instructions are visible before tools in legacy
 initialization and modern discovery. Register/resume using a stable external ID and the real title
-from available public host metadata (otherwise an honest explicit fallback); save the returned
-session key and inbox URI. Titles fit 50 graphemes; overlong new titles end in `…` inside that
-limit. Fitting titles and stored ellipses remain unchanged; old truncated input is unrecoverable.
-Optional `directory_label` is display-only context: avoid personal absolute paths. It normalizes
-to one safe line, rejects more than 100 scalars and is omitted/cleared when absent or blank.
-The server adds native bold `[title]`, optional italic directory on a separate line and one
+from public host metadata when valid. Use a concise title grounded in the current task or project
+when the host title begins with a path or is otherwise unusable.
+Save the returned session key and inbox URI. Titles fit 50 graphemes, with `…` on shortened
+input. Supply a short project or workspace name as `directory_label`. After skipping leading
+whitespace, opening brackets, quotes and backticks, neither field may start with an absolute or
+home path, even if prose follows. Omission on resume keeps the saved label. See the
+[registration workflow](../README.md#synthetic-workflows) to recover older metadata.
+The server adds native bold `[title]`, an italic project label on a separate line and one
 blank line before a nonempty body/caption, without trailing blank lines for an empty caption.
 Supply verbatim bodies/captions without repeating these headers.
 Optional body-relative `entities` on send/ask and `caption_entities` on send_file request native

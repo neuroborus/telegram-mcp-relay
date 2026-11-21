@@ -209,9 +209,9 @@ or a claim that every live failure/recovery case was exercised.
 
 ### Installed source and preserved state
 
-The accepted source HEAD is `70fedf8471b8981a802fa0085d527f6bd5d35645`; Rust runtime composition
-is unchanged since `e7575f2636480b35fa1da75134e337fadb9a4a00`, whose full C1–C6 and Native
-locked daemon/probe releases passed. The final documentation step passed its own Native C1/C2;
+The trial used accepted source `70fedf8471b8981a802fa0085d527f6bd5d35645`, whose Rust runtime matched
+the composition baseline `e7575f2636480b35fa1da75134e337fadb9a4a00`. Full C1–C6 and Native locked
+daemon/probe releases passed at that baseline. The final documentation step passed its own Native C1/C2;
 all fifteen planned steps reached DONE as [recorded in testing](TESTING.md#agent-experience-continuation-status).
 
 The coordinator separately materialized the locked daemon and probe releases offline after
@@ -388,12 +388,14 @@ the orchestrator must explicitly allow that chat and a synthetic user in TOML. T
 does not launch a probe or mock, grant file access, sample processes or run HOST capture.
 
 The driver uses the implemented stateless MCP `2026-07-28` lifecycle: `server/discover`, then
-`telegram_register` with external ID `resource-measurement-v1` and title `Resource measurement`,
-then exactly one `telegram_send_file`. Every request carries `MCP-Protocol-Version`, `Mcp-Method`,
-tool calls carry `Mcp-Name`, and params carry the protocol-version and empty client-capabilities
-metadata. Discovery must confirm the version, private zero-TTL capability response and tools.
-The driver preserves the returned session key internally and validates structured tool results
-against their text representation. Neither the key nor an inbox URI is emitted.
+`telegram_register` with external ID `resource-measurement-v1`, title `Resource measurement` and
+project label `relay-probe`, then exactly one `telegram_send_file`. Every request carries
+`MCP-Protocol-Version` and `Mcp-Method`. Tool calls carry `Mcp-Name`, and params carry the
+protocol-version and empty client-capabilities metadata. Discovery must confirm the version,
+private zero-TTL capability response and tools.
+The driver verifies the returned title and project label, preserves the session key internally
+and validates structured tool results against their text representation. It emits neither the
+key nor the inbox URI.
 
 After discovery, stdout emits `responsive`; its monotonic timestamp identifies confirmed MCP
 responsiveness separately from the probe's readiness line. After registration and exclusive
@@ -401,21 +403,26 @@ file creation, `idle` reports `upload_bytes=49999999`. The fixed `measurement-up
 49,999,999-byte sparse zero file, one byte below the unchanged 50,000,000-byte production limit.
 Only its absolute path is passed to MCP; the driver never reads its contents. The normal probe
 file admission and Telegram multipart path read and stream all bytes. The short synthetic
-caption receives the current native bold title header through `caption_entities`; it fits both
-caption bounds. This differs from the historical benchmark's bracketed header and does not
-remeasure it. Root/file identity and metadata are rechecked
-before and after sending. Existing files are never overwritten or removed.
+caption receives native bold title and italic project-label entities and fits both caption
+bounds. The driver rechecks root/file identity and metadata before and after sending.
+Existing files are never overwritten or removed.
 
 Control input consists of newline-delimited JSON. The controller first waits for `idle` and
 primes its sampling window, then writes `{"command":"upload"}`. The driver emits
 `upload_started`, invokes the normal MCP send tool, validates the expected chat and positive
 message ID, then emits `uploaded` with those IDs and the actual verified file size. Tool success
 confirms Telegram acceptance and committed reply routing under the implemented service contract;
-existing C6 HTTP/routing tests own that proof. These events delimit the observed request interval,
+the HTTP/routing cases in C6 cover that contract. These events delimit the observed request interval,
 including MCP and bookkeeping overhead. The driver stays alive for the controller's trailing
 samples until `{"command":"stop"}`, then emits `stopped`. All events include
 `at_monotonic_seconds`. The controller records PID/start-tick identity separately; the driver
 does not claim a measurement from its events.
+
+The [recorded HOST capture](#recorded-host-capture) retains its source and workload identity,
+including its pre-native-entity framing. The controller records the current label in subsequent
+workload metadata. Current registration and upload assertions await the
+applicable Runner FINALIZE and release receipts. Any subsequent authorized capture belongs to
+the HOST operator after the required release and tooling gates and release of workspace ownership.
 
 Only those two commands in that order succeed. EOF, timeout, cancellation, protocol/tool errors,
 changed files and output failures exit nonzero with a static redacted diagnostic. There is no

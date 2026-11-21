@@ -165,15 +165,17 @@ async fn session_calls_and_read_only_resources_share_explicit_application_identi
             &transport,
             "tools/call",
             json!({"name":"telegram_register",
-            "arguments":{"external_session_id":"synthetic-thread","title":"Shared"}}),
+            "arguments":{"external_session_id":"synthetic-thread","title":"Shared","directory_label":"p"}}),
         )
         .await;
     assert_eq!(registered["result"]["isError"], false);
     let application = &registered["result"]["structuredContent"];
     assert_ne!(application["session_key"], transport);
     assert_eq!(
-        http.register(json!({"external_session_id":"synthetic-thread","title":"Shared"}))
-            .await,
+        http.register(
+            json!({"external_session_id":"synthetic-thread","title":"Shared","directory_label":"p"})
+        )
+        .await,
         *application
     );
     for (method, params) in [
@@ -431,7 +433,7 @@ async fn matching_inline_metadata_cannot_discard_live_unknown_or_terminated_sess
     let (session, _) = http.initialize(LEGACY_VERSION).await;
     let call = json!({"jsonrpc":"2.0","id":7,"method":"tools/call","params":{
         "_meta":inline_meta(),"name":"telegram_register",
-        "arguments":{"title":"private-title","external_session_id":"private-thread"}}});
+        "arguments":{"title":"private-title","external_session_id":"private-thread","directory_label":"p"}}});
     for transport in [&session, "synthetic-unknown-session"] {
         let response = http
             .legacy_post(call.clone(), Some(transport))

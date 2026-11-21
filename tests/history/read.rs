@@ -35,7 +35,7 @@ fn shared_observation_revalidates_policy_and_never_exposes_or_mutates_private_re
     let fixture = fixture();
     let mut db = fixture.open();
     let observer = db
-        .register_session(Some("private-observer"), None, "Observer", None, 0)
+        .register_session(Some("private-observer"), None, "Observer", Some("p"), 0)
         .unwrap();
     let owner = db
         .register_session(Some("private-owner"), None, "Owner", Some("module"), 0)
@@ -200,7 +200,7 @@ fn bounded_sparse_keyset_scans_resume_across_ties_expiry_and_cleanup_without_los
     fixture.0.history.page_limit = 1;
     let mut db = fixture.open();
     let session = db
-        .register_session(None, None, "Observer", None, 0)
+        .register_session(None, None, "Observer", Some("p"), 0)
         .unwrap();
     for id in 1..=7 {
         let mut record = input();
@@ -277,7 +277,7 @@ fn response_bytes_query_input_and_search_work_are_bounded_without_truncation() {
     fixture.0.history.response_bytes = 2_048;
     let mut db = fixture.open();
     let session = db
-        .register_session(None, None, "Observer", None, 0)
+        .register_session(None, None, "Observer", Some("p"), 0)
         .unwrap();
     let body = "x".repeat(100);
     for id in 1..=10 {

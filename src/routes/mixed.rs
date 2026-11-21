@@ -101,7 +101,7 @@ async fn both_protocols_share_tools_resources_and_durable_routes() {
     for (index, client) in clients.into_iter().enumerate() {
         let listed = client.rpc(&http, "tools/list", json!({})).await;
         tools::assert_tool_catalog(&listed["result"]["tools"]);
-        let args = json!({"title":"Same", "external_session_id":format!("mixed-{index}")});
+        let args = json!({"title":"Same","directory_label":"p","external_session_id":format!("mixed-{index}")});
         let session = client
             .success(&http, "telegram_register", args.clone())
             .await;
@@ -269,11 +269,15 @@ async fn mixed_claims_reconcile_fence_and_ack_across_restart() {
         .success(
             &http,
             "telegram_register",
-            json!({"title":"Same","external_session_id":"recovery"}),
+            json!({"title":"Same","external_session_id":"recovery","directory_label":"p"}),
         )
         .await;
     let other = modern
-        .success(&http, "telegram_register", json!({"title":"Same"}))
+        .success(
+            &http,
+            "telegram_register",
+            json!({"title":"Same","directory_label":"p"}),
+        )
         .await;
     let key = session["session_key"].as_str().unwrap();
     let uri = session["inbox_uri"].as_str().unwrap();
@@ -398,7 +402,9 @@ async fn mixed_questions_target_their_own_replies_while_modern_events_remain_act
     let (database, state) = mock.shared(&fixture);
     let mut http = fixture.serve(state.clone(), None).await;
     let (transport, _) = http.initialize(LEGACY_VERSION).await;
-    let session = http.register(json!({"title":"Same"})).await;
+    let session = http
+        .register(json!({"title":"Same","directory_label":"p"}))
+        .await;
     let key = session["session_key"].as_str().unwrap();
     let uri = session["inbox_uri"].as_str().unwrap();
     let filter = json!({"resourceSubscriptions":[uri]});
@@ -514,7 +520,7 @@ async fn legacy_ask_cancellation_and_abandonment_preserve_sends_and_recover_capa
                 Some("reconnect"),
                 None,
                 "Same",
-                None,
+                Some("p"),
                 unix_millis().unwrap(),
             )
             .unwrap();

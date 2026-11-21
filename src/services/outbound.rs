@@ -153,15 +153,16 @@ impl OutboundService {
         let (delivery, reservation, journal, permit) = {
             let mut database = self.database.lock().map_err(|_| AppError::StorageFailure)?;
             let session = database.session(session_key)?;
+            let directory = Some(session.outbound_directory_label()?);
             let delivery = if let Some(file) = file {
                 Delivery::Document(
-                    format_caption(&session.title, session.directory_label.as_ref(), body)?
+                    format_caption(&session.title, directory, body)?
                         .with_body_entities(body, entities)?,
                     file,
                 )
             } else {
                 Delivery::Text(
-                    format_text(&session.title, session.directory_label.as_ref(), body)?
+                    format_text(&session.title, directory, body)?
                         .with_body_entities(body, entities)?,
                 )
             };

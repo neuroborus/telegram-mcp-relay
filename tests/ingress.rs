@@ -52,11 +52,11 @@ impl Fixture {
 
     fn seed(&self, database: &mut Database) -> (String, String) {
         let a = database
-            .register_session(None, None, "Same", None, 100)
+            .register_session(None, None, "Same", Some("p"), 100)
             .unwrap()
             .session_key;
         let b = database
-            .register_session(None, None, "Same", None, 100)
+            .register_session(None, None, "Same", Some("p"), 100)
             .unwrap()
             .session_key;
         for (key, chat, kind) in [(&a, -101, RouteKind::Text), (&b, -102, RouteKind::Document)] {
@@ -484,7 +484,7 @@ fn unauthorized_flood_compacts_without_consuming_full_receipt_or_metadata_budget
     let fixture = Fixture::new(Limits {
         receipts: 1,
         // Two sessions/routes, one receipt and one accepted reply fill variable metadata.
-        metadata_bytes: 2 * (128 + 64 + 4) + 2 * (128 + 64) + (128 + 7 + 64 + 5) + 256,
+        metadata_bytes: 2 * (128 + 64 + 4 + 1) + 2 * (128 + 64) + (128 + 7 + 64 + 5) + 256,
         ..Limits::default()
     });
     let mut database = fixture.open();
@@ -591,7 +591,7 @@ fn item_payload_and_metadata_pressure_preserve_replies_and_outstanding_send_admi
         },
         // Two sessions/routes, one reply, and one admitted route exactly fill metadata.
         Limits {
-            metadata_bytes: 2 * (128 + 64 + 4) + 2 * (128 + 64) + 256 + 192,
+            metadata_bytes: 2 * (128 + 64 + 4 + 1) + 2 * (128 + 64) + 256 + 192,
             ..Limits::default()
         },
     ] {

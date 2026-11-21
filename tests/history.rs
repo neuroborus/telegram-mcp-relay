@@ -163,7 +163,9 @@ fn capacity_failure_preserves_inbox_admission_for_an_observation_not_yet_ingeste
         "SELECT telegram_update_id FROM journal_records WHERE chat_id = -101 AND message_id = 7",
         [], |r| r.get(0)).unwrap();
     assert_eq!(update_id, None);
-    let session = db.register_session(None, None, "Another", None, 0).unwrap();
+    let session = db
+        .register_session(None, None, "Another", Some("p"), 0)
+        .unwrap();
     let mut message = input();
     message.source.message_id = 8;
     message.session = Some(&session);
@@ -230,7 +232,7 @@ fn own_reply_provenance_survives_history_expiry_and_disablement_then_retires_aft
     fixture.0.history.max_attachments = 1;
     let mut db = fixture.open();
     let session = db
-        .register_session(None, None, "Synthetic", None, 0)
+        .register_session(None, None, "Synthetic", Some("p"), 0)
         .unwrap();
     let reserve = db.reserve_route(&session.session_key).unwrap();
     db.persist_route(reserve, -101, 5, RouteKind::Text, 0, 0)
@@ -306,7 +308,7 @@ fn failed_v7_migration_preserves_old_schema_and_records_transactionally() {
     let fixture = Fixture::new();
     let mut db = fixture.open();
     let session = db
-        .register_session(None, None, "Preserve", None, 0)
+        .register_session(None, None, "Preserve", Some("p"), 0)
         .unwrap();
     drop(db);
     let sql = fixture.sql();

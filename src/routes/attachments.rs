@@ -43,9 +43,11 @@ async fn attachment_downloads(backend: BotApi) {
     };
     let now = unix_millis().unwrap();
     let mut db = Database::open(&fixture.config.storage, &fixture.config.limits).unwrap();
-    let owner = db.register_session(None, None, "Owner", None, now).unwrap();
+    let owner = db
+        .register_session(None, None, "Owner", Some("p"), now)
+        .unwrap();
     let observer = db
-        .register_session(None, None, "Observer", None, now)
+        .register_session(None, None, "Observer", Some("p"), now)
         .unwrap();
     let reservation = db.reserve_route(&owner.session_key).unwrap();
     db.persist_route(reservation, -101, 11, RouteKind::Text, now, now)

@@ -517,7 +517,8 @@ def run(root, output):
         build["python"] = sys.version.split()[0]
         settings = synthetic_settings(free_address())
         workload = {"upload_bytes": driver.UPLOAD_BYTES, "file": "sparse-zero-file",
-                    "title": driver.TITLE, "caption": driver.CAPTION,
+                    "title": driver.TITLE, "directory_label": driver.PROJECT_LABEL,
+                    "caption": driver.CAPTION,
                     "external_session_id": driver.EXTERNAL_ID, "protocol": driver.VERSION,
                     "cadence_seconds": CADENCE, "idle_window_seconds": IDLE_SECONDS,
                     "upload_deadline_seconds": UPLOAD_SECONDS, "mock_upload_pacing": "none",

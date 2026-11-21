@@ -163,7 +163,12 @@ pub(super) fn failure(result: &Value, code: &str) {
     assert_eq!(rendered, result["structuredContent"]);
 }
 
-async fn entity_call(http: &Http, transport: Option<&str>, name: &str, arguments: Value) -> Value {
+async fn protocol_tool(
+    http: &Http,
+    transport: Option<&str>,
+    name: &str,
+    arguments: Value,
+) -> Value {
     let params = json!({"name":name,"arguments":arguments});
     match transport {
         Some(transport) => http.legacy_rpc(transport, "tools/call", params).await,
@@ -278,7 +283,7 @@ async fn native_body_entities_and_literal_defaults_reach_json_multipart_and_jour
         .into_iter()
         .enumerate()
         {
-            let response = entity_call(&http, transport.as_deref(), tool, args).await;
+            let response = protocol_tool(&http, transport.as_deref(), tool, args).await;
             let mut data = json!({"telegram_chat_id":-101,"outbound_message_id":7+index});
             if tool == "telegram_ask" {
                 data["status"] = json!("sent");
@@ -375,7 +380,9 @@ async fn invalid_body_entities_have_no_send_route_journal_activity_or_wait_admis
         } else {
             None
         };
-        let session = http.register(json!({"title":"Session"})).await;
+        let session = http
+            .register(json!({"title":"Entity validation","directory_label":"p"}))
+            .await;
         let key = session["session_key"].as_str().unwrap();
         let before = database.lock().unwrap().session(key).unwrap();
         // Fill waiter capacity: invalid questions must still fail validation first.
@@ -418,7 +425,7 @@ async fn invalid_body_entities_have_no_send_route_journal_activity_or_wait_admis
                 } else {
                     json!({"session_key":key,"text":"😀ok","entities":entities})
                 };
-                let response = entity_call(&http, transport.as_deref(), tool, args).await;
+                let response = protocol_tool(&http, transport.as_deref(), tool, args).await;
                 if protocol_error {
                     assert_eq!(response["error"]["code"], -32602);
                 } else {
@@ -544,10 +551,12 @@ async fn tools_have_typed_schemas_and_registration_survives_separate_requests_an
     let listing = http.rpc("tools/list", json!({})).await;
     assert_tool_catalog(&listing["result"]["tools"]);
     let first = http
-        .register(json!({"external_session_id":"thread-a","title":" Shared\n title "}))
+        .register(json!({"external_session_id":"thread-a","title":" Shared\n title ","directory_label":"p"}))
         .await;
     let second = http
-        .register(json!({"external_session_id":"thread-b","title":"Shared title"}))
+        .register(
+            json!({"external_session_id":"thread-b","title":"Shared title","directory_label":"p"}),
+        )
         .await;
     assert_eq!(first["title"], "Shared title");
     assert_eq!(first["title"], second["title"]);
@@ -563,8 +572,10 @@ async fn tools_have_typed_schemas_and_registration_survives_separate_requests_an
         .register(json!({"external_session_id":"thread-a","title":"Renamed"}))
         .await;
     assert_eq!(resumed["session_key"], first["session_key"]);
-    let anonymous = http.register(json!({"title":""})).await;
-    assert_eq!(anonymous["title"], "Agent Session");
+    assert_eq!(resumed["directory_label"], first["directory_label"]);
+    let anonymous = http
+        .register(json!({"title":"Anonymous task","directory_label":"p"}))
+        .await;
     http.finish().await;
     // A fresh handler/HTTP endpoint must resume the same durable identity and saved handle.
     let telegram = Telegram::new(&fixture.config, vec![]).await;
@@ -585,13 +596,335 @@ async fn tools_have_typed_schemas_and_registration_survives_separate_requests_an
 }
 
 #[tokio::test]
+async fn registration_validates_metadata_and_keeps_the_saved_label_on_both_protocols() {
+    let mut fixture = Fixture::new();
+    let mut http = fixture.serve(fixture.state.clone(), None).await;
+    let (legacy, _) = http.initialize(LEGACY_VERSION).await;
+    let sql = rusqlite::Connection::open(&fixture.config.storage.path).unwrap();
+    for transport in [None, Some(legacy.as_str())] {
+        let missing_title = protocol_tool(
+            &http,
+            transport,
+            "telegram_register",
+            json!({"directory_label":"org/repo"}),
+        )
+        .await;
+        assert_eq!(missing_title["error"]["code"], -32602);
+        assert!(
+            missing_title["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("title")
+        );
+        let before: i64 = sql
+            .query_row("SELECT count(*) FROM sessions", [], |row| row.get(0))
+            .unwrap();
+        for (arguments, field) in [
+            (json!({"title":" ","directory_label":"org/repo"}), "title"),
+            (
+                json!({"title":"New Chat","directory_label":"org/repo"}),
+                "title",
+            ),
+            (
+                json!({"title":"[ Agent Session ]","directory_label":"org/repo"}),
+                "title",
+            ),
+            (
+                json!({"title":"(Agent Session)","directory_label":"org/repo"}),
+                "title",
+            ),
+            (
+                json!({"title":"\u{200d}[`/example/private`]","directory_label":"org/repo"}),
+                "title",
+            ),
+            (
+                json!({"title":"‹/example/private›","directory_label":"org/repo"}),
+                "title",
+            ),
+            (
+                json!({"title":"[/example]—CI/CD review","directory_label":"org/repo"}),
+                "title",
+            ),
+            (json!({"title":"Upgrade guide"}), "directory_label"),
+            (
+                json!({"title":"Upgrade guide","directory_label":"/example/private"}),
+                "directory_label",
+            ),
+            (
+                json!({"title":"Upgrade guide","directory_label":"《~/project》"}),
+                "directory_label",
+            ),
+            (
+                json!({"title":"Upgrade guide","directory_label":r"([C:\workspace\release]])"}),
+                "directory_label",
+            ),
+            (
+                json!({"title":"Upgrade guide","directory_label":"[/example/release].draft]"}),
+                "directory_label",
+            ),
+        ] {
+            let response = protocol_tool(&http, transport, "telegram_register", arguments).await;
+            let result = &response["result"];
+            failure(result, "REQUEST_INVALID");
+            assert!(
+                result["structuredContent"]["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains(field)
+            );
+            assert!(!result.to_string().contains("/example/private"));
+            assert!(!result.to_string().contains("~/project"));
+            assert!(!result.to_string().contains("/example/release"));
+            assert!(!result.to_string().contains("release]]"));
+            assert!(!result.to_string().contains("[/example]—CI/CD review"));
+        }
+        let after: i64 = sql
+            .query_row("SELECT count(*) FROM sessions", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(after, before);
+        let title = "[Review] /example/project";
+        let registered = protocol_tool(
+            &http,
+            transport,
+            "telegram_register",
+            json!({"title":title,"directory_label":"org/repo"}),
+        )
+        .await;
+        assert_eq!(registered["result"]["isError"], false);
+        assert_eq!(registered["result"]["structuredContent"]["title"], title);
+        let key = &registered["result"]["structuredContent"]["session_key"];
+        let resumed = protocol_tool(
+            &http,
+            transport,
+            "telegram_register",
+            json!({"session_key":key,"title":"Resume guide"}),
+        )
+        .await;
+        assert_eq!(resumed["result"]["isError"], false);
+        assert_eq!(resumed["result"]["structuredContent"]["session_key"], *key);
+        assert_eq!(
+            resumed["result"]["structuredContent"]["directory_label"],
+            "org/repo"
+        );
+
+        let raw_label = " \u{200d}›~/project‹ ";
+        sql.execute(
+            "UPDATE sessions SET directory_label = ?1 WHERE session_key = ?2",
+            (raw_label, key.as_str().unwrap()),
+        )
+        .unwrap();
+        let resumed = protocol_tool(
+            &http,
+            transport,
+            "telegram_register",
+            json!({"session_key":key,"title":"Resume guide"}),
+        )
+        .await;
+        assert_eq!(resumed["result"]["isError"], false);
+        assert!(resumed["result"]["structuredContent"]["directory_label"].is_null());
+        assert!(!resumed.to_string().contains("~/project"));
+        let stored: String = sql
+            .query_row(
+                "SELECT directory_label FROM sessions WHERE session_key = ?1",
+                [key.as_str().unwrap()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored, raw_label);
+    }
+    http.finish().await;
+}
+
+#[tokio::test]
+async fn legacy_session_metadata_gates_outbound_and_processing_until_recovery_on_both_protocols() {
+    for legacy in [false, true] {
+        let mut fixture = Fixture::new();
+        fixture.config.limits.waiters = 1;
+        fixture.config.activity.typing_enabled = false;
+        let telegram = Telegram::new(&fixture.config, vec![sent(7), sent(8), sent(9)]).await;
+        let shared = Arc::new(Mutex::new(
+            Database::open(&fixture.config.storage, &fixture.config.limits).unwrap(),
+        ));
+        let handler = Arc::new(
+            McpHandler::new(shared.clone(), telegram.client.clone(), &fixture.config).unwrap(),
+        );
+        let mut http = fixture.serve(handler, None).await;
+        let transport = if legacy {
+            Some(http.initialize(LEGACY_VERSION).await.0)
+        } else {
+            None
+        };
+        let transport = transport.as_deref();
+        let response = protocol_tool(
+            &http,
+            transport,
+            "telegram_register",
+            json!({"external_session_id":"thread","title":"Upgrade guide","directory_label":"org/repo"}),
+        )
+        .await;
+        let session = &response["result"]["structuredContent"];
+        let key = &session["session_key"];
+        let key_str = key.as_str().unwrap();
+        inbox::seed(&fixture, session, 5, &[11, 12]);
+        let response = protocol_tool(
+            &http,
+            transport,
+            "telegram_inbox",
+            json!({"session_key":key,"limit":1}),
+        )
+        .await;
+        let reply = &response["result"]["structuredContent"]["replies"][0];
+        let identifier = json!({"session_key":key,"reply_id":reply["reply_id"],"claim_token":reply["claim_token"],"active":true});
+        let path = fixture.directory.join("report.txt");
+        let missing_path = fixture.directory.join("missing.txt");
+        fs::write(&path, b"synthetic report").unwrap();
+        let database = Database::open(&fixture.config.storage, &fixture.config.limits).unwrap();
+        let sql = rusqlite::Connection::open(&fixture.config.storage.path).unwrap();
+        let now = unix_millis().unwrap();
+        let before_inbox = database
+            .inbox_snapshot(key_str, None, 10, now)
+            .unwrap()
+            .replies;
+        // Invalid metadata wins over a saturated waiter budget.
+        let interest = shared
+            .lock()
+            .unwrap()
+            .inbox_notifications
+            .waiter(key_str.to_owned())
+            .unwrap();
+        for (title, label) in [
+            (" \t", Some("org/repo")),
+            ("[ AGENT SESSION ]", Some("org/repo")),
+            ("【Agent Session】", Some("org/repo")),
+            ("[/example/private]—CI/CD review", Some("org/repo")),
+            ("Upgrade guide", None),
+            ("Upgrade guide", Some("‘/example/private’.draft")),
+        ] {
+            sql.execute(
+                "UPDATE sessions SET title = ?1, directory_label = ?2 WHERE session_key = ?3",
+                (title, label, key_str),
+            )
+            .unwrap();
+            let before_session = database.session(key_str).unwrap();
+            for (tool, arguments) in [
+                ("telegram_send", json!({"session_key":key,"text":"Update"})),
+                (
+                    "telegram_ask",
+                    json!({"session_key":key,"text":"Question?"}),
+                ),
+                (
+                    "telegram_send_file",
+                    json!({"session_key":key,"path":missing_path,"caption":"Report"}),
+                ),
+                ("telegram_processing", identifier.clone()),
+            ] {
+                let response = protocol_tool(&http, transport, tool, arguments).await;
+                let result = &response["result"];
+                failure(result, "SESSION_METADATA_REQUIRED");
+                let message = result["structuredContent"]["message"].as_str().unwrap();
+                assert!(
+                    message.contains("telegram_register") && message.contains("directory_label")
+                );
+                assert!(!result.to_string().contains(key_str));
+                assert!(!result.to_string().contains("/example/private"));
+            }
+            assert_eq!(telegram.request_count(), 0);
+            assert_eq!(database.session(key_str).unwrap(), before_session);
+            assert_eq!(
+                database
+                    .inbox_snapshot(key_str, None, 10, now)
+                    .unwrap()
+                    .replies,
+                before_inbox
+            );
+        }
+        let recovered = protocol_tool(
+            &http,
+            transport,
+            "telegram_register",
+            if legacy {
+                json!({"session_key":key,"title":"Release guide","directory_label":"org/repo"})
+            } else {
+                json!({"external_session_id":"thread","title":"Release guide","directory_label":"org/repo"})
+            },
+        )
+        .await;
+        assert_eq!(recovered["result"]["isError"], false);
+        assert_eq!(
+            recovered["result"]["structuredContent"]["inbox_uri"],
+            session["inbox_uri"]
+        );
+        assert_eq!(
+            database.route(-101, 5, now).unwrap().unwrap().session_key,
+            key_str
+        );
+        assert_eq!(
+            database
+                .inbox_snapshot(key_str, None, 10, now)
+                .unwrap()
+                .replies,
+            before_inbox
+        );
+        let processing = protocol_tool(&http, transport, "telegram_processing", identifier).await;
+        assert_eq!(processing["result"]["isError"], false);
+        assert!(processing["result"]["structuredContent"]["processing_started_at"].is_i64());
+        let saturated = protocol_tool(
+            &http,
+            transport,
+            "telegram_ask",
+            json!({"session_key":key,"text":"Question?"}),
+        )
+        .await;
+        failure(&saturated["result"], "WAIT_CAPACITY");
+        drop(interest);
+        assert_eq!(telegram.request_count(), 0);
+        for (tool, arguments) in [
+            ("telegram_send", json!({"session_key":key,"text":"Update"})),
+            (
+                "telegram_send_file",
+                json!({"session_key":key,"path":path,"caption":"Report"}),
+            ),
+        ] {
+            let response = protocol_tool(&http, transport, tool, arguments).await;
+            assert_eq!(response["result"]["isError"], false);
+        }
+        let changes = shared.lock().unwrap().route_changes();
+        let committed = changes.notified();
+        tokio::pin!(committed);
+        committed.as_mut().enable();
+        let ingress = crate::services::ingress::IngressService::new(&fixture.config).unwrap();
+        let reply = async {
+            committed.await;
+            assert!(matches!(
+                subscriptions::ingest(&ingress, &shared, 13, 9).unwrap(),
+                crate::repositories::IngestOutcome::ReplyStored { .. }
+            ));
+        };
+        let ask = protocol_tool(
+            &http,
+            transport,
+            "telegram_ask",
+            json!({"session_key":key,"text":"Question?"}),
+        );
+        let (asked, ()) =
+            tokio::time::timeout(Duration::from_secs(2), async { tokio::join!(ask, reply) })
+                .await
+                .unwrap();
+        assert_eq!(asked["result"]["isError"], false);
+        assert!(asked["result"]["structuredContent"]["reply"].is_object());
+        assert_eq!(telegram.request_count(), 3);
+        http.finish().await;
+    }
+}
+
+#[tokio::test]
 async fn text_and_documents_return_committed_composite_routes_for_same_title_sessions() {
     let mut fixture = Fixture::new();
     let telegram = Telegram::new(&fixture.config, vec![sent(7), sent(8), sent(9)]).await;
     let handler = telegram.handler(&fixture);
     let http = fixture.serve(handler, None).await;
     let first = http
-        .register(json!({"external_session_id":"a","title":"界"}))
+        .register(json!({"external_session_id":"a","title":"界","directory_label":"p"}))
         .await;
     let second = http
         .register(
@@ -599,8 +932,8 @@ async fn text_and_documents_return_committed_composite_routes_for_same_title_ses
         )
         .await;
     assert_eq!(second["directory_label"], "📁");
-    assert_eq!(first["directory_label"], Value::Null);
-    let text = "a".repeat(995);
+    assert_eq!(first["directory_label"], "p");
+    let text = "a".repeat(993);
     let path = fixture.directory.join("report.bin");
     fs::write(&path, b"synthetic report\0\xff").unwrap();
     let caption = "😀".repeat(507) + "aa";
@@ -639,11 +972,11 @@ async fn text_and_documents_return_committed_composite_routes_for_same_title_ses
         let body: Value = serde_json::from_slice(&requests[0].body).unwrap();
         assert_eq!(
             body,
-            json!({"chat_id":-101,"text":format!("[界]\n\n{text}"),"entities":[{"type":"bold","offset":0,"length":3}]})
+            json!({"chat_id":-101,"text":format!("[界]\np\n\n{text}"),"entities":[{"type":"bold","offset":0,"length":3},{"type":"italic","offset":4,"length":1}]})
         );
         for (index, (request, caption)) in requests[1..]
             .iter()
-            .zip([format!("[界]\n📁\n\n{caption}"), "[Renamed]".into()])
+            .zip([format!("[界]\n📁\n\n{caption}"), "[Renamed]\np".into()])
             .enumerate()
         {
             assert_eq!(request.method, "/botSynthetic/sendDocument");
@@ -658,14 +991,14 @@ async fn text_and_documents_return_committed_composite_routes_for_same_title_ses
                     .unwrap()
                     .encode_utf16()
                     .count(),
-                if index == 0 { 1_024 } else { 9 }
+                if index == 0 { 1_024 } else { 11 }
             );
             assert_eq!(
                 serde_json::from_slice::<Value>(request.part("caption_entities")).unwrap(),
                 if index == 0 {
                     json!([{"type":"bold","offset":0,"length":3}, {"type":"italic","offset":4,"length":2}])
                 } else {
-                    json!([{"type":"bold","offset":0,"length":9}])
+                    json!([{"type":"bold","offset":0,"length":9},{"type":"italic","offset":10,"length":1}])
                 }
             );
             let bytes = b"synthetic report\0\xff";
@@ -700,7 +1033,7 @@ async fn validation_and_protocol_failures_have_no_telegram_route_or_activity_eff
     let handler = telegram.handler(&fixture);
     let http = fixture.serve(handler, None).await;
     let session = http
-        .register(json!({"external_session_id":"thread","title":"界"}))
+        .register(json!({"external_session_id":"thread","title":"界","directory_label":"p"}))
         .await;
     let key = &session["session_key"];
     let path = fixture.directory.join("report.bin");
@@ -736,17 +1069,17 @@ async fn validation_and_protocol_failures_have_no_telegram_route_or_activity_eff
         ),
         (
             "telegram_send",
-            json!({"session_key":key,"text":"a".repeat(996)}),
+            json!({"session_key":key,"text":"a".repeat(994)}),
             "TEXT_TOO_LONG",
         ),
         (
             "telegram_send_file",
-            json!({"session_key":key,"path":path,"caption":"a".repeat(996)}),
+            json!({"session_key":key,"path":path,"caption":"a".repeat(994)}),
             "TEXT_TOO_LONG",
         ),
         (
             "telegram_send_file",
-            json!({"session_key":key,"path":path,"caption":"😀".repeat(509)+"aa"}),
+            json!({"session_key":key,"path":path,"caption":"😀".repeat(508)+"aa"}),
             "TEXT_TOO_LONG",
         ),
         (
@@ -782,7 +1115,7 @@ async fn validation_and_protocol_failures_have_no_telegram_route_or_activity_eff
             );
             assert_eq!(
                 details["actual_characters"],
-                if native_caption { 516 } else { 1_001 }
+                if native_caption { 517 } else { 1_001 }
             );
             assert_eq!(
                 details["actual_utf16_units"],
@@ -871,7 +1204,9 @@ async fn delivery_errors_remain_distinct_safe_tool_results_without_routes_or_rep
     ]).await;
     let handler = telegram.handler(&fixture);
     let http = fixture.serve(handler, None).await;
-    let session = http.register(json!({"title":"private title"})).await;
+    let session = http
+        .register(json!({"title":"private title","directory_label":"p"}))
+        .await;
     for code in [
         "TELEGRAM_REJECTED",
         "TELEGRAM_DELIVERY_UNCERTAIN",
@@ -928,10 +1263,10 @@ async fn shared_history_requires_bearer_and_is_read_only_through_both_protocols(
     .unwrap();
     let now = unix_millis().unwrap();
     let observer = database
-        .register_session(None, None, "Observer", None, now)
+        .register_session(None, None, "Observer", Some("p"), now)
         .unwrap();
     let owner = database
-        .register_session(None, None, "Owner", None, now)
+        .register_session(None, None, "Owner", Some("p"), now)
         .unwrap();
     database
         .record_message(

@@ -5,7 +5,7 @@ use crate::{
 };
 
 fn formatted(body: &str) -> FormattedMessage {
-    format_text(&SessionTitle::new("Session"), None, body).unwrap()
+    format_text(&SessionTitle::parse("Example").unwrap(), None, body).unwrap()
 }
 use std::{
     fs::{self, DirBuilder, File, OpenOptions},
@@ -247,7 +247,7 @@ async fn native_send_and_typing_use_typed_results() {
         requests[0],
         (
             "/bot123:synthetic/sendMessage".into(),
-            json!({"chat_id":101,"text":"[Session]\n\n<literal> 😀", "entities":[{"type":"bold","offset":0,"length":9}]})
+            json!({"chat_id":101,"text":"[Example]\n\n<literal> 😀", "entities":[{"type":"bold","offset":0,"length":9}]})
         )
     );
     assert_eq!(requests[1].1, json!({"chat_id":101,"action":"typing"}));

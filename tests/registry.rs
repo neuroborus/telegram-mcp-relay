@@ -52,12 +52,12 @@ fn title_ellipsis_round_trips_without_inventing_old_truncated_input() {
     let mut db = fixture.open(&limits);
     let label = format!("{}…", "👩🏽‍💻".repeat(49));
     let new = db
-        .register_session(Some("long"), None, &"👩🏽‍💻".repeat(51), None, 100)
+        .register_session(Some("long"), None, &"👩🏽‍💻".repeat(51), Some("p"), 100)
         .unwrap();
     assert_eq!(new.title.as_str(), label);
     // A fifty-grapheme persisted label is indistinguishable from an old truncated input.
     let old = db
-        .register_session(Some("old"), None, &"a".repeat(50), None, 100)
+        .register_session(Some("old"), None, &"a".repeat(50), Some("p"), 100)
         .unwrap();
     drop(db);
     let mut db = fixture.open(&limits);
@@ -78,7 +78,7 @@ fn same_titles_interleaved_text_and_documents_survive_rename_and_restart() {
     let mut keys = Vec::new();
     for external in ["thread-a", "thread-b", "thread-c"] {
         let session = database
-            .register_session(Some(external), None, " Same\n title ", None, 100)
+            .register_session(Some(external), None, " Same\n title ", Some("p"), 100)
             .unwrap();
         assert_eq!(session.title.as_str(), "Same title");
         assert_eq!(session.session_key.len(), 64);
@@ -97,22 +97,22 @@ fn same_titles_interleaved_text_and_documents_survive_rename_and_restart() {
             .persist_route(reservation, chat, message, kind, 150, 200)
             .unwrap();
     }
-    let old_text = format_text(
-        &database.session(&keys[0]).unwrap().title,
-        None,
-        "Synthetic",
-    )
-    .unwrap();
+    let old = database.session(&keys[0]).unwrap();
+    let old_text = format_text(&old.title, old.directory_label.as_ref(), "Synthetic").unwrap();
     let renamed = database
         .register_session(Some("thread-a"), None, " New\t title ", None, 300)
         .unwrap();
     assert_eq!(renamed.session_key, keys[0]);
-    assert_eq!(old_text.as_str(), "[Same title]\n\nSynthetic");
+    assert_eq!(old_text.as_str(), "[Same title]\np\n\nSynthetic");
     assert_eq!(
-        format_text(&renamed.title, None, "Synthetic")
-            .unwrap()
-            .as_str(),
-        "[New title]\n\nSynthetic"
+        format_text(
+            &renamed.title,
+            renamed.directory_label.as_ref(),
+            "Synthetic"
+        )
+        .unwrap()
+        .as_str(),
+        "[New title]\np\n\nSynthetic"
     );
     assert_eq!(
         renamed.inbox_uri(),
@@ -148,10 +148,10 @@ fn saved_handle_resumes_anonymous_identity_and_conflicts_never_create_sessions()
     let limits = Limits::default();
     let mut database = fixture.open(&limits);
     let anonymous = database
-        .register_session(None, None, "", None, 100)
+        .register_session(None, None, "Original", Some("p"), 100)
         .unwrap();
     let another = database
-        .register_session(Some("stable"), None, "", None, 100)
+        .register_session(Some("stable"), None, "Original", Some("p"), 100)
         .unwrap();
     assert_ne!(anonymous.session_key, another.session_key);
     drop(database);
@@ -187,7 +187,7 @@ fn saved_handle_resumes_anonymous_identity_and_conflicts_never_create_sessions()
 #[test]
 fn directory_display_updates_are_durable_bounded_and_do_not_change_old_routes() {
     let fixture = Fixture::new();
-    // Exactly a session plus one route; optional directory bytes share metadata admission.
+    // Exactly a session plus one route; directory bytes share metadata admission.
     let limits = Limits {
         metadata_bytes: 128 + 64 + 4 + 1 + 128 + 64 + 4,
         ..Limits::default()
@@ -228,18 +228,18 @@ fn directory_display_updates_are_durable_bounded_and_do_not_change_old_routes() 
     );
     assert_eq!(
         database.register_session(Some("same"), None, "changed", Some(&"x".repeat(101)), 400),
-        Err(AppError::InvalidRequest("directory_label"))
+        Err(AppError::InvalidDirectoryLabel)
     );
     assert_eq!(database.session(key).unwrap(), renamed);
-    for directory in [None, Some(" \t\n\u{202e}")] {
-        assert_eq!(
-            database
-                .register_session(Some("same"), None, "T", directory, 500)
-                .unwrap()
-                .directory_label,
-            None
-        );
-    }
+    assert_eq!(
+        database.register_session(Some("same"), None, "T", Some(" \t\n\u{202e}"), 500),
+        Err(AppError::InvalidDirectoryLabel)
+    );
+    assert_eq!(database.session(key).unwrap(), renamed);
+    let resumed = database
+        .register_session(Some("same"), None, "T", None, 500)
+        .unwrap();
+    assert_eq!(resumed.directory_label, renamed.directory_label);
     assert!(!format!("{renamed:?}").contains("📁"));
 }
 
@@ -250,7 +250,7 @@ fn session_activity_and_route_expiry_have_independent_anchors() {
     fixture.0.route_ttl_days = 2;
     let mut database = fixture.open(&Limits::default());
     let key = database
-        .register_session(None, None, "Synthetic", None, 100)
+        .register_session(None, None, "Synthetic", Some("p"), 100)
         .unwrap()
         .session_key;
     let reservation = database.reserve_route(&key).unwrap();
@@ -293,11 +293,11 @@ fn count_limits_include_retained_rows_and_simultaneous_sends() {
     };
     let mut database = fixture.open(&limits);
     let session = database
-        .register_session(Some("stable"), None, "Synthetic", None, 100)
+        .register_session(Some("stable"), None, "Synthetic", Some("p"), 100)
         .unwrap();
     let key = &session.session_key;
     assert_eq!(
-        database.register_session(None, None, "Other", None, 40 * DAY),
+        database.register_session(None, None, "Other", Some("p"), 40 * DAY),
         Err(AppError::StorageCapacity)
     );
     assert_eq!(database.session(key).unwrap(), session);
@@ -332,14 +332,14 @@ fn count_limits_include_retained_rows_and_simultaneous_sends() {
 fn metadata_budget_counts_utf8_and_reservations_and_rejects_rename_atomically() {
     let fixture = Fixture::new();
     // Exactly one session (including its external ID/title) and one route.
-    let session_bytes = 128 + 64 + "外部".len() + "界".len();
+    let session_bytes = 128 + 64 + "外部".len() + "界".len() + 1;
     let limits = Limits {
         metadata_bytes: (session_bytes + 128 + 64) as u32,
         ..Limits::default()
     };
     let mut database = fixture.open(&limits);
     let session = database
-        .register_session(Some("外部"), None, "界", None, 100)
+        .register_session(Some("外部"), None, "界", Some("p"), 100)
         .unwrap();
     let key = &session.session_key;
     // A schema-valid legacy title must be charged by stored bytes before normalization.
@@ -399,10 +399,10 @@ fn route_conflicts_and_failed_bookkeeping_do_not_mutate_routes_or_activity() {
     let fixture = Fixture::new();
     let mut database = fixture.open(&Limits::default());
     let a = database
-        .register_session(None, None, "A", None, 100)
+        .register_session(None, None, "A", Some("p"), 100)
         .unwrap();
     let b = database
-        .register_session(None, None, "B", None, 100)
+        .register_session(None, None, "B", Some("p"), 100)
         .unwrap();
     let reservation = database.reserve_route(&a.session_key).unwrap();
     database
@@ -442,7 +442,7 @@ fn invalid_inputs_and_foreign_reservations_fail_without_effects_or_private_diagn
     let fixture = Fixture::new();
     let mut database = fixture.open(&Limits::default());
     let session = database
-        .register_session(None, None, "Private title", None, 100)
+        .register_session(None, None, "Private title", Some("p"), 100)
         .unwrap();
     for timestamp in [-1, i64::MAX] {
         assert!(matches!(
@@ -452,7 +452,7 @@ fn invalid_inputs_and_foreign_reservations_fail_without_effects_or_private_diagn
     }
     for external in ["", "synthetic\0id"] {
         assert_eq!(
-            database.register_session(Some(external), None, "wrong", None, 100),
+            database.register_session(Some(external), None, "wrong", Some("p"), 100),
             Err(AppError::InvalidRequest("external_session_id"))
         );
     }

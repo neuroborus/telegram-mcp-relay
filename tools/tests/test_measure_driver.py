@@ -17,6 +17,7 @@ from tools import measure_driver as driver
 
 KEY = "a" * 64
 REGISTRATION = {"session_key": KEY, "title": driver.TITLE,
+                "directory_label": "relay-probe",
                 "inbox_uri": f"telegram-bridge://sessions/{KEY}/inbox"}
 SENT = {"telegram_chat_id": driver.CHAT_ID, "outbound_message_id": 7}
 DISCOVERY = {"supportedVersions": [driver.VERSION], "cacheScope": "private", "ttlMs": 0,
@@ -110,7 +111,8 @@ class DriverTests(unittest.TestCase):
             self.assertNotIn("Authorization", headers)
             self.assertEqual(seconds, driver.UPLOAD_SECONDS if index == 3 else 10)
         self.assertEqual(transport.calls[1][2]["params"]["arguments"],
-                         {"external_session_id": driver.EXTERNAL_ID, "title": driver.TITLE})
+                         {"external_session_id": "resource-measurement-v1",
+                          "title": "Resource measurement", "directory_label": "relay-probe"})
         _, headers, body, _ = transport.calls[2]
         self.assertEqual(headers["Mcp-Name"], "telegram_send_file")
         self.assertEqual(body["params"]["arguments"], {"session_key": KEY,
@@ -137,6 +139,8 @@ class DriverTests(unittest.TestCase):
 
     def test_registration_and_tool_result_validation(self):
         invalid = [tool({**REGISTRATION, "title": "wrong"}),
+                   tool({**REGISTRATION, "directory_label": None}),
+                   tool({**REGISTRATION, "directory_label": "wrong"}),
                    tool({**REGISTRATION, "session_key": "PrivateKey"}),
                    tool({**REGISTRATION, "inbox_uri": "telegram-bridge://wrong/inbox"}),
                    {**tool(REGISTRATION), "isError": True},

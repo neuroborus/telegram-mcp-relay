@@ -26,7 +26,7 @@ fn session(database: &Arc<Mutex<Database>>) -> String {
     database
         .lock()
         .unwrap()
-        .register_session(None, None, "Synthetic", None, unix_millis().unwrap())
+        .register_session(None, None, "Synthetic", Some("p"), unix_millis().unwrap())
         .unwrap()
         .session_key
 }
@@ -57,7 +57,7 @@ async fn text_and_file_then_wait_catch_up_without_signals_or_resending_on_both_p
             &http,
             transport,
             "telegram_register",
-            json!({"title":"Synthetic"}),
+            json!({"title":"Synthetic","directory_label":"p"}),
         )
         .await;
         let key = &registered["session_key"];

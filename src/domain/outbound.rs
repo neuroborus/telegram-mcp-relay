@@ -1,6 +1,6 @@
 //! Verbatim outbound text, isolated native header/body entities and final Unicode limits.
 
-use std::fmt;
+use std::{borrow::Cow, fmt};
 
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -41,16 +41,15 @@ pub(crate) fn is_service_notice(text: &str) -> bool {
             let mut lines = header.split('\n');
             let title = lines.next().unwrap_or_default();
             // Brackets may belong to an old literal title rather than the new framing.
-            let valid_title = |label: &str| SessionTitle::new(label).as_str() == label;
+            let valid_title =
+                |label: &str| SessionTitle::normalize_stored(label, true).as_str() == label;
             return (valid_title(title)
                 || title
                     .strip_prefix('[')
                     .and_then(|s| s.strip_suffix(']'))
                     .is_some_and(valid_title))
                 && lines.next().is_none_or(|directory| {
-                    DirectoryLabel::new(directory)
-                        .ok()
-                        .flatten()
+                    DirectoryLabel::from_stored(directory)
                         .is_some_and(|label| label.as_str() == directory)
                 })
                 && lines.next().is_none();
@@ -61,7 +60,7 @@ pub(crate) fn is_service_notice(text: &str) -> bool {
     };
     let title = header.strip_prefix('[').and_then(|s| s.strip_suffix(']'));
     body == UNCONFIRMED_NOTICE
-        && title.is_some_and(|title| SessionTitle::normalize(title, false).as_str() == title)
+        && title.is_some_and(|title| SessionTitle::normalize_stored(title, false).as_str() == title)
 }
 
 /// A single-line display label, never a session identity or routing key.
@@ -72,12 +71,36 @@ impl SessionTitle {
     /// Collapse whitespace, strip unsafe controls and keep at most 50 graphemes.
     /// Overlong labels reserve the last grapheme for a visible ellipsis.
     /// A single grapheme can contain many scalars; final output still needs validation.
-    pub fn new(input: &str) -> Self {
-        Self::normalize(input, true)
+    pub fn parse(input: &str) -> Result<Self, AppError> {
+        let normalized = normalize_line(input.chars(), true);
+        if !is_meaningful_title(&normalized) {
+            return Err(AppError::InvalidTitle);
+        }
+        let title = Self::truncate(normalized);
+        title
+            .is_meaningful()
+            .then_some(title)
+            .ok_or(AppError::InvalidTitle)
     }
 
-    fn normalize(input: &str, safe: bool) -> Self {
-        let mut normalized = normalize_line(input, safe);
+    pub(crate) fn from_stored(input: &str) -> Self {
+        let normalized = normalize_line(input.chars(), true);
+        if normalized.is_empty() || starts_with_path(&comparable_label(&normalized)) {
+            return Self(FALLBACK_TITLE.to_owned());
+        }
+        Self::truncate(normalized)
+    }
+
+    // Match notices already sent with legacy titles, including ones now rejected for display.
+    fn normalize_stored(input: &str, safe: bool) -> Self {
+        let normalized = normalize_line(input.chars(), safe);
+        if normalized.is_empty() {
+            return Self(FALLBACK_TITLE.to_owned());
+        }
+        Self::truncate(normalized)
+    }
+
+    fn truncate(mut normalized: String) -> Self {
         let mut graphemes = normalized.grapheme_indices(true);
         let cutoff = graphemes
             .nth(TITLE_GRAPHEME_LIMIT - 1)
@@ -88,10 +111,11 @@ impl SessionTitle {
             normalized.truncate(normalized.trim_end().len());
             normalized.push('…');
         }
-        if normalized.is_empty() {
-            normalized.push_str(FALLBACK_TITLE);
-        }
         Self(normalized)
+    }
+
+    pub(crate) fn is_meaningful(&self) -> bool {
+        is_meaningful_title(self.as_str())
     }
 
     pub fn as_str(&self) -> &str {
@@ -99,18 +123,69 @@ impl SessionTitle {
     }
 }
 
-/// Opt-in display context only; never a filesystem authority, instruction or route.
+fn is_meaningful_title(title: &str) -> bool {
+    let comparable = comparable_label(title);
+    if starts_with_path(&comparable) {
+        return false;
+    }
+    let title = placeholder_text(&comparable);
+    !title.is_empty()
+        && ![
+            "agent session",
+            "session",
+            "agent",
+            "untitled",
+            "new chat",
+            "new session",
+            "conversation",
+            "chat",
+        ]
+        .iter()
+        .any(|placeholder| title.eq_ignore_ascii_case(placeholder))
+}
+
+fn placeholder_text(mut title: &str) -> &str {
+    let mut cutoff = false;
+    loop {
+        // A cutoff can remove one or more closing brackets.
+        cutoff |= title.trim_end_matches(['[', ']', ' ']).ends_with('…');
+        title = title.trim_matches(['[', ']', '…', ' ']);
+        let Some(open) = title.chars().next() else {
+            return title;
+        };
+        let Some(close) = label_bracket_end(open) else {
+            return title;
+        };
+        let inner = &title[open.len_utf8()..];
+        let Some(inner) = inner.strip_suffix(close).or(cutoff.then_some(inner)) else {
+            return title;
+        };
+        title = inner;
+    }
+}
+
+/// Project or workspace display context with no filesystem or routing authority.
 #[derive(Clone, PartialEq, Eq)]
 pub struct DirectoryLabel(String);
 
 impl DirectoryLabel {
-    /// Blank labels are omitted; oversized normalized labels are rejected, not truncated.
-    pub fn new(input: &str) -> Result<Option<Self>, AppError> {
-        let normalized = normalize_line(input, true);
-        if normalized.chars().count() > DIRECTORY_SCALAR_LIMIT {
-            return Err(AppError::InvalidRequest("directory_label"));
-        }
-        Ok((!normalized.is_empty()).then_some(Self(normalized)))
+    /// Validate a short, nonblank display label before admitting it to registration.
+    pub fn parse(input: &str) -> Result<Self, AppError> {
+        Self::from_stored(input)
+            .filter(Self::is_project_label)
+            .ok_or(AppError::InvalidDirectoryLabel)
+    }
+
+    /// Read legacy labels without applying current project-label validation.
+    pub(crate) fn from_stored(input: &str) -> Option<Self> {
+        let normalized = normalize_line(input.chars(), true);
+        (!normalized.is_empty() && normalized.chars().count() <= DIRECTORY_SCALAR_LIMIT)
+            .then_some(Self(normalized))
+    }
+
+    pub(crate) fn is_project_label(&self) -> bool {
+        let label = comparable_label(&self.0);
+        !label.is_empty() && !starts_with_path(&label)
     }
 
     pub fn as_str(&self) -> &str {
@@ -118,10 +193,70 @@ impl DirectoryLabel {
     }
 }
 
-fn normalize_line(input: &str, safe: bool) -> String {
+/// Match only after leading display wrappers and whitespace in the comparison text.
+fn starts_with_path(label: &str) -> bool {
+    let prefix = label.trim_start_matches(|c: char| {
+        c.is_whitespace()
+            || label_bracket_end(c).is_some()
+            || matches!(
+                c,
+                '\'' | '"' | '`' | '＇' | '＂' | '‘'..='‚' | '“'..='„' | '«' | '»' | '‹' | '›'
+            )
+    });
+    let drive_path = matches!(
+        prefix.as_bytes(),
+        [drive, b':', b'/' | b'\\', ..] if drive.is_ascii_alphabetic()
+    );
+    prefix.starts_with(['/', '~']) || prefix.starts_with(r"\\") || drive_path
+}
+
+fn label_bracket_end(open: char) -> Option<char> {
+    Some(match open {
+        '[' => ']',
+        '(' => ')',
+        '{' => '}',
+        '<' => '>',
+        '（' => '）',
+        '［' => '］',
+        '｛' => '｝',
+        '＜' => '＞',
+        '〈' => '〉',
+        '《' => '》',
+        '「' => '」',
+        '『' => '』',
+        '【' => '】',
+        '〔' => '〕',
+        _ => return None,
+    })
+}
+
+fn comparable_label(label: &str) -> Cow<'_, str> {
+    // Ignore invisible modifiers for validation while preserving them in display text.
+    // Treat blank Braille and Hangul spaces as separators, like ordinary whitespace.
+    let is_blank = |c| matches!(c, '\u{2800}' | '\u{3164}' | '\u{ffa0}');
+    let is_ignorable = |c| {
+        matches!(c, '\u{34f}' | '\u{115f}'..='\u{1160}' | '\u{17b4}'..='\u{17b5}'
+            | '\u{180b}'..='\u{180d}' | '\u{180f}' | '\u{200c}'..='\u{200d}'
+            | '\u{fe00}'..='\u{fe0f}' | '\u{fff0}'..='\u{fff8}' | '\u{1bca0}'..='\u{1bca3}'
+            | '\u{1d173}'..='\u{1d17a}' | '\u{e0000}'..='\u{e0fff}')
+    };
+    if label.contains(|c| is_blank(c) || is_ignorable(c)) {
+        Cow::Owned(normalize_line(
+            label
+                .chars()
+                .filter(|&c| !is_ignorable(c))
+                .map(|c| if is_blank(c) { ' ' } else { c }),
+            true,
+        ))
+    } else {
+        Cow::Borrowed(label)
+    }
+}
+
+fn normalize_line(input: impl Iterator<Item = char>, safe: bool) -> String {
     let mut normalized = String::new();
     let mut space = false;
-    for c in input.chars() {
+    for c in input {
         if c.is_whitespace() {
             space = !normalized.is_empty();
         } else if c.is_control() || (safe && unsafe_format_control(c)) {
@@ -207,7 +342,7 @@ pub fn format_text(
     directory: Option<&DirectoryLabel>,
     body: &str,
 ) -> Result<FormattedMessage, AppError> {
-    format_outbound("", Some(title), directory, body, TEXT_UTF16_LIMIT)
+    format_outbound("", Some(title.as_str()), directory, body, TEXT_UTF16_LIMIT)
 }
 
 /// An empty document description leaves only the title and optional directory.
@@ -216,7 +351,13 @@ pub fn format_caption(
     directory: Option<&DirectoryLabel>,
     body: &str,
 ) -> Result<FormattedMessage, AppError> {
-    format_outbound("", Some(title), directory, body, CAPTION_UTF16_LIMIT)
+    format_outbound(
+        "",
+        Some(title.as_str()),
+        directory,
+        body,
+        CAPTION_UTF16_LIMIT,
+    )
 }
 
 /// Every service notice begins with the exact prefix, before any known-session header.
@@ -225,12 +366,20 @@ pub fn format_notice(
     directory: Option<&DirectoryLabel>,
     body: &str,
 ) -> Result<FormattedMessage, AppError> {
+    let title = title.map(|title| {
+        if title.is_meaningful() {
+            title.as_str()
+        } else {
+            FALLBACK_TITLE
+        }
+    });
+    let directory = directory.filter(|label| label.is_project_label());
     format_outbound(SERVICE_PREFIX, title, directory, body, TEXT_UTF16_LIMIT)
 }
 
 fn format_outbound(
     prefix: &str,
-    title: Option<&SessionTitle>,
+    title: Option<&str>,
     directory: Option<&DirectoryLabel>,
     body: &str,
     native_limit_utf16: usize,
@@ -243,7 +392,7 @@ fn format_outbound(
         + usize::from(directory.is_some());
     let (actual_characters, actual_utf16_units) = prefix
         .chars()
-        .chain(title.into_iter().flat_map(|title| title.as_str().chars()))
+        .chain(title.into_iter().flat_map(str::chars))
         .chain(
             directory
                 .into_iter()
@@ -269,12 +418,12 @@ fn format_outbound(
         entities.push(MessageEntity {
             kind: EntityKind::Bold,
             offset: prefix.encode_utf16().count(),
-            length: title.as_str().encode_utf16().count() + 2,
+            length: title.encode_utf16().count() + 2,
             url: None,
             language: None,
         });
         text.push('[');
-        text.push_str(title.as_str());
+        text.push_str(title);
         text.push(']');
     }
     if let Some(directory) = directory {

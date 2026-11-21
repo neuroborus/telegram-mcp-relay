@@ -1,8 +1,8 @@
 # Telegram MCP Bridge — Technical Specification and Implementation Task
 
-**Status:** Accepted requirements, including the 2026-11-01 body-entity, server-instruction and framing revisions  
+**Status:** Accepted requirements, including the RELAY-003 and RELAY-004 session presentation revision  
 **Original date:** 2026-10-29  
-**Revision date:** 2026-11-01  
+**Revision date:** 2026-11-21  
 **Preferred implementation:** Rust  
 **Target:** One lightweight, local, vendor-neutral MCP server shared by multiple agent sessions  
 **Primary user interface:** A single Telegram bot
@@ -33,13 +33,17 @@ also restores bold bracketed titles and blank-line separation, reserves a visibl
 inside the 50-grapheme title limit, and publishes standard server-wide MCP instructions before
 tool calls. It claims no new HOST/measurement results and does not change run-frozen guidance.
 
+The RELAY-003 and RELAY-004 revision requires a meaningful title and project label for
+agent outbound messages and fenced processing start. It preserves identity, routes and
+pending replies during metadata recovery.
+
 ---
 
 ## 1. Goal
 
 Build a small **Telegram ↔ MCP bridge** that lets many independent AI agent sessions communicate with one Telegram user through one bot.
 
-An agent can send short text, ask questions, and send files. **Every outgoing text message has a strict 1,000-Unicode-scalar maximum, including all visible framing**; longer information must be sent as an explicitly prepared file, not broken into a series of chat messages. Every agent-originated Telegram message identifies its session with a native bold `[title]` framing a label of at most **50 Unicode grapheme clusters**, optionally followed by an italic directory display line and a blank line before the body. The user can **Reply** to *any* of those messages—including a document—and the bridge routes that reply to the correct agent session, not simply to the last agent that spoke.
+An agent can send short text, ask questions, and send files. **Every outgoing text message has a strict 1,000-Unicode-scalar maximum, including all visible framing**; longer information must be sent as an explicitly prepared file, not broken into a series of chat messages. Every agent-originated Telegram message identifies its session with a native bold `[title]` framing a label of at most **50 Unicode grapheme clusters**, followed by an italic project display line and a blank line before the body. The user can **Reply** to *any* of those messages—including a document—and the bridge routes that reply to the correct agent session, not simply to the last agent that spoke.
 
 For incoming replies, support **standard MCP resource-change notifications whenever clients subscribe**, **plus enabled-by-default bounded waiting**, armed by an ask or explicitly after a successful text/file send without resending. These are complementary mechanisms, never exclusive modes. Replies remain durable when no agent is available. Provide opt-in bounded shared observation history and lazy authorized attachment access without changing private inbox ownership.
 
@@ -66,7 +70,7 @@ Keep resource usage extremely low: one native process, minimal allocations and C
 - One local Streamable HTTP MCP endpoint serving multiple simultaneous clients.
 - One Telegram bot and one or more explicitly allowlisted user/chat IDs (optimized for a single private chat).
 - Telegram long polling with `getUpdates`, with one outstanding request; no inbound public endpoint.
-- Registration of stable agent sessions, accurate human-readable titles and optional bounded directory display metadata; isolated native header entities and optional explicit body formatting.
+- Registration of stable agent sessions, accurate human-readable titles and required bounded project display metadata; isolated native header entities and optional explicit body formatting.
 - Short text sending with a strict 1,000-character limit, plus document sending with large-file-safe streaming and outbound message-to-session routing.
 - Telegram Reply routing to the original session, including replies to sent documents.
 - Durable inbox with at-least-once recoverability, explicit processing state, deduplication, and acknowledgments.
@@ -160,24 +164,47 @@ Use a minimal dependency graph. Re-evaluate exact crate versions and `rmcp` feat
 On first use, an agent explicitly registers:
 
 - `external_session_id`: stable runtime/thread ID **if available**; otherwise an agent-generated, persisted UUID.
-- `title`: obtain the **real current conversation title** from public host metadata when available; otherwise use an honest explicit fallback, never an invented title or model name. The relay cannot universally discover a host title, thread or working directory.
-- Optional `directory_label`: opt-in working-directory **display context**, not a path instruction, file authorization, host identity or routing input. Avoid personal absolute paths by default; omit it when unavailable or not explicitly chosen.
+- `title`: use the **real conversation title** from public host metadata when available and
+  valid. Otherwise choose a concise label grounded in the actual task or project, such as
+  “Review CI/CD” when the host title begins with a path.
+- `directory_label`: supply a short **project or workspace name** as display context on
+  creation. Where host project metadata is unavailable, choose a short name grounded in the
+  current work. The label grants no filesystem, identity or routing authority.
 - The bridge returns an opaque `session_key` and an inbox resource URI. Session-scoped tool calls carry `session_key` explicitly; read-only `telegram_guidance` needs no session.
 
-Persist mapping between `external_session_id`, `session_key`, title and optional directory label. Registration is idempotent for the same registered identity; a saved `session_key` can resume without an external ID. Different sessions with identical titles **must remain isolated**. No reliance on in-memory TCP connections, process IDs, directory labels or a model's display name as an identity.
+Persist mapping between `external_session_id`, `session_key`, title and project label. Old rows can lack a project label. Registration is idempotent for the same registered identity; a saved `session_key` can resume without an external ID. Different sessions with identical titles **must remain isolated**. No reliance on in-memory TCP connections, process IDs, directory labels or a model's display name as an identity.
 
 **Title handling:** Normalize whitespace and strip line breaks/unsafe controls. Preserve fitting
 labels; if new normalized input exceeds **50 Unicode grapheme clusters**, keep at most 49
-whole graphemes and end with Unicode `…` within that limit. Preserve existing ellipses on round
-trips. Blank titles use `Agent Session`. Render the complete `[title]` natively bold, with
+whole graphemes and end with Unicode `…` within that limit. Preserve existing ellipses in
+meaningful titles. Reject titles that are blank or only an ellipsis after normalization or
+truncation. Ignore the ellipsis when checking the retained title for placeholders. Reject the
+case-insensitive placeholders `agent session`,
+`session`, `agent`, `untitled`, `new chat`, `new session`, `conversation` and `chat`, including
+when wrapped in brackets. Return `REQUEST_INVALID` with title selection guidance. Render the complete `[title]` natively bold, with
 brackets outside the label limit but inside outbound length limits. Old persisted labels
 already truncated by a prior release have no recoverable original input; preserve compatibility
 without a recovery migration. Renaming affects future messages, never historical routes.
 
 **Directory handling:** Normalize to one safe line, stripping unsafe controls and line breaks.
-Reject more than **100 normalized Unicode scalars**; omit absent or blank values. Render a
-present label as a second, native italic line. Presentation updates affect future messages
-only. Do not infer a directory or use this field to resolve, open or authorize files.
+Require 1–**100 normalized Unicode scalars**. Short names such as `org/repo` are valid. On resume,
+omission retains the saved label. A supplied label must pass validation and replaces the saved label.
+
+**Leading paths:** After the existing whitespace, control and invisible-character handling,
+skip leading whitespace and supported opening brackets, quotes and backticks. Both fields reject
+the prefixes `/`, `~`, `\\`, and an ASCII drive letter followed by `:\` or `:/` with
+`REQUEST_INVALID`. A closing delimiter or appended prose does not affect the decision.
+“[/example]—CI/CD review” is invalid. “Review /example/project” and “[Release review]” are valid
+titles. Apply the same predicate to stored metadata and display it only where valid.
+
+An older session with an invalid title or missing or invalid label returns
+`SESSION_METADATA_REQUIRED` on send, ask, file send or `telegram_processing(active=true)`
+before any state change or Telegram effect. Recover by re-registering with the same
+`session_key` or `external_session_id` and a valid title and project label. Keep the session's
+routes and inbox replies. A resume response returns a null label when the retained label is
+missing or invalid. Service notices retain their framing, use `Agent Session` for an unsafe
+legacy title and omit missing or invalid project labels. New journal snapshots omit invalid
+session titles and labels while retaining the session's public display ID.
 
 ### 4.2 Telegram output
 
@@ -185,6 +212,7 @@ Text example:
 
 ```text
 [Refactor Portfolio API]
+portfolio
 
 ✅ Completed the implementation. All tests passed.
 ```
@@ -193,6 +221,7 @@ Question example:
 
 ```text
 [Fix ClickHouse Indexing]
+indexer
 
 ❓ Should I proceed with option A or option B?
 ```
@@ -203,13 +232,14 @@ Document example (Telegram document with caption):
 architecture-report.pdf
 Caption:
 [Refactor Portfolio API]
+portfolio
 
 Architecture review and implementation report.
 ```
 
-The code blocks show visible text; the entire bracketed title is bold. If a directory label
-is present, insert its separate italic line after the title. Separate the header block from
-a nonempty body with one blank line (two newlines), including when the directory is absent.
+The code blocks show visible text. Agent messages render the complete bracketed title in bold
+and the project label on a separate italic line. Separate the header from a nonempty body
+with one blank line (two newlines).
 An empty caption/body adds no trailing blank lines. Use Telegram `entities`
 for text and `caption_entities` for documents, without `parse_mode` or a new Markdown/HTML
 parser. Server-owned bold/italic spans use **UTF-16 code-unit offsets and lengths**, including
@@ -245,7 +275,7 @@ All bot-generated agent messages and documents are registered as `(telegram_chat
 
 **Mandatory outbound text policy (agent-facing and server-enforced):**
 
-- **Maximum 1,000 Unicode scalar values** per final outgoing Telegram text message (`Rust: message.chars().count()`), counting the entire visible string: emoji, service prefix, normalized title/ellipsis, brackets, optional directory, blank-line separators and body. Native entity metadata adds no visible characters. This is the explicit bridge-side definition of a *character*, not a UTF-8 byte or grapheme cluster.
+- **Maximum 1,000 Unicode scalar values** per final outgoing Telegram text message (`Rust: message.chars().count()`), counting the entire visible string: emoji, service prefix, normalized title/ellipsis, brackets, project label when present, blank-line separators and body. Native entity metadata adds no visible characters. This is the explicit bridge-side definition of a *character*, not a UTF-8 byte or grapheme cluster.
 - Apply the same **1,000-scalar final-caption limit** to documents, in addition to Telegram's native caption limit.
 - Apply these checks to `telegram_send`, `telegram_ask`, `telegram_send_file` captions, and automatically generated service notices. Incoming **user** Replies are not subject to this *outbound* limit.
 - Exactly 1,000 scalar values pass the **bridge** limit; 1,001 fail. Independently enforce Telegram's native limits. For document captions additionally validate a conservative **1,024 UTF-16-code-unit bound**. Thus a 1,000-scalar caption with many astral emojis may still be rejected to avoid a Telegram API failure. Test ASCII, Cyrillic, combining marks, ZWJ emoji, and supplementary-plane symbols.
@@ -271,11 +301,11 @@ The session title, directory, formatting and emoji are display labels. **Routing
 
 ## 5. MCP interface
 
-Use clear JSON Schemas, structured results, and stable error codes. The following is the intended **logical** contract; adopt the SDK's standard naming/serialization where appropriate. Keep tools limited and avoid implementing overlapping methods unless needed for correct semantics. Preserve the existing registration/send/file/ask/inbox/processing/ack contracts with additive metadata; new tools do not replace them. Every interaction-tool description, including registration, instructs callers to fetch `telegram_guidance` first for each client conversation, without a new enforcement handshake or vendor hook. Publish and test inventory/counts from the actual catalog, not a fixed historical tool count.
+Use clear JSON Schemas, structured results, and stable error codes. The following is the intended **logical** contract; adopt the SDK's standard naming/serialization where appropriate. Keep tools limited and avoid implementing overlapping methods unless needed for correct semantics. Enforce registration and outbound metadata according to §4.1 while preserving session identity and reply recovery. Every interaction-tool description, including registration, instructs callers to fetch `telegram_guidance` first for each client conversation, without a new enforcement handshake or vendor hook. Publish and test inventory/counts from the actual catalog, not a fixed historical tool count.
 
 | Tool | Required behavior |
 |---|---|
-| `telegram_register` | Register/resume a session with accurate title and optional directory label; return opaque key, effective presentation and inbox URI. |
+| `telegram_register` | Register or resume with a meaningful title and a project label for new sessions. Both fields follow the leading-path rule in §4.1. Omission on resume retains the saved label. Return the opaque key, effective presentation and inbox URI. |
 | `telegram_send` | Send concise text (maximum 1,000 formatted characters) and register its Telegram message ID; reject overlong requests. |
 | `telegram_send_file` | Send an existing local file as a Telegram document, with a concise title caption (maximum 1,000 formatted characters); register its message ID. |
 | `telegram_ask` | Send a question (maximum 1,000 formatted characters); if wait fallback is enabled, wait up to its configured timeout for a routed Reply; otherwise return immediately. **Events remain enabled in either case.** |
@@ -310,6 +340,7 @@ implemented schemas with `tools/list`; public usage documentation must use the a
 {
   "session_key": "opaque-session-handle",
   "title": "Fix ClickHouse Indexing",
+  "directory_label": "workspace/indexer",
   "inbox_uri": "telegram-bridge://sessions/opaque-session-handle/inbox"
 }
 ```
@@ -422,7 +453,7 @@ and nonsecret effective limits/capabilities, including the actual tool inventory
 subscription support, wait enablement/budgets, formatting rules, history privacy/coverage and
 attachment limits/availability. No private settings, paths, credentials or recovery handles.
 Every interaction tool's description requests it first per client conversation, including
-registration; clients that omit it retain backward-compatible access without vendor adapters.
+registration. Required title and project label validation applies even when the client skips guidance.
 
 Guidance must cover all of §14, body/header/emoji ownership, startup and notification inbox
 reads, current claim fences and lost-response-safe reconciliation, explicit wait arming and
@@ -586,6 +617,7 @@ when a session is known. Suggested text (title rendered bold):
 
 ```text
 🔧 [Fix ClickHouse Indexing]
+indexer
 
 Reply saved, but the agent has not confirmed processing it yet.
 ```
@@ -612,7 +644,7 @@ recursive unroutable notices for them. Opt-in journal observation does not chang
 ### 9.1 Agent → Telegram (MVP requirement)
 
 - Use Telegram `sendDocument` for arbitrary file types to preserve files in their original form.
-- Caption starts with native bold `[title]` and optional separate italic directory, then one blank line before a nonempty short description; validate complete visible scalar/UTF-16 limits (§4.2).
+- Caption starts with native bold `[title]` and a separate italic project label, then one blank line before a nonempty short description; validate complete visible scalar/UTF-16 limits (§4.2).
 - Store the returned Telegram message ID in the route table. Reply to that document must route to its originating session.
 - Read and stream from the local path rather than loading the entire file into RAM.
 - Validate that the path exists, resolves within configured allowed root directories, is a regular file, and is readable. Avoid symlink traversal and path-escaping TOCTOU problems as far as practical.
@@ -801,6 +833,8 @@ Consequences must be documented: Reply to a bot message after its route expires 
 - History capture **and** shared reads are explicitly opted in, disabled by default and require MCP authentication plus current chat/user allowlists. Disabling history stops capture/shared reads; retained records still expire under documented retention. Explain stored body privacy, migrations, deletion and the trusted-local-client model before enabling it.
 - Journal future authorized observed incoming text/captions/document/photo metadata, including standalone messages and content addressed to another session. Include bounded source/sender/session **display** context, stable opaque message/attachment handles and nonsecret session display IDs for filtering. Never expose another session's `session_key`, claim token or private recovery handle.
 - Journal only **confirmed** outgoing text/captions/document metadata and presentation snapshots, including service context. Coordinate reservation and successful journal insertion with existing route/notice bookkeeping transactions. Preserve accepted-send draining, definitive rejection, delivery uncertainty and confirmed-send bookkeeping errors; no fabricated success or automatic replay. Sending must never retain local source paths or file bytes.
+- Omit invalid legacy session titles and project labels from the display fields of all new
+  journal snapshots. Preserve prior observations and retained display identities.
 - `telegram_history` is observational and read-only: no claim, processing, acknowledgment, routing mutation or hidden whole-chat API. Default to the configured chat; validate optional chat/session-display/query/cursor/limit filters and every continuation against current authorization and opt-in. Never require another agent's secret session credential for a session filter.
 - Use bounded keyset pagination, page/response byte limits, bounded query input and indexed/bounded search work. Return a continuation when a bounded scan is incomplete, distinguishing that from the end of matching history. No full-chat dumps or unbounded scans in requests or logs.
 - Report honest observation start, retention/expiry and known coverage gaps. The Bot API has **no general past-chat retrieval**. Reuse older retained replies/routes only where actual content and authorization provenance support it; do not invent older outgoing bodies, expired/deleted content or group messages the bot could not observe. Explain bot visibility/privacy settings and the separate **at-most-24-hour upstream update window**. Restart recovery cannot reconstruct missed pre-observation data.
@@ -952,13 +986,19 @@ this requirement revision does not change run-frozen contributor instructions or
 - Fetch `telegram_guidance` first for each client conversation, including before
   registration. Follow its current capabilities, limits and actual schemas.
 - Register/resume a stable `external_session_id` or saved private `session_key`.
-  Obtain the REAL current conversation title from public host metadata when available;
-  otherwise use an honest explicit fallback, never a model name or invented title.
-  The relay cannot universally discover the host title/thread/working directory.
-  Preserve the returned session key privately; transport IDs are not agent identity.
-- Optional `directory_label` is opt-in display context only: prefer a short nonpersonal
-  label; omit unavailable/blank values. It grants no file, identity or routing authority.
-- The server owns the bold `[title]`, optional italic directory on its own line and
+  Use the real conversation title from public host metadata when available and valid.
+  Otherwise choose a concise label grounded in the actual task or project, such as
+  “Review CI/CD” when the host title begins with a path.
+  Skip leading whitespace, opening brackets, quotes and backticks when checking either
+  display field. If it starts with an absolute or home path, it is invalid even if prose follows.
+  Preserve the returned session key privately across transport connections.
+- Set `directory_label` to a short project or workspace name, such as `org/repo`,
+  or choose a name from the current work when host project metadata is unavailable.
+  Omitting the field on resume keeps the saved
+  label. If Relay returns `SESSION_METADATA_REQUIRED`, re-register with the same
+  identity and supply both a valid title and label. Existing routes and replies stay
+  with that identity. Display context grants no file or routing authority.
+- The server owns the bold `[title]`, italic project label on its own line and
   one blank line before a nonempty body. Empty captions add no trailing blank line.
   Titles fit 50 graphemes; overlong new titles end with `…` inside that limit.
   Supply verbatim bodies/captions; do not manually repeat headers or add service notices.
@@ -1057,8 +1097,8 @@ Keep phases small and independently testable; do **not** treat provider-specific
 
 ### Accepted agent-experience extensions
 
-Native header entities, optional directory context, after-send/file waiting, the opt-in bounded
-shared journal/history interface, confined lazy attachment downloads and versioned current
+Native header entities, required project context for agent sends, after-send/file waiting,
+the opt-in bounded shared journal/history interface, confined lazy attachment downloads and versioned current
 guidance are **required**, not optional later work. Their implementation follows the accepted
 fifteen-commit sequence; this revision does not reorder that plan or assert completion of any
 feature. Add meaningful synthetic proofs at the owning layers and mixed-protocol composition
@@ -1071,8 +1111,8 @@ coverage, then reconcile public documentation with actual DTOs and tested capabi
 ### Functional acceptance
 
 - [ ] A single Rust process supports at least **three concurrent agent sessions** on one Telegram bot.
-- [ ] Registration uses the actual current title from available public host metadata or an honest explicit fallback; no invented/model title or universal host-discovery claim. Stable identity, same-title isolation and future-only renaming remain intact.
-- [ ] Every agent text/question/document has a native bold `[title]` framing a normalized label of at most **50 graphemes**, with `…` ending overlong new input inside that limit. Fitting and persisted labels round-trip; lost input is not fabricated. Optional italic directory uses a separate line; one blank line precedes a nonempty body, with no generated trailing blank lines. Directory labels are normalized to one safe line, reject over 100 normalized scalars, omit absent/blank values and confer no filesystem/routing authority.
+- [ ] Registration uses the real title from available public host metadata when valid or a concise title grounded in the actual task or project. Blank and placeholder titles fail, and both display fields reject paths starting after leading whitespace and supported wrappers. Stable identity, same-title isolation and future-only renaming remain intact.
+- [ ] Every agent text/question/document has a native bold `[title]` framing a normalized label of at most **50 graphemes**, with `…` ending overlong new input inside that limit. Fitting and persisted labels round-trip; lost input is not fabricated. The italic project label uses a separate line, followed by one blank line before a nonempty body. The label is a safe display line of 1–100 scalars. Omission on resume keeps the saved label. Older sessions recover missing or invalid presentation under the same identity.
 - [ ] Native text/caption entities use correct UTF-16 offsets/lengths, including astral/ZWJ/combining characters and any service prefix. Optional body-relative entities support §4.2's kinds, metadata and nesting without header overlap. Omitted/empty lists remain literal; invalid inputs fail before effects and no implicit markup is parsed.
 - [ ] Every outgoing text/question/document caption is **at most 1,000 Unicode scalar values in its final visible form**, including emoji, service prefix, brackets, title/ellipsis, directory and blank-line separators; exactly 1,000 scalars are accepted by that policy, 1,001 are rejected before effects, and captions additionally fit **1,024 UTF-16 units** plus other native limits.
 - [ ] The bridge never splits or truncates an oversized message, or silently generates a file: it returns `TEXT_TOO_LONG` with an accurate count and guidance to use `telegram_send_file`.
@@ -1181,8 +1221,8 @@ Implementation must verify current upstream versions and behavior rather than tr
 |---|---|
 | One compact Rust native service, low idle RAM/CPU, local-only | §§1–3, 13, 16 |
 | Universal MCP, one Telegram bot for multiple agents, no vendor adapters | §§1–3, 5–6 |
-| Real host title or honest fallback, stable identity and future-only presentation | §§4.1, 5.2, 14, 16 |
-| Bold bracketed 50-grapheme title with cutoff ellipsis, italic opt-in 100-scalar directory and blank line; optional native body entities and literal defaults | §§4.1–4.2, 9, 14, 16 |
+| Real host title or concise task/project title, stable identity and future-only presentation | §§4.1, 5.2, 14, 16 |
+| Bold bracketed 50-grapheme title with cutoff ellipsis, italic required project label within 100 scalars and blank line; optional native body entities and literal defaults | §§4.1–4.2, 9, 14, 16 |
 | Maximum 1,000 outgoing text characters including header; use files for details | §§4.2, 5, 9, 14, 16 |
 | Reply to any agent text/document routes to original session | §§4.3, 6, 9–10 |
 | MCP resource notifications remain active with or without a pending wait | §§5–6, 16 |

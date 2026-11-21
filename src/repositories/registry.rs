@@ -37,6 +37,22 @@ impl Session {
     pub fn inbox_uri(&self) -> String {
         format!("telegram-bridge://sessions/{}/inbox", self.session_key)
     }
+
+    pub(crate) fn outbound_directory_label(&self) -> Result<&DirectoryLabel, AppError> {
+        self.display_directory_label()
+            .filter(|_| self.title.is_meaningful())
+            .ok_or(AppError::SessionMetadataRequired)
+    }
+
+    pub(crate) fn display_directory_label(&self) -> Option<&DirectoryLabel> {
+        self.directory_label
+            .as_ref()
+            .filter(|label| label.is_project_label())
+    }
+
+    pub(super) fn display_title(&self) -> Option<&str> {
+        self.title.is_meaningful().then_some(self.title.as_str())
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -198,11 +214,8 @@ impl Database {
             return Err(AppError::InvalidRequest("external_session_id"));
         }
         let expires_at = expiry(now, self.registry.session_ttl_ms)?;
-        let title = SessionTitle::new(title);
-        let directory_label = directory_label
-            .map(DirectoryLabel::new)
-            .transpose()?
-            .flatten();
+        let title = SessionTitle::parse(title)?;
+        let directory_label = directory_label.map(DirectoryLabel::parse).transpose()?;
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -223,42 +236,52 @@ impl Database {
         let mut session = if let Some(existing) = &existing {
             existing.clone()
         } else {
+            if directory_label.is_none() {
+                return Err(AppError::InvalidDirectoryLabel);
+            }
             Session {
                 session_key: random_key()?,
                 external_session_id: external_session_id.map(str::to_owned),
                 title: title.clone(),
-                directory_label: directory_label.clone(),
+                directory_label: None,
                 created_at: now,
                 last_activity_at: now,
                 expires_at,
             }
         };
         session.title = title;
-        session.directory_label = directory_label;
         session.last_activity_at = session.last_activity_at.max(now);
         session.expires_at = session.expires_at.max(expires_at);
         let used = usage(&transaction)?;
-        let old_bytes = if let Some(existing) = &existing {
-            // Schema v1 can contain titles not yet normalized by the registration API.
-            let title_bytes: u64 = transaction.query_row(
-                "SELECT length(CAST(title AS BLOB)) FROM sessions WHERE session_key = ?1",
-                [&existing.session_key],
-                |r| r.get(0),
+        let identity_bytes = session_identity_bytes(&session);
+        let (old_bytes, saved_label_bytes) = if existing.is_some() {
+            // Account for the original bytes, including legacy labels kept on omission.
+            let (title_bytes, label_bytes): (u64, u64) = transaction.query_row(
+                "SELECT length(CAST(title AS BLOB)),
+                    coalesce(length(CAST(directory_label AS BLOB)), 0)
+                 FROM sessions WHERE session_key = ?1",
+                [&session.session_key],
+                |r| Ok((r.get(0)?, r.get(1)?)),
             )?;
-            session_bytes(existing) - existing.title.as_str().len() as u64 + title_bytes
+            (identity_bytes + title_bytes + label_bytes, label_bytes)
         } else {
-            0
+            (0, 0)
         };
+        let new_label_bytes = directory_label
+            .as_ref()
+            .map_or(saved_label_bytes, |label| label.as_str().len() as u64);
+        let new_bytes = identity_bytes + session.title.as_str().len() as u64 + new_label_bytes;
         if (existing.is_none() && used.sessions >= u64::from(self.registry.sessions))
             || used.metadata_bytes - old_bytes
-                + session_bytes(&session)
+                + new_bytes
                 + self.reserved_routes.bytes.load(Ordering::SeqCst)
                 > self.registry.metadata_bytes
         {
             return Err(AppError::StorageCapacity);
         }
         let sql = if existing.is_some() {
-            "UPDATE sessions SET title = ?3, last_activity_at = ?5, expires_at = ?6, directory_label = ?7
+            "UPDATE sessions SET title = ?3, last_activity_at = ?5, expires_at = ?6,
+                 directory_label = coalesce(?7, directory_label)
              WHERE session_key = ?1 AND external_session_id IS ?2 AND created_at = ?4"
         } else {
             // A random-key collision must fail rather than adopt another session's identity.
@@ -273,10 +296,13 @@ impl Database {
                 session.created_at,
                 session.last_activity_at,
                 session.expires_at,
-                session.directory_label.as_ref().map(DirectoryLabel::as_str),
+                directory_label.as_ref().map(DirectoryLabel::as_str),
             ),
         )?;
         transaction.commit()?;
+        if let Some(label) = directory_label {
+            session.directory_label = Some(label);
+        }
         Ok(session)
     }
 
@@ -465,13 +491,10 @@ fn session_row(row: &Row<'_>) -> rusqlite::Result<Session> {
     Ok(Session {
         session_key: row.get(0)?,
         external_session_id: row.get(1)?,
-        title: SessionTitle::new(&title),
+        title: SessionTitle::from_stored(&title),
         directory_label: directory_label
             .as_deref()
-            .map(DirectoryLabel::new)
-            .transpose()
-            .map_err(|_| rusqlite::Error::InvalidQuery)?
-            .flatten(),
+            .and_then(DirectoryLabel::from_stored),
         created_at: row.get(3)?,
         last_activity_at: row.get(4)?,
         expires_at: row.get(5)?,
@@ -490,18 +513,13 @@ pub(super) fn session_by(
     ).optional()?)
 }
 
-fn session_bytes(session: &Session) -> u64 {
+fn session_identity_bytes(session: &Session) -> u64 {
     ROW_BYTES
         + session.session_key.len() as u64
         + session
             .external_session_id
             .as_ref()
             .map_or(0, |s| s.len() as u64)
-        + session.title.as_str().len() as u64
-        + session
-            .directory_label
-            .as_ref()
-            .map_or(0, |label| label.as_str().len() as u64)
 }
 
 pub(super) struct Usage {

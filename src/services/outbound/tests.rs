@@ -162,7 +162,7 @@ impl Fixture {
         database
             .lock()
             .unwrap()
-            .register_session(None, None, " 界\n ", None, 50_000)
+            .register_session(None, None, " 界\n ", Some("p"), 50_000)
             .unwrap()
     }
 
@@ -354,7 +354,7 @@ async fn validates_before_effects_and_persists_exact_formatted_boundaries_across
             .unwrap_err(),
         AppError::SessionNotFound
     );
-    for body in ["a".repeat(996), "😀".repeat(996)] {
+    for body in ["a".repeat(994), "😀".repeat(994)] {
         let error = service
             .send_text(&session.session_key, &body)
             .await
@@ -383,8 +383,8 @@ async fn validates_before_effects_and_persists_exact_formatted_boundaries_across
             .unwrap()
             .is_none()
     );
-    // Brackets and the blank line consume five scalars with this one-scalar title.
-    for (id, body) in [(7, "a".repeat(995)), (8, "😀".repeat(995))] {
+    // The header and separator consume seven scalars.
+    for (id, body) in [(7, "a".repeat(993)), (8, "😀".repeat(993))] {
         let result = service
             .send_text(&session.session_key, &body)
             .await
@@ -394,7 +394,7 @@ async fn validates_before_effects_and_persists_exact_formatted_boundaries_across
         assert_eq!(requests.last().unwrap().method, "/botSynthetic/sendMessage");
         assert_eq!(
             serde_json::from_slice::<Value>(&requests.last().unwrap().body).unwrap(),
-            json!({"chat_id":-101,"text":format!("[界]\n\n{body}"),"entities":[{"type":"bold","offset":0,"length":3}]})
+            json!({"chat_id":-101,"text":format!("[界]\np\n\n{body}"),"entities":[{"type":"bold","offset":0,"length":3},{"type":"italic","offset":4,"length":1}]})
         );
     }
     assert_eq!(mock.count(), 2);
@@ -447,7 +447,7 @@ async fn rejects_unapproved_destination_and_exhausted_storage_before_http() {
         let mut fixture = Fixture::new();
         fixture.config.limits.routes = 1;
         if metadata_limited {
-            fixture.config.limits.metadata_bytes = 128 + 64 + "界".len() as u32;
+            fixture.config.limits.metadata_bytes = 128 + 64 + "界".len() as u32 + 1;
         }
         let database = fixture.open();
         let session = fixture.register(&database);

@@ -97,9 +97,9 @@ Only sanitized, at-most-128-byte ASCII basenames are prepared for upload; errors
 Document streaming enforces the opening size during mutation; see
 [document delivery](ARCHITECTURE.md#document-delivery).
 Final outbound text/captions always have the fixed 1,000-scalar policy, counting native headers,
-the optional directory, separators, service prefix and body; captions also fit 1,024 UTF-16 units.
-Registration's opt-in `directory_label` is normalized display metadata, omitted/cleared when
-absent or blank and rejected above 100 normalized scalars. Its UTF-8 bytes count toward
+project labels, separators, service prefixes and bodies. Captions also fit 1,024 UTF-16 units.
+New registrations require a `directory_label` of 1–100 normalized scalars. Omission on resume
+keeps the saved display label. Its UTF-8 bytes count toward
 `limits.metadata_bytes`; it never authorizes file access. Positive request/task/subscription/inbox/payload/metadata budgets reject excessive values
 and inconsistent capacities. SQLite's physical budget must exceed payload plus metadata budgets;
 later components enforce actual usage without early eviction. The library MCP endpoint enforces

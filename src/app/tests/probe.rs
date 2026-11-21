@@ -26,7 +26,7 @@ async fn probe_runs_shared_tools_and_drains_an_accepted_send() {
         let session = tool(
             address,
             "telegram_register",
-            json!({"title":"Resource probe"}),
+            json!({"title":"Resource probe","directory_label":"p"}),
         )
         .await;
         let key = session["session_key"].as_str().unwrap().to_owned();
@@ -40,7 +40,7 @@ async fn probe_runs_shared_tools_and_drains_an_accepted_send() {
             .await
         });
         let send = mock.next("sendMessage").await;
-        assert_eq!(send.payload["text"], "[Resource probe]\n\nSynthetic");
+        assert_eq!(send.payload["text"], "[Resource probe]\np\n\nSynthetic");
         caller.abort();
         assert!(caller.await.unwrap_err().is_cancelled());
         stop.cancel();

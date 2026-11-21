@@ -590,7 +590,7 @@ mod tests {
         };
         let mut database = Database::open(&settings, &Limits::default()).unwrap();
         let key = database
-            .register_session(None, None, "Synthetic", None, 0)
+            .register_session(None, None, "Synthetic", Some("p"), 0)
             .unwrap()
             .session_key;
         let before = database.disk_usage().unwrap();
@@ -667,7 +667,7 @@ mod tests {
         };
         let mut database = Database::open(&settings, &Limits::default()).unwrap();
         let key = database
-            .register_session(None, None, "Synthetic", None, 0)
+            .register_session(None, None, "Synthetic", Some("p"), 0)
             .unwrap()
             .session_key;
         // Create free overflow pages while retaining the real session row and indexes.
