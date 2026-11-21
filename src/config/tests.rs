@@ -13,10 +13,20 @@ fn parse(extra: &str) -> Result<Config, AppError> {
     Config::parse(&input, Some(Path::new("/home/synthetic")))
 }
 
+fn parse_telegram(settings: &str, extra: &str) -> Result<Config, AppError> {
+    let input = BASE.replacen("[telegram]\n", &format!("[telegram]\n{settings}\n"), 1);
+    Config::parse(
+        &format!("{input}{extra}"),
+        Some(Path::new("/home/synthetic")),
+    )
+}
+
 #[test]
 fn defaults_and_example_are_safe_and_independent() {
     let config = parse("").unwrap();
     assert!(config.server.listen.ip().is_loopback());
+    assert_eq!(config.telegram.bot_api, BotApi::Cloud);
+    assert_eq!(config.telegram.local_bot_api_address().unwrap(), None);
     assert!(config.delivery.wait_fallback_enabled && config.activity.typing_enabled);
     assert_eq!(config.delivery.wait_timeout_seconds, 600);
     assert!(!config.history.enabled);
@@ -38,6 +48,144 @@ fn defaults_and_example_are_safe_and_independent() {
     let config = parse("[delivery]\nwait_fallback_enabled=false\nwait_timeout_seconds=900\n[activity]\ntyping_max_duration_seconds=8\n").unwrap();
     assert_eq!(config.activity.typing_refresh_seconds, 4);
     assert_eq!(config.delivery.wait_timeout_seconds, 900);
+}
+
+#[test]
+fn local_bot_api_accepts_explicit_loopback_and_keeps_cloud_transfer_limits() {
+    let root = "local_bot_api_files_root = '~/upstream'";
+    let settings = |url: &str| format!("bot_api = 'local'\n{root}\nlocal_bot_api_url = '{url}'");
+    for address in ["127.0.0.2:8081", "[::1]:80"] {
+        let config = parse_telegram(&settings(&format!("http://{address}")), "").unwrap();
+        assert_eq!(config.telegram.bot_api, BotApi::Local);
+        assert_eq!(
+            config.telegram.local_bot_api_address().unwrap(),
+            Some(address.parse().unwrap())
+        );
+        assert_eq!(
+            config.telegram.local_bot_api_files_root.as_deref(),
+            Some(Path::new("/home/synthetic/upstream"))
+        );
+        assert_eq!(config.downloads.max_file_bytes, CLOUD_DOWNLOAD_BYTES);
+        assert_eq!(config.files.max_outbound_mb, 50);
+    }
+    let local = settings("http://127.0.0.1:8081");
+    for extra in [
+        "[downloads]\nmax_file_bytes=20000001",
+        "[downloads]\nmax_total_bytes=1073741825",
+        "[downloads]\ntimeout_seconds=601",
+    ] {
+        assert_eq!(
+            parse_telegram(&local, extra).unwrap_err(),
+            AppError::InvalidConfig("downloads.budgets")
+        );
+    }
+    let mut config = parse_telegram(&local, "").unwrap();
+    config.files.max_outbound_mb = 51;
+    assert_eq!(
+        config.validate(None).unwrap_err(),
+        AppError::InvalidConfig("files.max_outbound_mb")
+    );
+}
+
+#[test]
+fn local_bot_api_rejects_enabled_downloads_until_local_retrieval_is_supported() {
+    let downloads = "[downloads]\nenabled=true\nroots=['~/downloads']";
+    assert!(parse(downloads).unwrap().downloads.enabled);
+    assert_eq!(
+        parse_telegram(
+            "bot_api='local'\nlocal_bot_api_url='http://127.0.0.1:8081'\nlocal_bot_api_files_root='~/upstream'",
+            downloads,
+        )
+        .unwrap_err(),
+        AppError::InvalidConfig("downloads.enabled")
+    );
+}
+
+#[test]
+fn local_bot_api_rejects_anything_beyond_an_explicit_http_loopback_authority() {
+    for url in [
+        "http://192.0.2.1:8081",
+        "http://localhost:8081",
+        "http://127.1:8081",
+        "http://127.0.0.1",
+        "http://127.0.0.1:0",
+        "https://127.0.0.1:8081",
+        "http://user:secret@127.0.0.1:8081",
+        "http://127.0.0.1:8081/",
+        "http://127.0.0.1:8081/prefix/..",
+        "http://127.0.0.1:8081?",
+        "http://127.0.0.1:8081#",
+        "http://[::1%0]:8081",
+    ] {
+        let settings = format!(
+            "bot_api='local'\nlocal_bot_api_url='{url}'\nlocal_bot_api_files_root='/upstream'"
+        );
+        assert_eq!(
+            parse_telegram(&settings, "").unwrap_err(),
+            AppError::InvalidConfig("telegram.local_bot_api_url"),
+            "{url}"
+        );
+    }
+    for (settings, field) in [
+        (
+            "bot_api='local'\nlocal_bot_api_files_root='/upstream'",
+            "telegram.local_bot_api_url",
+        ),
+        (
+            "bot_api='local'\nlocal_bot_api_url='http://127.0.0.1:8081'",
+            "telegram.local_bot_api_files_root",
+        ),
+        (
+            "bot_api='cloud'\nlocal_bot_api_url='http://127.0.0.1:8081'",
+            "telegram.local_bot_api_url",
+        ),
+        (
+            "local_bot_api_files_root='/upstream'",
+            "telegram.local_bot_api_files_root",
+        ),
+        ("bot_api='auto'", "TOML document"),
+    ] {
+        assert_eq!(
+            parse_telegram(settings, "").unwrap_err(),
+            AppError::InvalidConfig(field)
+        );
+    }
+}
+
+#[test]
+fn local_bot_api_root_must_be_absolute_and_separate_from_relay_paths() {
+    for (root, extra, telegram_extra) in [
+        ("relative", "", ""),
+        ("/", "", ""),
+        ("/private/../upstream", "", ""),
+        ("~/exports", "", ""),
+        ("~/exports/upstream", "", ""),
+        (
+            "~/upstream",
+            "[downloads]\nroots=['~/upstream/downloads']",
+            "",
+        ),
+        (
+            "~/upstream",
+            "[storage]\npath='~/upstream/relay.sqlite'",
+            "",
+        ),
+        (
+            "~/upstream",
+            "[server]\nauth_token_file='~/upstream/auth'",
+            "",
+        ),
+        ("~/upstream", "", "bot_token_file='~/upstream/bot'"),
+    ] {
+        let settings = format!(
+            "bot_api='local'\nlocal_bot_api_url='http://127.0.0.1:8081'\nlocal_bot_api_files_root='{root}'\n{telegram_extra}"
+        );
+        assert_eq!(
+            parse_telegram(&settings, extra).unwrap_err(),
+            AppError::InvalidConfig("telegram.local_bot_api_files_root"),
+            "{root} {extra} {telegram_extra}"
+        );
+    }
 }
 
 #[test]
@@ -201,6 +349,185 @@ impl Drop for Fixture {
     fn drop(&mut self) {
         fs::remove_dir_all(&self.0).unwrap();
     }
+}
+
+fn local_bot_api_config(upstream: &Path, exports: &Path, database: &Path) -> String {
+    format!(
+        "[telegram]\n\
+         chat_id = 101\nallowed_chat_ids = [101]\nallowed_user_ids = [202]\n\
+         bot_api = 'local'\nlocal_bot_api_url = 'http://127.0.0.1:8081'\n\
+         local_bot_api_files_root = {upstream:?}\n\
+         [files]\nallowed_roots = [{exports:?}]\n\
+         [storage]\npath = {database:?}\n"
+    )
+}
+
+#[test]
+fn loading_local_bot_api_config_rejects_overlap_through_a_symlinked_ancestor() {
+    let fixture = Fixture::new();
+    let upstream = fixture.0.join("upstream");
+    fs::create_dir_all(upstream.join("private")).unwrap();
+    let alias = fixture.0.join("alias");
+    symlink(&upstream, &alias).unwrap();
+    let exports = fixture.0.join("exports");
+    let input = |database: &Path| local_bot_api_config(&upstream, &exports, database);
+    let separate_db = fixture.0.join("relay.sqlite");
+    let protected = alias.join("private");
+    let token = protected.join("token");
+    for (name, config) in [
+        ("overlap-db.toml", input(&protected.join("relay.sqlite"))),
+        (
+            "overlap-token.toml",
+            format!(
+                "{}[server]\nauth_token_file = {token:?}\n",
+                input(&separate_db)
+            ),
+        ),
+    ] {
+        let config_path = fixture.write(name, config.as_bytes());
+        assert_eq!(
+            Config::load(&config_path).unwrap_err(),
+            AppError::InvalidConfig(LOCAL_BOT_API_FILES_ROOT)
+        );
+    }
+    let config_path = fixture.write("separate.toml", input(&separate_db).as_bytes());
+    assert!(Config::load(&config_path).is_ok());
+    assert!(!separate_db.exists());
+    assert!(!token.exists());
+}
+
+#[test]
+fn local_bot_api_rejects_a_dangling_upstream_ancestor() {
+    let fixture = Fixture::new();
+    let exports = fixture.0.join("exports");
+    fs::create_dir(&exports).unwrap();
+    let alias = fixture.0.join("alias");
+    symlink(exports.join("missing"), &alias).unwrap();
+    let mountinfo = b"1 0 8:1 / / rw - ext4 /dev/synthetic rw\n";
+    let database = fixture.0.join("relay.sqlite");
+    for upstream in [alias.join("upstream"), alias.join(".")] {
+        let input = local_bot_api_config(&upstream, &exports, &database);
+        let config = Config::parse(&input, None).unwrap();
+        assert_eq!(
+            config.validate_local_path_aliases(&upstream, mountinfo),
+            Err(AppError::InvalidConfig(LOCAL_BOT_API_FILES_ROOT))
+        );
+    }
+}
+
+#[test]
+fn loading_local_bot_api_config_rejects_a_file_as_the_working_directory() {
+    let fixture = Fixture::new();
+    let upstream = fixture.0.join("upstream");
+    let database = fixture.write("relay.sqlite", b"synthetic");
+    let input = local_bot_api_config(&upstream, &fixture.0.join("exports"), &database);
+    let path = fixture.write("local.toml", input.as_bytes());
+    assert!(Config::load(&path).is_ok());
+    fixture.write("upstream", b"synthetic");
+    assert_eq!(
+        Config::load(&path).unwrap_err(),
+        AppError::InvalidConfig(LOCAL_BOT_API_FILES_ROOT)
+    );
+}
+
+#[test]
+fn filesystem_prefix_overlap_detects_bind_mount_aliases() {
+    // Model two disjoint mount paths for the same directory without creating a mount.
+    let prefix = |device, inode, remainder: &'static str| ExistingPathPrefix {
+        device,
+        inode,
+        remainder: Path::new(remainder),
+    };
+    let upstream = prefix(7, 42, "");
+    assert!(upstream.overlaps(&prefix(7, 42, "")));
+    assert!(upstream.overlaps(&prefix(7, 42, "private/token")));
+    assert!(!upstream.overlaps(&prefix(8, 42, "")));
+    assert!(!upstream.overlaps(&prefix(7, 43, "")));
+    assert!(prefix(7, 42, "private").overlaps(&prefix(7, 42, "private/token")));
+    assert!(!prefix(7, 42, "private").overlaps(&prefix(7, 42, "exports")));
+}
+
+fn mount_field(path: &Path) -> String {
+    path.to_str()
+        .unwrap()
+        .replace('\\', "\\134")
+        .replace(' ', "\\040")
+        .replace('\t', "\\011")
+        .replace('\n', "\\012")
+}
+
+#[test]
+fn local_bot_api_rejects_namespace_mounts_that_cover_configured_paths() {
+    let fixture = Fixture::new();
+    let upstream = fixture.0.join("upstream");
+    let exports = fixture.0.join("exports");
+    let database = fixture.0.join("relay.sqlite");
+    fs::create_dir(&upstream).unwrap();
+    fs::create_dir(&exports).unwrap();
+    let input = local_bot_api_config(&upstream, &exports, &database);
+    let config = Config::parse(&input, None).unwrap();
+    let validate = |point: &Path| {
+        let mountinfo = format!(
+            "1 0 8:1 / / rw - ext4 /dev/synthetic rw\n\
+             2 1 0:4 mnt:[4026537000] {} rw - nsfs nsfs rw\n",
+            mount_field(point)
+        );
+        config.validate_local_path_aliases(&upstream, mountinfo.as_bytes())
+    };
+
+    for point in [
+        fixture.0.join("unrelated"),
+        upstream.join("namespace"),
+        exports.join("namespace"),
+    ] {
+        assert_eq!(validate(&point), Ok(()), "{point:?}");
+    }
+    for point in [&upstream, &exports, &database, &fixture.0] {
+        assert_eq!(
+            validate(point),
+            Err(AppError::InvalidConfig(LOCAL_BOT_API_FILES_ROOT)),
+            "{point:?}"
+        );
+    }
+}
+
+#[test]
+fn local_bot_api_rejects_a_nested_bind_mount_of_an_upstream_subdirectory() {
+    let fixture = Fixture::new();
+    let upstream = fixture.0.join("upstream files");
+    let exports = fixture.0.join("exports");
+    let nested = exports.join("nested");
+    fs::create_dir_all(upstream.join("private")).unwrap();
+    fs::create_dir_all(&nested).unwrap();
+    let input = local_bot_api_config(&upstream, &exports, &fixture.0.join("relay.sqlite"));
+    let config = Config::parse(&input, None).unwrap();
+
+    // Model a bind of an upstream descendant below exports without mounting anything.
+    // The configured roots and their ancestors share only the ordinary fixture prefix.
+    let mountinfo = |source: &Path| {
+        format!(
+            "1 0 8:1 / / rw - ext4 /dev/synthetic rw\n\
+             2 1 8:2 /data {} rw - ext4 /dev/synthetic2 rw\n\
+             3 2 8:2 {} {} rw - ext4 /dev/synthetic2 rw\n\
+             4 2 0:4 mnt:[4026537000] {} rw - nsfs nsfs rw\n",
+            mount_field(&fixture.0),
+            mount_field(source),
+            mount_field(&nested),
+            mount_field(&exports.join("namespace"))
+        )
+    };
+    assert!(
+        config
+            .validate_local_path_aliases(&upstream, mountinfo(Path::new("/data/other")).as_bytes())
+            .is_ok()
+    );
+    assert_eq!(
+        config.validate_local_path_aliases(
+            &upstream,
+            mountinfo(Path::new("/data/upstream files/private")).as_bytes()
+        ),
+        Err(AppError::InvalidConfig(LOCAL_BOT_API_FILES_ROOT))
+    );
 }
 
 #[test]

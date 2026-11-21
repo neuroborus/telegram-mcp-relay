@@ -1,13 +1,16 @@
 //! Private cloud downloads into an already owned writer; no caller URLs or path opening.
 
-use std::{net::IpAddr, time::Duration};
+use std::{
+    net::{IpAddr, SocketAddr},
+    time::Duration,
+};
 
 use reqwest::{StatusCode, Url, header};
 use serde::Deserialize;
 use serde_json::json;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 
-use super::{REQUEST_TIMEOUT, TelegramClient};
+use super::{EndpointOrigin, REQUEST_TIMEOUT, TelegramClient};
 use crate::{
     config::{CLOUD_DOWNLOAD_BYTES, DOWNLOAD_TIMEOUT_MAX},
     error::{AppError, TelegramError},
@@ -24,21 +27,18 @@ struct File {
     file_path: Option<String>,
 }
 
-/// Production is fixed to Telegram HTTPS. Only explicit synthetic constructors use HTTP.
-pub(super) fn file_endpoint(endpoint: &str, https_only: bool) -> Result<Url, AppError> {
+/// Keep file requests on the authorized Bot API origin and token path.
+pub(super) fn file_endpoint(endpoint: &str, origin: EndpointOrigin) -> Result<Url, AppError> {
     let invalid = || AppError::InvalidConfig("Telegram client endpoint");
     let mut url = Url::parse(endpoint).map_err(|_| invalid())?;
-    let origin_allowed = if https_only {
-        url.scheme() == "https"
-            && url.host_str() == Some("api.telegram.org")
-            && url.port_or_known_default() == Some(443)
-    } else {
-        url.scheme() == "http"
-            && url
-                .host_str()
-                .and_then(|host| host.trim_matches(['[', ']']).parse::<IpAddr>().ok())
-                .is_some_and(|ip| ip.is_loopback())
-            && url.port_or_known_default().is_some_and(|port| port != 0)
+    let origin_allowed = match origin {
+        EndpointOrigin::Cloud => {
+            url.scheme() == "https"
+                && url.host_str() == Some("api.telegram.org")
+                && url.port_or_known_default() == Some(443)
+        }
+        EndpointOrigin::Local(address) => loopback_address(&url) == Some(address),
+        EndpointOrigin::LoopbackMock => loopback_address(&url).is_some(),
     };
     let token = url
         .path()
@@ -62,6 +62,16 @@ pub(super) fn file_endpoint(endpoint: &str, https_only: bool) -> Result<Url, App
     let path = format!("/file/bot{token}/");
     url.set_path(&path);
     Ok(url)
+}
+
+fn loopback_address(url: &Url) -> Option<SocketAddr> {
+    let ip = url
+        .host_str()?
+        .trim_matches(['[', ']'])
+        .parse::<IpAddr>()
+        .ok()?;
+    let port = url.port_or_known_default()?;
+    (url.scheme() == "http" && ip.is_loopback() && port != 0).then_some(SocketAddr::new(ip, port))
 }
 
 impl TelegramClient {

@@ -86,6 +86,32 @@ See the [official API](https://core.telegram.org/bots/api) and
 [documented API review](ARCHITECTURE.md#telegram-http-client); the baseline text trial did not
 verify webhook migration or every upstream failure mode.
 
+## Optional local Bot API upstream
+
+Relay defaults to Telegram's cloud API. To opt in to a same-host upstream:
+
+1. Stop the existing bot consumer. From a private HTTPS client, call Telegram's cloud
+   [`logOut`](https://core.telegram.org/bots/api#logout) and confirm success before connecting
+   the bot to the local server. Keep the token out of command arguments, request logs and shell
+   history. Telegram documents a ten-minute delay before the bot can return to the cloud API.
+2. Run [`telegram-bot-api --local`](https://github.com/tdlib/telegram-bot-api) bound to a numeric
+   loopback address and explicit port. Use a dedicated working directory with trusted ancestors,
+   separate from Relay storage, exports and secrets. The operator owns the upstream process,
+   its permissions, cleanup and Bot API migration calls (`logOut` and `close`). A loopback
+   listener is sufficient.
+3. Add the settings to the existing `[telegram]` section and replace the synthetic path and
+   address with your upstream values.
+
+   ```toml
+   bot_api = "local"
+   local_bot_api_url = "http://127.0.0.1:8081"
+   local_bot_api_files_root = "~/.local/share/telegram-bot-api"
+   ```
+
+   Relay routes its Bot API calls to this origin. Set `downloads.enabled = false` before
+   starting Relay in local mode. Attachment retrieval currently supports cloud mode. Relay's
+   upload ceiling remains 50 MB.
+
 ## Configure paths and secrets
 
 Copy the templates only when the destination does not already exist; preserve an existing
@@ -129,8 +155,8 @@ content: same-user hard links, mounts and in-place writes remain part of the loc
 Uploads stream the validated open handle, retain no file copy, and enforce the lower of the
 configured limit and 50,000,000 bytes. Keep files stable until the send completes.
 
-Downloads default off and use separate dedicated private roots. For a new installation, create
-an absent root inside the existing state-directory writable boundary:
+Downloads default off and use separate dedicated private roots. To enable downloads in cloud
+mode, create an absent root inside the existing state-directory writable boundary:
 
 ```bash
 mkdir -m 700 "$HOME/.local/state/telegram-mcp-relay/downloads"
@@ -169,10 +195,12 @@ IDs, roots and port conflicts without enabling sensitive HTTP logs.
 Configure one **remote Streamable HTTP** connection to `http://127.0.0.1:8765/mcp`, with
 `Authorization: Bearer <MCP_BEARER>` when auth is enabled. Do not configure a stdio command
 that launches a daemon per session. Keep the listener on loopback; no public port, tunnel,
-reverse proxy, webhook endpoint or broad CORS is needed. Only the daemon needs outbound
-Telegram HTTPS/DNS. Native clients may omit Origin; if present, Origin must be HTTP with the
-configured numeric authority or `localhost`, including the port. Host has the same authority
-restriction. A shared bearer and opaque session handles assume **trusted local clients**;
+reverse proxy, webhook endpoint or broad CORS is needed. In cloud mode, Relay needs HTTPS and
+DNS access to Telegram. In local mode, Relay connects only to the configured loopback Bot API
+origin, and the operator-managed Bot API process needs external Telegram connectivity.
+Native clients may omit Origin. If present, Origin must be HTTP with the configured numeric
+authority or `localhost`, including the port. Host has the same authority restriction.
+A shared bearer and opaque session handles assume **trusted local clients**;
 they do not isolate hostile agents or users with access to your process/files.
 
 The locked SDK is rmcp 3.8.0. MCP **2025-06-18** and **2026-07-28** share this endpoint,

@@ -1,8 +1,8 @@
-//! One reusable HTTPS Bot API client, bounded decoding and conservative send uncertainty.
+//! One reusable Bot API HTTP client, bounded decoding and conservative send uncertainty.
 
 use std::{fmt, net::SocketAddr, time::Duration};
 
-use reqwest::{Client, StatusCode, redirect::Policy};
+use reqwest::{Client, StatusCode, Url, redirect::Policy};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::json;
 
@@ -21,6 +21,12 @@ pub(crate) const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 pub(crate) const UPLOAD_TIMEOUT: Duration = Duration::from_secs(600);
 const ATTEMPTS: usize = 3;
 const MAX_RETRY_DELAY: Duration = Duration::from_secs(30);
+
+enum EndpointOrigin {
+    Cloud,
+    Local(SocketAddr),
+    LoopbackMock,
+}
 
 #[derive(Clone)]
 pub struct TelegramClient {
@@ -55,7 +61,7 @@ struct Parameters {
 impl TelegramClient {
     #[cfg(test)]
     pub(crate) fn for_test(config: &Config, endpoint: String) -> Result<Self, AppError> {
-        Self::build(config, endpoint, false)
+        Self::build(config, endpoint, EndpointOrigin::LoopbackMock)
     }
 
     /// Credential-free loopback construction, confined to the explicit library probe.
@@ -63,20 +69,29 @@ impl TelegramClient {
         if !address.ip().is_loopback() || address.port() == 0 {
             return Err(AppError::InvalidConfig("probe mock address"));
         }
-        Self::build(config, format!("http://{address}/botSynthetic/"), false)
-    }
-
-    /// Uses only Telegram's cloud endpoint; production accepts no endpoint override.
-    pub fn new(config: &Config, token: &Secret) -> Result<Self, AppError> {
         Self::build(
             config,
-            format!("https://api.telegram.org/bot{}/", token.expose()),
-            true,
+            format!("http://{address}/botSynthetic/"),
+            EndpointOrigin::LoopbackMock,
         )
     }
 
-    fn build(config: &Config, endpoint: String, https_only: bool) -> Result<Self, AppError> {
-        let file_endpoint = download::file_endpoint(&endpoint, https_only)?;
+    /// Uses Telegram's HTTPS cloud endpoint or the operator's configured loopback server.
+    pub fn new(config: &Config, token: &Secret) -> Result<Self, AppError> {
+        let path = format!("/bot{}/", token.expose());
+        let (origin, base) = match config.telegram.local_bot_api_address()? {
+            Some(address) => (EndpointOrigin::Local(address), format!("http://{address}")),
+            None => (EndpointOrigin::Cloud, "https://api.telegram.org".to_owned()),
+        };
+        let mut endpoint =
+            Url::parse(&base).map_err(|_| AppError::InvalidConfig("Telegram client endpoint"))?;
+        endpoint.set_path(&path);
+        Self::build(config, endpoint.into(), origin)
+    }
+
+    fn build(config: &Config, endpoint: String, origin: EndpointOrigin) -> Result<Self, AppError> {
+        let https_only = matches!(origin, EndpointOrigin::Cloud);
+        let file_endpoint = download::file_endpoint(&endpoint, origin)?;
         if !(1..=16_777_216).contains(&config.limits.telegram_response_bytes)
             || !(1..=50).contains(&config.telegram.long_poll_timeout_seconds)
         {

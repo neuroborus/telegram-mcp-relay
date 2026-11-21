@@ -266,8 +266,9 @@ and whole-task publication; they do not inherit checks from the completed produc
 The root Cargo example [resource_probe](../tools/resource_probe.rs) links the actual
 [`app` composition](../src/app.rs) through its explicit [probe constructor](../src/app/probe.rs).
 It uses protected SQLite, the same MCP endpoint, one poller, notices, retention, shared
-typing and admitted-send draining. Production startup and TOML retain the fixed Telegram cloud
-endpoint; there is no production endpoint override or new dependency.
+typing and admitted-send draining. The probe uses its explicit synthetic loopback peer.
+Production defaults to the Telegram cloud API and can opt in to a configured loopback upstream.
+See [Telegram Bot API configuration](CONFIGURATION.md#telegram-bot-api-upstream).
 
 Build prerequisites are the locked root toolchain/dependencies and ordinary private writable
 Cargo output, as for the daemon. Both exact builds are mandatory Runner-managed FINALIZE checks:

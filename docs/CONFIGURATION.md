@@ -10,8 +10,8 @@ TOML path: `telegram-mcp-relay /absolute/path/to/config.toml`. Startup validates
 secrets, opens protected SQLite/export roots and configured private download roots, binds the
 listener, then completes startup cleanup before serving MCP or starting Telegram activity. Start with the
 [synthetic example](../config/relay.example.toml);
-unlisted settings retain [central defaults](../src/config.rs). Unknown fields, inline
-credentials and API overrides fail. TOML input is bounded to 64 KiB.
+unlisted settings retain [central defaults](../src/config.rs). Unknown fields and inline
+credentials fail. TOML input is bounded to 64 KiB.
 
 Specify a nonzero destination `telegram.chat_id` inside nonempty `allowed_chat_ids`, positive
 `allowed_user_ids`, and 1–64 export roots. IDs are bounded to 52 bits; ID lists to 256 entries.
@@ -37,6 +37,30 @@ paths outside exports. Protect environment sources with a mode-0600 service envi
 It creates 64 hex characters from 32 OS-random bytes with exclusive mode-0600 creation and a
 synced write. Existing files are validated, never overwritten/repaired; failed writes may leave
 an incomplete private file requiring operator removal. No parent directories are auto-created.
+
+## Telegram Bot API upstream
+
+| `[telegram]` setting | Default | Accepted values |
+| --- | --- | --- |
+| `bot_api` | `"cloud"` | `"cloud"` selects `https://api.telegram.org`. `"local"` selects an operator-managed loopback Bot API server. |
+| `local_bot_api_url` | Omitted | Required in local mode. Use an HTTP origin with a literal loopback IPv4 or IPv6 address and an explicit nonzero port, such as `http://127.0.0.1:8081` or `http://[::1]:8081`. Supply only the scheme and authority, with no credentials, path (including a trailing slash), query or fragment. |
+| `local_bot_api_files_root` | Omitted | Required in local mode. Use an absolute, dedicated upstream working directory. Initial `~/` expands against the daemon's HOME. |
+
+Cloud mode requires both local keys to be omitted. The upstream working directory must be
+separate from `downloads.roots`, `files.allowed_roots`, `storage.path` and both configured
+secret files. Relay checks expanded paths when parsing. At startup it resolves existing path
+prefixes, compares filesystem device and inode, and reads `/proc/self/mountinfo` to detect aliases
+through nested bind mounts. Startup ignores namespace files when comparing backing directories
+and rejects opaque mounts that cover a configured path. Dangling symlinks in configured paths
+fail validation. An existing upstream path must resolve to a directory. Keep the operator-managed
+working directory and Relay paths separate when changing mounts.
+
+Local mode requires `downloads.enabled = false`. A `--local` server returns absolute paths and
+Relay currently retrieves attachments only through the cloud API. The 50 MB outbound limit
+applies to both modes. See
+[local upstream setup](SETUP.md#optional-local-bot-api-upstream).
+
+## Delivery, storage and resource limits
 
 Wait/grace settings accept 1–86,400 seconds; claims 1–600; independent typing duration 1–600
 with refresh 1–5 seconds no longer than that duration. Long polling defaults to 45 (1–50).
@@ -154,7 +178,7 @@ create roots or repair permissions on existing paths.
 
 | Download setting | Default | Accepted range |
 | --- | --- | --- |
-| `enabled` | false | Boolean; enabled operation requires roots |
+| `enabled` | false | Boolean; enabled operation requires cloud mode and approved roots |
 | `roots` | empty | At most 8 separate absolute roots; initial `~/` expansion supported |
 | `max_file_bytes` | 20,000,000 | 1–20,000,000 payload bytes |
 | `max_total_bytes` | 100,000,000 | At least `max_file_bytes`, at most 1,073,741,824 payload bytes |

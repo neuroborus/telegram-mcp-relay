@@ -34,7 +34,7 @@ impl Downloads {
                 !files
                     .allowed_roots
                     .iter()
-                    .any(|source| overlap(root, source)),
+                    .any(|source| paths_overlap(root, source)),
                 "downloads.source separation",
             )?;
             require(
@@ -48,14 +48,12 @@ impl Downloads {
         }
         for (i, root) in self.roots.iter().enumerate() {
             require(
-                !self.roots[..i].iter().any(|other| overlap(root, other)),
+                !self.roots[..i]
+                    .iter()
+                    .any(|other| paths_overlap(root, other)),
                 "downloads.root separation",
             )?;
         }
         Ok(())
     }
-}
-
-fn overlap(left: &Path, right: &Path) -> bool {
-    left.starts_with(right) || right.starts_with(left)
 }

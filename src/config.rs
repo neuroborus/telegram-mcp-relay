@@ -2,9 +2,10 @@
 
 use std::{
     fmt,
-    fs::File,
-    io::Read,
+    fs::{self, File},
+    io::{self, Read},
     net::SocketAddr,
+    os::unix::fs::MetadataExt,
     path::{Component, Path, PathBuf},
 };
 
@@ -13,6 +14,7 @@ use serde::Deserialize;
 use crate::error::AppError;
 
 mod downloads;
+mod mounts;
 mod secrets;
 pub use secrets::{Secret, Secrets};
 
@@ -29,6 +31,7 @@ pub(crate) const MCP_SESSION_QUEUE: usize = 16;
 pub(crate) const MCP_CONTROL_REQUESTS: usize = 1;
 pub(crate) const INCOMING_ATTACHMENT_LIMIT: usize = 10;
 const CONFIG_BYTES: usize = 65_536;
+const LOCAL_BOT_API_FILES_ROOT: &str = "telegram.local_bot_api_files_root";
 
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -69,14 +72,59 @@ settings!(Server {
     auth_token_file: Option<PathBuf> = None,
     create_auth_token_file: bool = false,
 });
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum BotApi {
+    Cloud,
+    Local,
+}
+
 settings!(Telegram {
     bot_token_env: Option<String> = None,
     bot_token_file: Option<PathBuf> = None,
+    bot_api: BotApi = BotApi::Cloud,
+    local_bot_api_url: Option<String> = None,
+    local_bot_api_files_root: Option<PathBuf> = None,
     chat_id: i64 = 0,
     allowed_chat_ids: Vec<i64> = Vec::new(),
     allowed_user_ids: Vec<u64> = Vec::new(),
     long_poll_timeout_seconds: u64 = 45,
 });
+
+impl Telegram {
+    pub(crate) fn local_bot_api_address(&self) -> Result<Option<SocketAddr>, AppError> {
+        const URL: &str = "telegram.local_bot_api_url";
+        match self.bot_api {
+            BotApi::Cloud => {
+                require(self.local_bot_api_url.is_none(), URL)?;
+                require(
+                    self.local_bot_api_files_root.is_none(),
+                    LOCAL_BOT_API_FILES_ROOT,
+                )?;
+                Ok(None)
+            }
+            BotApi::Local => {
+                // Parse the raw authority as an IP socket. URL parsers can normalize away
+                // paths, infer a port, or interpret noncanonical hostnames as numeric IPs.
+                let address = self
+                    .local_bot_api_url
+                    .as_deref()
+                    .and_then(|url| url.strip_prefix("http://"))
+                    .filter(|authority| !authority.contains('%'))
+                    .and_then(|authority| authority.parse::<SocketAddr>().ok())
+                    .filter(|address| address.ip().is_loopback() && address.port() != 0)
+                    .ok_or(AppError::InvalidConfig(URL))?;
+                require(
+                    self.local_bot_api_files_root.is_some(),
+                    LOCAL_BOT_API_FILES_ROOT,
+                )?;
+                Ok(Some(address))
+            }
+        }
+    }
+}
+
 settings!(Delivery {
     wait_fallback_enabled: bool = true,
     wait_timeout_seconds: u64 = 600,
@@ -205,7 +253,13 @@ impl Config {
             .read_to_string(&mut input)
             .map_err(|_| AppError::ConfigRead)?;
         let home = std::env::var_os("HOME").map(PathBuf::from);
-        Self::parse(&input, home.as_deref())
+        let config = Self::parse(&input, home.as_deref())?;
+        if let Some(root) = &config.telegram.local_bot_api_files_root {
+            let mountinfo = fs::read("/proc/self/mountinfo")
+                .map_err(|_| AppError::InvalidConfig(LOCAL_BOT_API_FILES_ROOT))?;
+            config.validate_local_path_aliases(root, &mountinfo)?;
+        }
+        Ok(config)
     }
 
     /// Parse and validate without filesystem mutations, environment changes or network I/O.
@@ -307,15 +361,75 @@ impl Config {
             *path = expand_path(path, home)?;
             require(path.parent().is_some(), "files.allowed_roots")?;
         }
-        self.downloads.normalize(
-            home,
-            &self.files,
-            &self.storage,
-            [
-                self.server.auth_token_file.as_deref(),
-                self.telegram.bot_token_file.as_deref(),
-            ],
+        let secrets = [
+            self.server.auth_token_file.as_deref(),
+            self.telegram.bot_token_file.as_deref(),
+        ];
+        self.telegram.local_bot_api_address()?;
+        require(
+            self.telegram.bot_api != BotApi::Local || !self.downloads.enabled,
+            "downloads.enabled",
         )?;
+        self.downloads
+            .normalize(home, &self.files, &self.storage, secrets)?;
+        if let Some(root) = &mut self.telegram.local_bot_api_files_root {
+            *root = expand_path(root, home)
+                .map_err(|_| AppError::InvalidConfig(LOCAL_BOT_API_FILES_ROOT))?;
+        }
+        if let Some(root) = &self.telegram.local_bot_api_files_root {
+            require(
+                root.parent().is_some()
+                    && !self.relay_paths().any(|path| paths_overlap(root, path)),
+                LOCAL_BOT_API_FILES_ROOT,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn relay_paths(&self) -> impl Iterator<Item = &Path> {
+        self.downloads
+            .roots
+            .iter()
+            .chain(&self.files.allowed_roots)
+            .map(PathBuf::as_path)
+            .chain(std::iter::once(self.storage.path.as_path()))
+            .chain(self.server.auth_token_file.as_deref())
+            .chain(self.telegram.bot_token_file.as_deref())
+    }
+
+    fn validate_local_path_aliases(&self, root: &Path, mountinfo: &[u8]) -> Result<(), AppError> {
+        let invalid = |_| AppError::InvalidConfig(LOCAL_BOT_API_FILES_ROOT);
+        let resolve = |path: &Path| resolve_existing_prefix(path).map_err(invalid);
+        let root = resolve(root)?;
+        match fs::symlink_metadata(&root) {
+            Ok(metadata) => require(metadata.is_dir(), LOCAL_BOT_API_FILES_ROOT)?,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => (),
+            Err(error) => return Err(invalid(error)),
+        }
+        let root_prefixes = existing_path_prefixes(&root).map_err(invalid)?;
+        let mounts = mounts::MountTable::parse(mountinfo)
+            .ok_or(AppError::InvalidConfig(LOCAL_BOT_API_FILES_ROOT))?;
+        let backing_paths = |path: &Path| {
+            mounts
+                .backing_paths(path)
+                .ok_or(AppError::InvalidConfig(LOCAL_BOT_API_FILES_ROOT))
+        };
+        let upstream_mount_paths = backing_paths(&root)?;
+        for path in self.relay_paths() {
+            let path = resolve(path)?;
+            require(!paths_overlap(&root, &path), LOCAL_BOT_API_FILES_ROOT)?;
+            let overlaps = existing_path_prefixes(&path)
+                .map_err(invalid)?
+                .iter()
+                .any(|prefix| root_prefixes.iter().any(|root| root.overlaps(prefix)));
+            require(!overlaps, LOCAL_BOT_API_FILES_ROOT)?;
+            require(
+                !backing_paths(&path)?
+                    .iter()
+                    .any(|path| upstream_mount_paths.iter().any(|root| root.overlaps(path))),
+                LOCAL_BOT_API_FILES_ROOT,
+            )?;
+        }
         Ok(())
     }
 }
@@ -362,6 +476,69 @@ fn expand_path(path: &Path, home: Option<&Path>) -> Result<PathBuf, AppError> {
         "path",
     )?;
     Ok(expanded)
+}
+
+fn paths_overlap(left: &Path, right: &Path) -> bool {
+    left.starts_with(right) || right.starts_with(left)
+}
+
+// Resolve aliases even where Relay will create the database or a secret later.
+fn resolve_existing_prefix(path: &Path) -> io::Result<PathBuf> {
+    for prefix in path.ancestors() {
+        match prefix.canonicalize() {
+            Ok(resolved) => {
+                let remainder = path.strip_prefix(prefix).map_err(io::Error::other)?;
+                return Ok(if remainder.as_os_str().is_empty() {
+                    resolved
+                } else {
+                    resolved.join(remainder)
+                });
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                // Trim trailing separators and dots so metadata does not follow a symlink.
+                let prefix = prefix.components().as_path();
+                // An unresolved symlink can redirect the missing suffix when its target appears.
+                match prefix.symlink_metadata() {
+                    Err(missing) if missing.kind() == io::ErrorKind::NotFound => (),
+                    Err(other) => return Err(other),
+                    Ok(_) => return Err(error),
+                }
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Err(io::ErrorKind::NotFound.into())
+}
+
+struct ExistingPathPrefix<'a> {
+    device: u64,
+    inode: u64,
+    remainder: &'a Path,
+}
+
+impl ExistingPathPrefix<'_> {
+    fn overlaps(&self, other: &Self) -> bool {
+        self.device == other.device
+            && self.inode == other.inode
+            && paths_overlap(self.remainder, other.remainder)
+    }
+}
+
+// Bind mounts can expose the same prefix under different canonical pathnames.
+fn existing_path_prefixes(path: &Path) -> io::Result<Vec<ExistingPathPrefix<'_>>> {
+    let mut prefixes = Vec::new();
+    for ancestor in path.ancestors() {
+        match fs::metadata(ancestor) {
+            Ok(metadata) => prefixes.push(ExistingPathPrefix {
+                device: metadata.dev(),
+                inode: metadata.ino(),
+                remainder: path.strip_prefix(ancestor).map_err(io::Error::other)?,
+            }),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => (),
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(prefixes)
 }
 
 #[cfg(test)]

@@ -558,12 +558,24 @@ fn cloud_origin_and_path_validation_reject_url_interpretation_and_traversal() {
         "https://api.telegram.org/a/../botSynthetic/",
     ] {
         assert_eq!(
-            file_endpoint(endpoint, true).unwrap_err(),
+            file_endpoint(endpoint, EndpointOrigin::Cloud).unwrap_err(),
             AppError::InvalidConfig("Telegram client endpoint")
         );
     }
-    assert!(file_endpoint("http://192.0.2.1/botSynthetic/", false).is_err());
-    assert!(file_endpoint("https://api.telegram.org/bot123:synthetic/", true).is_ok());
+    assert!(
+        file_endpoint(
+            "http://192.0.2.1/botSynthetic/",
+            EndpointOrigin::LoopbackMock
+        )
+        .is_err()
+    );
+    assert!(
+        file_endpoint(
+            "https://api.telegram.org/bot123:synthetic/",
+            EndpointOrigin::Cloud
+        )
+        .is_ok()
+    );
     for path in [
         "",
         "/private",
@@ -584,4 +596,26 @@ fn cloud_origin_and_path_validation_reject_url_interpretation_and_traversal() {
     }
     assert!(!valid_path(&"a".repeat(4_097)));
     assert!(valid_path("documents/file_1-test.bin"));
+}
+
+#[test]
+fn local_file_endpoint_fixes_the_http_address_and_port() {
+    let local = || EndpointOrigin::Local("[::1]:80".parse().unwrap());
+    assert_eq!(
+        file_endpoint("http://[::1]/bot123:synthetic/", local())
+            .unwrap()
+            .as_str(),
+        "http://[::1]/file/bot123:synthetic/"
+    );
+    for endpoint in [
+        "http://[::1]:8081/botSynthetic/",
+        "http://127.0.0.1/botSynthetic/",
+        "https://[::1]/botSynthetic/",
+        "http://[::1]/botSynthetic/?private",
+    ] {
+        assert_eq!(
+            file_endpoint(endpoint, local()).unwrap_err(),
+            AppError::InvalidConfig("Telegram client endpoint")
+        );
+    }
 }

@@ -776,14 +776,15 @@ document and verified its 44-byte authorized download; it is not a near-limit li
 ## Telegram HTTP client
 
 `clients::telegram::TelegramClient` owns one reusable reqwest/rustls pool; clones share it.
-The production constructor fixes `https://api.telegram.org`, disables proxy discovery,
-redirects and reqwest retries, and retains no transport errors or Telegram descriptions.
+The production constructor uses `https://api.telegram.org` by default or the explicit numeric
+loopback HTTP origin selected in [configuration](CONFIGURATION.md#telegram-bot-api-upstream).
+It disables proxy discovery, redirects and reqwest retries, and retains no transport errors or
+Telegram descriptions.
 Crate tests and the explicit [resource probe](MEASUREMENTS.md) can construct a mock endpoint;
 the probe accepts only a numeric loopback address and sends a fixed synthetic token path.
-TOML has no API override. Production
-startup shares that client across polling, delivery, typing and notices. The delivery service
-owns title formatting,
-destination authorization, capacity reservations and durable routes for text/document sends.
+Production startup shares that client across polling, delivery, typing and notices. The delivery
+service owns title formatting, destination authorization, capacity reservations and durable
+routes for text/document sends.
 
 The adapter provides `getUpdates`, `getWebhookInfo`, native-entity `sendMessage`, streamed
 `sendDocument` and typing `sendChatAction`. Updates retain
@@ -823,13 +824,13 @@ minimum number of seconds before repeating a rate-limited request; typing lasts 
 five seconds and can clear on a new bot message. These are documented API contracts,
 not live bot observations.
 
-The complete, unfiltered `cargo test --locked --workspace` suite passed in Runner FINALIZE
-through the read-only trusted route, including the synthetic HTTP client tests. Earlier
-Native attempts failed at loopback `bind` with `Operation not permitted`; that limitation
-did not affect the successful Runner execution. No socket tests were skipped. The separate
+The [accepted composition suite](TESTING.md#agent-experience-composition-validation) passed in
+Runner FINALIZE through the read-only trusted route, including the HTTP client tests in that
+candidate. Earlier Native attempts failed at loopback `bind` with `Operation not permitted`.
+Runner executed the full suite, including the socket tests. The separate
 [HOST record](MEASUREMENTS.md#agent-experience-host-acceptance) verifies bounded live text,
 document and download effects; live rate-limit/retry, Unicode-boundary and other API edge cases
-remain unverified. Production configuration exposes no endpoint override.
+remain unverified.
 
 ## Private cloud download adapter
 
@@ -843,9 +844,10 @@ stable `file_unique_id` must match retained provenance; the bounded opaque `file
 because Telegram permits multiple valid IDs for one file. Missing paths are unavailable.
 Relative paths are bounded to 4,096 ASCII bytes with nonempty safe segments; traversal, URL
 syntax, percent encoding, controls and backslashes fail closed. File origin and token prefix
-come from the validated fixed HTTPS API endpoint. Only explicit synthetic constructors accept a
-numeric loopback HTTP origin. Redirects, unsolicited partial responses and nonidentity content
-encoding fail; upstream error bodies are never exposed or consumed as file output.
+come from the validated API origin. A `--local` server returns an absolute path. Startup rejects
+enabled downloads in local mode until Relay supports that retrieval path. Redirects, unsolicited
+partial responses and nonidentity content encoding fail; upstream error bodies are never exposed
+or consumed as file output.
 
 Metadata/HTTP sizes can reject early, but actual streamed bytes independently enforce the lower
 caller limit or 20,000,000 bytes. Writes are at most 64 KiB, with no whole-file buffer. One
@@ -1227,7 +1229,7 @@ starts the drain; repeated signals do not force an early exit. Allow pending upl
 I/O and bookkeeping to finish before an external service-manager deadline. SIGKILL, process crashes and
 forced termination can bypass draining and interrupt bookkeeping after Telegram accepts a send;
 they do not justify automatically resending. Composition tests use the same private constructor
-with a mocked client; production exposes no endpoint override.
+with a mocked client.
 
 The explicit `resource_probe` Cargo example links this same library composition through
 `app::probe::run_until`. It rejects credential sources, uses a separate loopback mock, transfers

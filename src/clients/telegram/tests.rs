@@ -1,10 +1,19 @@
 use super::*;
-use crate::domain::outbound::{SessionTitle, format_text};
+use crate::{
+    config::BotApi,
+    domain::outbound::{SessionTitle, format_text},
+};
 
 fn formatted(body: &str) -> FormattedMessage {
     format_text(&SessionTitle::new("Session"), None, body).unwrap()
 }
-use std::sync::{Arc, Mutex};
+use std::{
+    fs::{self, DirBuilder, File, OpenOptions},
+    io::Write,
+    os::unix::fs::{DirBuilderExt, OpenOptionsExt},
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
@@ -52,7 +61,7 @@ impl Mock {
         );
         let mut config = Config::default();
         config.limits.telegram_response_bytes = response_bytes;
-        let mut client = TelegramClient::build(&config, endpoint, false).unwrap();
+        let mut client = TelegramClient::for_test(&config, endpoint).unwrap();
         client.retry_delays = Some(Arc::default());
         let requests = Arc::new(Mutex::new(Vec::new()));
         let recorded = requests.clone();
@@ -117,6 +126,105 @@ impl Mock {
     fn count(&self) -> usize {
         self.requests.lock().unwrap().len()
     }
+}
+
+struct PrivateDirectory(PathBuf);
+
+impl PrivateDirectory {
+    fn new() -> Self {
+        let mut random = [0; 8];
+        getrandom::fill(&mut random).unwrap();
+        let path = std::env::temp_dir().canonicalize().unwrap().join(format!(
+            "telegram-origin-{:016x}",
+            u64::from_ne_bytes(random)
+        ));
+        DirBuilder::new().mode(0o700).create(&path).unwrap();
+        Self(path)
+    }
+}
+
+impl Drop for PrivateDirectory {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+#[tokio::test]
+async fn production_bot_api_uses_only_its_configured_origin_and_redacts_the_token() {
+    const TOKEN: &str = "123:origin_test_token";
+    let mock = Mock::new(
+        vec![
+            reply(
+                500,
+                &format!(r#"{{"ok":false,"error_code":500,"description":"{TOKEN}"}}"#),
+            ),
+            reply(
+                200,
+                r#"{"ok":true,"result":{"url":"","pending_update_count":0}}"#,
+            ),
+        ],
+        8_192,
+    )
+    .await;
+    let directory = PrivateDirectory::new();
+    let token_path = directory.0.join("bot-token");
+    OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&token_path)
+        .unwrap()
+        .write_all(TOKEN.as_bytes())
+        .unwrap();
+    let mut config = Config::default();
+    config.telegram.bot_token_file = Some(token_path);
+    let token = config.load_secrets().unwrap().bot_token;
+    let cloud = TelegramClient::new(&config, &token).unwrap();
+    assert_eq!(
+        cloud.endpoint,
+        format!("https://api.telegram.org/bot{TOKEN}/")
+    );
+    assert_eq!(
+        cloud.file_endpoint.as_str(),
+        format!("https://api.telegram.org/file/bot{TOKEN}/")
+    );
+
+    let origin = mock.client.file_endpoint.origin().ascii_serialization();
+    let upstream_root = directory.0.join("upstream");
+    DirBuilder::new()
+        .mode(0o700)
+        .create(&upstream_root)
+        .unwrap();
+    config.telegram.bot_api = BotApi::Local;
+    config.telegram.local_bot_api_url = Some(origin.clone());
+    config.telegram.local_bot_api_files_root = Some(upstream_root);
+    let log_path = directory.0.join("diagnostics");
+    let subscriber = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .with_writer(Arc::new(File::create(&log_path).unwrap()))
+        .finish();
+    let _guard = tracing::subscriber::set_default(subscriber);
+    let mut local = TelegramClient::new(&config, &token).unwrap();
+    assert_eq!(
+        local.file_endpoint.as_str(),
+        format!("{origin}/file/bot{TOKEN}/")
+    );
+    local.retry_delays = Some(Arc::default());
+    assert!(local.get_webhook_info().await.unwrap().url.is_empty());
+    let expected = format!("/bot{TOKEN}/getWebhookInfo");
+    let requests = mock.requests.lock().unwrap();
+    assert_eq!(requests.len(), 2);
+    assert!(requests.iter().all(|(path, _)| path == &expected));
+    assert!(!format!("{local:?} {cloud:?}").contains(TOKEN));
+    let diagnostics = fs::read_to_string(log_path).unwrap();
+    assert!(diagnostics.contains("Retrying Telegram read"));
+    assert!(!diagnostics.contains(TOKEN));
+
+    config.telegram.local_bot_api_url = Some(format!("http://{TOKEN}@192.0.2.1:8081"));
+    assert_eq!(
+        TelegramClient::new(&config, &token).unwrap_err(),
+        AppError::InvalidConfig("telegram.local_bot_api_url")
+    );
 }
 
 #[tokio::test]
