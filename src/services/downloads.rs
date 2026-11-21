@@ -303,15 +303,11 @@ impl DownloadStore {
         })
         .await
         .map_err(|_| AppError::ServiceStopped)??;
-        if temporary
+        let blocks = temporary
             .metadata()
             .map_err(|_| AppError::DownloadStorageUnavailable)?
-            .blocks()
-            .saturating_mul(512)
-            > record.disk_bytes
-        {
-            return Err(AppError::DownloadCapacity);
-        }
+            .blocks();
+        allocated_bytes(blocks, record.disk_bytes)?;
         self.ensure_running(cancel, deadline)?;
         authorize()?;
         root.publish(record, &temporary)?;
@@ -360,6 +356,7 @@ impl DownloadStore {
         if metadata.len() != actual {
             return Err(AppError::DownloadStorageUnavailable);
         }
+        let disk_bytes = allocated_bytes(metadata.blocks(), record.disk_bytes)?;
         drop(file);
         let completed = self
             .0
@@ -369,7 +366,7 @@ impl DownloadStore {
             .complete_download(
                 &record.id,
                 actual,
-                metadata.blocks().saturating_mul(512),
+                disk_bytes,
                 (self.0.now)()?,
                 self.0.policy.retention_seconds,
             )?;
@@ -539,6 +536,13 @@ impl DownloadStore {
             Ok(())
         })
     }
+}
+
+fn allocated_bytes(blocks: u64, disk_budget: u64) -> Result<u64, AppError> {
+    blocks
+        .checked_mul(512)
+        .filter(|&bytes| bytes <= disk_budget)
+        .ok_or(AppError::DownloadCapacity)
 }
 
 // The owned job can finish before its caller is polled again. Keep cleanup ownership

@@ -353,6 +353,51 @@ mod tests {
     }
 
     #[test]
+    fn completed_downloads_charge_only_actual_payload_to_the_total_budget() {
+        let directory = Directory::new();
+        let settings = Storage {
+            path: directory.0.join("test.sqlite"),
+            ..Storage::default()
+        };
+        let mut database = Database::open(&settings, &Limits::default()).unwrap();
+        let root = FileIdentity {
+            device: "0000000000000001".into(),
+            inode: "0000000000000002".into(),
+        };
+        let file = FileIdentity {
+            device: root.device.clone(),
+            inode: "0000000000000003".into(),
+        };
+        let policy = crate::config::Downloads {
+            max_file_bytes: 1_024,
+            max_total_bytes: 1_025,
+            ..Default::default()
+        };
+        let reserve = |db: &mut Database| {
+            db.reserve_download(&root, &policy, 1_000, u64::MAX, 4_096, u64::MAX)
+        };
+        let first = reserve(&mut database).unwrap();
+        assert_eq!(
+            reserve(&mut database).unwrap_err(),
+            AppError::DownloadCapacity
+        );
+        database.own_download_inode(&first.id, &file).unwrap();
+        let completed = database
+            .complete_download(&first.id, 1, 4_096, 1_000, 10)
+            .unwrap();
+        assert_eq!(
+            (completed.actual_bytes, completed.disk_bytes),
+            (Some(1), 4_096)
+        );
+        let second = reserve(&mut database).unwrap();
+        assert_eq!(second.reserved_bytes, 1_024);
+        assert_eq!(
+            reserve(&mut database).unwrap_err(),
+            AppError::DownloadCapacity
+        );
+    }
+
+    #[test]
     fn migration_failure_rolls_back_tables_cursor_and_version() {
         let directory = Directory::new();
         let mut connection = Connection::open(directory.0.join("test.sqlite")).unwrap();

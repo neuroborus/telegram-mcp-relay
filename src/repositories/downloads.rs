@@ -5,6 +5,30 @@ use rusqlite::{OptionalExtension, TransactionBehavior, params};
 use super::{Database, registry::random_key};
 use crate::{config::Downloads, error::AppError};
 
+// The existing download_records schema bounds each stored disk charge.
+const MAX_STORED_DISK_BYTES: u64 = 1_073_741_824;
+
+/// Return block-rounded data bytes and the disk bytes reserved for data and metadata.
+/// At 4 KiB, an ext4 leaf holds 340 extents. One metadata block per 256 data
+/// blocks plus one extra leaves room for extent-tree indexes as well as leaves.
+/// Other filesystems still have to fit the reservation when allocation is measured.
+fn reservation_sizes(bytes: u64, allocation_unit: u64) -> Result<(u64, u64), AppError> {
+    let unit = allocation_unit.max(512);
+    let data_units = bytes.div_ceil(unit);
+    let data_bytes = data_units
+        .checked_mul(unit)
+        .ok_or(AppError::DownloadCapacity)?;
+    let metadata_bytes = data_units
+        .div_ceil(256)
+        .checked_add(1)
+        .and_then(|blocks| blocks.checked_mul(unit))
+        .ok_or(AppError::DownloadCapacity)?;
+    let disk_bytes = data_bytes
+        .checked_add(metadata_bytes)
+        .ok_or(AppError::DownloadCapacity)?;
+    Ok((data_bytes, disk_bytes))
+}
+
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct FileIdentity {
     pub device: String,
@@ -64,23 +88,23 @@ impl Database {
         if now < 0 {
             return Err(AppError::InvalidRequest("download timestamp"));
         }
+        let (_, disk_bytes) = reservation_sizes(policy.max_file_bytes, allocation_unit)?;
+        if disk_bytes > MAX_STORED_DISK_BYTES {
+            return Err(AppError::DownloadCapacity);
+        }
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let unit = allocation_unit.max(512);
-        let disk_bytes = policy
-            .max_file_bytes
-            .checked_add(unit - 1)
-            .and_then(|value| value.checked_div(unit))
-            .and_then(|value| value.checked_mul(unit))
-            .ok_or(AppError::DownloadCapacity)?;
         let (count, reserved, active): (u64, u64, u64) = transaction.query_row(
-            "SELECT count(*), coalesce(sum(max(disk_bytes, reserved_bytes)), 0), coalesce(sum(state != 'complete'), 0) FROM download_records", [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
+            "SELECT count(*), coalesce(sum(coalesce(actual_bytes, reserved_bytes)), 0),
+                    coalesce(sum(state != 'complete'), 0) FROM download_records",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
         let (pending, pending_files): (u64, u64) = transaction.query_row("SELECT coalesce(sum(disk_bytes), 0), count(*) FROM download_records WHERE state != 'complete' AND root_device = ?1", [&root.device], |row| Ok((row.get(0)?, row.get(1)?)))?;
         if count >= u64::from(policy.max_files)
             || active >= u64::from(policy.concurrent)
-            || reserved.saturating_add(disk_bytes) > policy.max_total_bytes
+            || reserved.saturating_add(policy.max_file_bytes) > policy.max_total_bytes
             || pending_files.saturating_add(1) > available_files
             || pending
                 .saturating_add(disk_bytes)
@@ -188,4 +212,32 @@ fn record(row: &rusqlite::Row<'_>) -> rusqlite::Result<DownloadRecord> {
         expires_at: row.get(8)?,
         disk_bytes: row.get(9)?,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reservation_sizes_round_data_and_allow_for_extent_metadata() {
+        assert_eq!(reservation_sizes(1, 0), Ok((512, 1_536)));
+        assert_eq!(
+            reservation_sizes(20_000_000, 4_096),
+            Ok((20_000_768, 20_086_784))
+        );
+        assert_eq!(
+            reservation_sizes(4 * 1024_u64.pow(3), 4_096),
+            Ok((4_294_967_296, 4_311_748_608))
+        );
+    }
+
+    #[test]
+    fn reservation_sizes_reject_overflow_in_data_metadata_and_total() {
+        for (bytes, unit) in [(u64::MAX, 4_096), (1, u64::MAX), (u64::MAX - 511, 512)] {
+            assert_eq!(
+                reservation_sizes(bytes, unit),
+                Err(AppError::DownloadCapacity)
+            );
+        }
+    }
 }

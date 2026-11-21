@@ -234,11 +234,23 @@ foreign symlinks, hard links and colliding
 names. Restart cases cover reservation-only, unnamed inode, linked partial and retiring-name
 crash points while preserving valid completed files and unknown files. Configuration cases
 reject inconsistent budgets and source/secret/storage overlap. Storage migration cases preserve
-older recovery data through v10, including v9 rollback after late DDL failure. These proofs
-passed in accepted complete C6. The separate
+older recovery data through v10, including v9 rollback after late DDL failure. The
+pre-RELAY-001 versions of these suites passed in the accepted complete C6. The separate
 [HOST trial](MEASUREMENTS.md#agent-experience-host-acceptance) verified a private mode-0600
 download on the deployed pinned root with matching device/inode identity. Other filesystem
 failure/restart cases in this suite were not all reproduced live.
+
+### RELAY-001 download reservation accounting
+
+The deterministic regression feeds the reported 20,004,864-byte ext4 allocation into the
+writer's allocation check. It exceeds the old 20,000,768-byte ceiling and fits the revised
+metadata-inclusive reservation. The storage tests cover an allocation above the revised ceiling,
+exact logical quota with `max_total_bytes == max_file_bytes`, completed payload accounting,
+disk headroom including pending reservations, inode and file-count limits, and concurrency.
+Pure sizing cases cover gigabyte-scale values and overflow without creating large files.
+The new regression results are pending FINALIZE. After DONE and workspace release, the
+supervising operator owns pending HOST acceptance through an MCP attachment download on ext4
+under conditions that reproduce the old accounting failure.
 
 ## Authorized attachment tool regressions
 

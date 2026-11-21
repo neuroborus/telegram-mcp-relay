@@ -156,8 +156,8 @@ create roots or repair permissions on existing paths.
 | --- | --- | --- |
 | `enabled` | false | Boolean; enabled operation requires roots |
 | `roots` | empty | At most 8 separate absolute roots; initial `~/` expansion supported |
-| `max_file_bytes` | 20,000,000 | 1–20,000,000 bytes |
-| `max_total_bytes` | 100,000,000 | At least `max_file_bytes`, at most 1,073,741,824 bytes |
+| `max_file_bytes` | 20,000,000 | 1–20,000,000 payload bytes |
+| `max_total_bytes` | 100,000,000 | At least `max_file_bytes`, at most 1,073,741,824 payload bytes |
 | `max_files` | 64 | 1–1,024, including reservations and retiring files |
 | `concurrent` | 2 | 1–64, no greater than `max_files` |
 | `timeout_seconds` | 600 | 1–600 seconds |
@@ -172,14 +172,14 @@ locks each directory until all of its work has retired; another store cannot swe
 Removing/replacing a configured root does not grant access to its replacement. Restoring the
 approved root identity is required to recover records for a missing or reconfigured root.
 
-Before file/network effects, durable reservations cover concurrency, count, filesystem-block-
-rounded allocation, pending inode demand and free-space headroom, including partial work.
-Actual preallocation must fit the reservation; completed records retain their measured
-allocated-block charge. The aggregate budget counts the larger of payload bytes and allocated
-data blocks for each file; bounded file count and headroom constrain directory overhead.
-Free-space snapshots are conservative admission checks, not a quota on unrelated processes.
-Small files can cost a whole filesystem block, so a byte
-budget below that block size can reject even a small download.
+Before file/network effects, durable reservations cover concurrency, file count, pending inode
+demand and disk space, including partial work. The per-file and aggregate byte limits apply to
+logical payload. The aggregate budget counts the reserved payload until completion, then the
+actual bytes received. Block rounding and filesystem metadata count toward disk headroom.
+Available space must cover pending disk reservations on that filesystem, the new reservation and
+`min_free_bytes`. Measured allocation must fit the disk reservation, and completed records retain
+their measured allocation. Relay uses a conservative free-space snapshot at admission. Other
+processes can still consume space after the check.
 
 Linux `openat2`, a filesystem supporting `O_TMPFILE` and `fallocate`, and the kernel's
 `/proc/self/fd` descriptor links are required. Unsupported/denied operations fail closed;

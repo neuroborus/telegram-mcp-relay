@@ -871,8 +871,15 @@ reference check alone establishes no live result; complete composition C6 and th
 [central settings](CONFIGURATION.md#private-download-storage) default to disabled. Schema
 v10 adds `download_records` in the existing protected SQLite database, with no file bytes,
 source paths or Telegram identifiers. Immediate reservations bound count, concurrent work,
-payload/data-block charges and pending filesystem demand before effects. Existing main-file
-limits bound bookkeeping; no history or inbox rows are evicted to admit downloads.
+logical payload bytes and pending filesystem demand before effects. The total payload quota
+counts reserved bytes until completion and actual bytes thereafter. Disk admission separately
+covers pending reservations on the same filesystem, the new reservation and minimum free-space
+headroom. Each new disk reservation rounds the data up to filesystem blocks (at least 512 bytes
+per block) and adds one block of metadata per 256 data blocks or fraction thereof, plus one extra.
+The allowance budgets for ext4 extent-tree leaves and indexes with 4 KiB blocks. The writer
+checks measured allocation against the reservation after preallocation and at completion on
+every filesystem. Existing main-file limits bound bookkeeping. Download admission preserves
+history and inbox rows.
 
 Roots are opened once through `openat2` with beneath/no-symlink/no-magic-link resolution and
 checked for effective ownership and mode 0700. Lifetime directory locks exclude a second store.

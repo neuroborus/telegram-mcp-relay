@@ -36,15 +36,11 @@ impl Fixture {
         let mut config = Config::default();
         config.storage.path = base.join("relay.sqlite");
         config.files.allowed_roots = vec![base.join("exports")];
-        let unit = rustix::fs::statvfs(base.join("downloads"))
-            .unwrap()
-            .f_frsize
-            .max(512);
         config.downloads = Downloads {
             enabled: true,
             roots: vec![base.join("downloads")],
             max_file_bytes: 1_024,
-            max_total_bytes: 1_024_u64.div_ceil(unit) * unit * 16,
+            max_total_bytes: 16 * 1_024,
             max_files: 8,
             concurrent: 4,
             retention_seconds: 10,
@@ -105,6 +101,49 @@ async fn save(store: &DownloadStore, bytes: &'static [u8]) -> Result<DownloadedF
 
 fn records(db: &Arc<Mutex<Database>>) -> Vec<DownloadRecord> {
     db.lock().unwrap().download_records("").unwrap()
+}
+
+#[test]
+fn preallocation_accepts_the_reported_ext4_metadata_block_and_rejects_an_overrun() {
+    let mut fixture = Fixture::new();
+    fixture.config.downloads.max_file_bytes = 20_000_000;
+    fixture.config.downloads.max_total_bytes = 20_000_000;
+    let db = fixture.database();
+    let store = fixture.store(db.clone());
+    let record = db
+        .lock()
+        .unwrap()
+        .reserve_download(
+            &store.0.roots[0].identity,
+            &fixture.config.downloads,
+            1_000,
+            u64::MAX,
+            4_096,
+            1,
+        )
+        .unwrap();
+    let observed = 20_004_864;
+    assert_eq!(
+        allocated_bytes(observed / 512, 20_000_768),
+        Err(AppError::DownloadCapacity)
+    );
+    assert_eq!(
+        allocated_bytes(observed / 512, record.disk_bytes),
+        Ok(observed)
+    );
+    let ceiling = record.disk_bytes / 512;
+    assert_eq!(
+        allocated_bytes(ceiling, record.disk_bytes),
+        Ok(record.disk_bytes)
+    );
+    assert_eq!(
+        allocated_bytes(ceiling + 1, record.disk_bytes),
+        Err(AppError::DownloadCapacity)
+    );
+    assert_eq!(
+        allocated_bytes(u64::MAX, record.disk_bytes),
+        Err(AppError::DownloadCapacity)
+    );
 }
 
 #[tokio::test]
@@ -194,18 +233,13 @@ async fn completed_files_are_exclusive_private_bounded_and_retired_without_touch
 }
 
 #[tokio::test]
-async fn count_byte_and_disk_reservations_fail_before_effects_and_recover_after_expiry() {
+async fn count_and_byte_reservations_fail_before_effects_and_recover_after_expiry() {
     for byte_budget in [false, true] {
         let mut fixture = Fixture::new();
         fixture.config.downloads.max_files = if byte_budget { 8 } else { 1 };
         fixture.config.downloads.concurrent = 1;
-        let unit = rustix::fs::statvfs(fixture.root())
-            .unwrap()
-            .f_frsize
-            .max(512);
-        let charge = fixture.config.downloads.max_file_bytes.div_ceil(unit) * unit;
         if byte_budget {
-            fixture.config.downloads.max_total_bytes = charge;
+            fixture.config.downloads.max_total_bytes = fixture.config.downloads.max_file_bytes;
         }
         let db = fixture.database();
         let store = fixture.store(db.clone());
@@ -221,39 +255,50 @@ async fn count_byte_and_disk_reservations_fail_before_effects_and_recover_after_
         save(&store, b"y").await.unwrap();
         store.shutdown().await.unwrap();
     }
-    let fixture = Fixture::new();
+}
+
+#[tokio::test]
+async fn disk_reservations_bound_pending_space_inodes_and_concurrency() {
+    let mut fixture = Fixture::new();
+    fixture.config.downloads.concurrent = 2;
     let db = fixture.database();
     let store = fixture.store(db.clone());
-    assert_eq!(
-        db.lock()
-            .unwrap()
-            .reserve_download(
-                &store.0.roots[0].identity,
-                &fixture.config.downloads,
-                1_000,
-                1_024,
-                4_096,
-                u64::MAX,
-            )
-            .unwrap_err(),
-        AppError::DownloadCapacity
-    );
-    assert!(records(&db).is_empty());
-    assert_eq!(fs::read_dir(fixture.root()).unwrap().count(), 0);
-    let reserve = |available_files| {
+    let reserve = |available_bytes, available_files| {
         db.lock().unwrap().reserve_download(
             &store.0.roots[0].identity,
             &fixture.config.downloads,
             1_000,
-            u64::MAX,
+            available_bytes,
             4_096,
             available_files,
         )
     };
-    assert_eq!(reserve(0).unwrap_err(), AppError::DownloadCapacity);
-    reserve(1).unwrap();
-    assert_eq!(reserve(1).unwrap_err(), AppError::DownloadCapacity);
-    assert_eq!(records(&db).len(), 1);
+    let disk_bytes = 3 * 4_096;
+    let headroom = fixture.config.downloads.min_free_bytes;
+    assert_eq!(
+        reserve(disk_bytes, 1).unwrap_err(),
+        AppError::DownloadCapacity
+    );
+    assert_eq!(
+        reserve(disk_bytes + headroom, 0).unwrap_err(),
+        AppError::DownloadCapacity
+    );
+    assert!(records(&db).is_empty());
+    reserve(disk_bytes + headroom, 1).unwrap();
+    assert_eq!(
+        reserve(2 * disk_bytes, 2).unwrap_err(),
+        AppError::DownloadCapacity
+    );
+    assert_eq!(
+        reserve(2 * disk_bytes + headroom, 1).unwrap_err(),
+        AppError::DownloadCapacity
+    );
+    reserve(2 * disk_bytes + headroom, 2).unwrap();
+    assert_eq!(
+        reserve(u64::MAX, u64::MAX).unwrap_err(),
+        AppError::DownloadCapacity
+    );
+    assert_eq!(records(&db).len(), 2);
     assert_eq!(fs::read_dir(fixture.root()).unwrap().count(), 0);
     store.shutdown().await.unwrap();
     assert!(records(&db).is_empty());
@@ -263,12 +308,7 @@ async fn count_byte_and_disk_reservations_fail_before_effects_and_recover_after_
 async fn partial_byte_reservations_hold_until_caller_cancellation_drains_without_shutdown() {
     let mut fixture = Fixture::new();
     fixture.config.downloads.concurrent = 2;
-    let unit = rustix::fs::statvfs(fixture.root())
-        .unwrap()
-        .f_frsize
-        .max(512);
-    fixture.config.downloads.max_total_bytes =
-        fixture.config.downloads.max_file_bytes.div_ceil(unit) * unit;
+    fixture.config.downloads.max_total_bytes = fixture.config.downloads.max_file_bytes;
     let db = fixture.database();
     let store = fixture.store(db.clone());
     let (entered, observed) = oneshot::channel();
@@ -352,10 +392,16 @@ async fn partial_write_and_size_failure_remove_owned_output_and_keep_other_durab
             })
             .await
             .unwrap_err();
-        assert!(matches!(
-            error,
-            AppError::DownloadWriteFailed | AppError::FileTooLarge { .. }
-        ));
+        let limit_bytes = fixture.config.downloads.max_file_bytes;
+        let expected = if oversized {
+            AppError::FileTooLarge {
+                limit_bytes,
+                actual_bytes: limit_bytes + 1,
+            }
+        } else {
+            AppError::DownloadWriteFailed
+        };
+        assert_eq!(error, expected);
         assert!(records(&db).is_empty());
         assert_eq!(fs::read_dir(fixture.root()).unwrap().count(), 0);
         assert_eq!(
