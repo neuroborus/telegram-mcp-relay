@@ -336,7 +336,7 @@ fn failed_v7_migration_preserves_old_schema_and_records_transactionally() {
     assert!(!exists);
     sql.execute_batch("DROP TABLE history_coverage").unwrap();
     let db = fixture.open();
-    assert_eq!(db.schema_version().unwrap(), 10);
+    assert_eq!(db.schema_version().unwrap(), 11);
     assert_eq!(
         db.session(&session.session_key).unwrap().title.as_str(),
         "Preserve"

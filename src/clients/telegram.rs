@@ -1,13 +1,13 @@
 //! One reusable Bot API HTTP client, bounded decoding and conservative send uncertainty.
 
-use std::{fmt, net::SocketAddr, time::Duration};
+use std::{fmt, net::SocketAddr, sync::Arc, time::Duration};
 
 use reqwest::{Client, StatusCode, Url, redirect::Policy};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::json;
 
 use crate::{
-    config::{Config, Secret},
+    config::{BotApi, Config, LOCAL_BOT_API_FILES_ROOT, Secret},
     domain::outbound::FormattedMessage,
     error::{AppError, TelegramError},
 };
@@ -33,6 +33,7 @@ pub struct TelegramClient {
     http: Client,
     endpoint: String,
     file_endpoint: reqwest::Url,
+    local_files: Option<Arc<download::LocalFiles>>,
     response_bytes: usize,
     poll_seconds: u64,
     #[cfg(test)]
@@ -92,6 +93,16 @@ impl TelegramClient {
     fn build(config: &Config, endpoint: String, origin: EndpointOrigin) -> Result<Self, AppError> {
         let https_only = matches!(origin, EndpointOrigin::Cloud);
         let file_endpoint = download::file_endpoint(&endpoint, origin)?;
+        let local_files = if config.telegram.bot_api == BotApi::Local {
+            let path = config
+                .telegram
+                .local_bot_api_files_root
+                .as_deref()
+                .ok_or(AppError::InvalidConfig(LOCAL_BOT_API_FILES_ROOT))?;
+            Some(Arc::new(download::LocalFiles::pin(path)?))
+        } else {
+            None
+        };
         if !(1..=16_777_216).contains(&config.limits.telegram_response_bytes)
             || !(1..=50).contains(&config.telegram.long_poll_timeout_seconds)
         {
@@ -113,6 +124,7 @@ impl TelegramClient {
             http,
             endpoint,
             file_endpoint,
+            local_files,
             response_bytes: config.limits.telegram_response_bytes as usize,
             poll_seconds: config.telegram.long_poll_timeout_seconds,
             #[cfg(test)]

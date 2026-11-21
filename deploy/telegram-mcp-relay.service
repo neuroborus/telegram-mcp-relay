@@ -9,7 +9,7 @@ WorkingDirectory=%h
 UMask=0077
 Restart=on-failure
 RestartSec=5s
-# Allow uploads/downloads up to 600 seconds plus bookkeeping/I/O drainage; review host margin.
+# Allow 600 seconds for accepted uploads plus bookkeeping and download I/O drainage.
 TimeoutStopSec=660s
 NoNewPrivileges=true
 CapabilityBoundingSet=

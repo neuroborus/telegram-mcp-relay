@@ -52,12 +52,15 @@ secret files. Relay checks expanded paths when parsing. At startup it resolves e
 prefixes, compares filesystem device and inode, and reads `/proc/self/mountinfo` to detect aliases
 through nested bind mounts. Startup ignores namespace files when comparing backing directories
 and rejects opaque mounts that cover a configured path. Dangling symlinks in configured paths
-fail validation. An existing upstream path must resolve to a directory. Keep the operator-managed
-working directory and Relay paths separate when changing mounts.
+fail validation. Local-mode startup requires an existing upstream directory with no symlink
+components. Relay pins the directory and rejects a replacement until restart. Keep the
+operator-managed working directory and Relay paths separate when changing mounts.
 
-Local mode requires `downloads.enabled = false`. A `--local` server returns absolute paths and
-Relay currently retrieves attachments only through the cloud API. The 50 MB outbound limit
-applies to both modes. See
+With downloads enabled, a `--local` server returns absolute paths. Relay needs read and
+traversal access to the same files under the configured root. The root may be a mount point.
+Attachment paths below it must stay on that mount, including when a bind mount is added
+after startup. Relay writes its own private copy. Plan space for both the upstream file and
+the Relay copy. The operator owns upstream storage limits and cleanup. See
 [local upstream setup](SETUP.md#optional-local-bot-api-upstream).
 
 ## Delivery, storage and resource limits
@@ -164,10 +167,11 @@ No new configuration setting is required. See
 filesystem bounds and limitations.
 See [architecture](ARCHITECTURE.md#session-and-route-persistence).
 
-`telegram_guidance` reports nonsecret effective capabilities and limits, including lower cloud
-file ceilings; it discloses no configured roots, allowlist IDs or secret sources. Disabled
-features remain in the tool catalog and their configured budgets remain visible alongside
-disabled capability flags. See the complete [public DTO and error reference](../README.md#public-tools-and-results).
+`telegram_guidance` reports nonsecret effective capabilities and limits, including the
+download limit for the selected backend. It discloses no configured roots, allowlist IDs
+or secret sources. Disabled features remain in the tool catalog and their configured budgets
+remain visible alongside disabled capability flags. See the complete
+[public DTO and error reference](../README.md#public-tools-and-results).
 
 ## Private download storage
 
@@ -178,16 +182,26 @@ create roots or repair permissions on existing paths.
 
 | Download setting | Default | Accepted range |
 | --- | --- | --- |
-| `enabled` | false | Boolean; enabled operation requires cloud mode and approved roots |
+| `enabled` | false | Boolean; enabled operation requires approved roots |
 | `roots` | empty | At most 8 separate absolute roots; initial `~/` expansion supported |
-| `max_file_bytes` | 20,000,000 | 1–20,000,000 payload bytes |
-| `max_total_bytes` | 100,000,000 | At least `max_file_bytes`, at most 1,073,741,824 payload bytes |
+| `max_file_bytes` | 20,000,000 | Positive payload bytes up to the backend ceiling below |
+| `max_total_bytes` | 100,000,000 | At least `max_file_bytes`, up to the backend ceiling below |
 | `max_files` | 64 | 1–1,024, including reservations and retiring files |
 | `concurrent` | 2 | 1–64, no greater than `max_files` |
-| `timeout_seconds` | 600 | 1–600 seconds |
+| `timeout_seconds` | 600 | Positive seconds up to the backend ceiling below |
 | `retention_seconds` | 3,600 | 1–604,800 seconds from successful completion |
 | `cleanup_interval_seconds` | 60 | 1–3,600 seconds |
 | `min_free_bytes` | 16,777,216 | 1–1,073,741,824 bytes of filesystem headroom |
+
+| Backend | Telegram incoming limit | Relay per-file ceiling | Relay aggregate ceiling | Relay timeout ceiling | Filesystem overhead | Relay outbound ceiling |
+| --- | --- | --- | --- | --- | --- | --- |
+| Cloud (default) | 20 MB | 20,000,000 bytes | 1 GiB | 600 seconds | Separate disk allowance | 50 MB |
+| Local (`--local`) | No documented download limit | 4 GiB (4,294,967,296 bytes) | 64 GiB | 3,600 seconds | Separate disk allowance | 50 MB |
+
+For 1 GiB incoming files, select local mode and set `max_file_bytes = 1073741824`,
+`max_total_bytes = 4294967296` and `timeout_seconds = 3600`. The separate outbound
+`files.max_outbound_mb` setting remains capped at 50 MB (50,000,000 bytes) in both modes.
+The local server itself supports [uploads up to 2,000 MB](https://core.telegram.org/bots/api#using-a-local-bot-api-server).
 
 Roots must already be effective-user-owned mode-0700 directories, with no symlink in any
 ancestor. They cannot overlap one another or outbound export roots, or contain SQLite/secrets.
@@ -198,8 +212,12 @@ approved root identity is required to recover records for a missing or reconfigu
 
 Before file/network effects, durable reservations cover concurrency, file count, pending inode
 demand and disk space, including partial work. The per-file and aggregate byte limits apply to
-logical payload. The aggregate budget counts the reserved payload until completion, then the
-actual bytes received. Block rounding and filesystem metadata count toward disk headroom.
+logical payload. Each reservation uses the lower of the retained attachment size and
+`max_file_bytes`, or `max_file_bytes` when the size is unknown. A transfer exceeding its
+reservation fails with `FILE_TOO_LARGE`. The aggregate budget counts reserved payload until
+completion, then actual bytes. Disk reservations round up to filesystem blocks and add one
+metadata block per 256 data blocks or fraction thereof, plus one extra block for filesystem
+metadata such as ext4 extent trees.
 Available space must cover pending disk reservations on that filesystem, the new reservation and
 `min_free_bytes`. Measured allocation must fit the disk reservation, and completed records retain
 their measured allocation. Relay uses a conservative free-space snapshot at admission. Other
@@ -223,7 +241,7 @@ time can delay retirement until the next successful open/sweep.
 `DOWNLOAD_WRITE_FAILED` disclose only safe classifications. Canceled/timed-out callers retain
 their reservation until tracked work has drained outstanding filesystem I/O and removed partial
 output. Kernel I/O is not forcibly interrupted or represented as having finished prematurely.
-SQLite schema v10 adds bounded private ownership records without changing inbox/history data.
+SQLite schema v11 widens reservation byte bounds and preserves existing private ownership records.
 
 The tool accepts only `session_key` and an opaque retained `attachment_handle`. Own replies,
 including read-only inbox resources, expose `attachments` with handles and bounded display
@@ -319,12 +337,12 @@ The binary registers SIGINT and SIGTERM before service startup; either signal st
 and drains accepted sends and route bookkeeping before exit. Registration failure logs
 `SHUTDOWN_SIGNAL_UNAVAILABLE` and exits unsuccessfully before starting services. No shutdown
 setting is required.
-Allow the existing network deadlines (15 seconds for text, 600 seconds for uploads, up to
-600 seconds for downloads), SQLite bookkeeping and tracked download filesystem I/O to drain
+Shutdown cancels downloads and drains tracked filesystem I/O. Allow time for that drainage,
+network deadlines (15 seconds for text and 600 seconds for uploads) and SQLite bookkeeping
 before any external forced-stop deadline. Kernel I/O cannot be forcibly preempted; cleanup can
-outlast a logical download deadline. Repeated SIGINT or
-SIGTERM does not abort the drain. SIGKILL, crashes and forced termination can still interrupt
-bookkeeping after a send is accepted; do not automatically resend an uncertain message.
+outlast a logical download deadline. Repeated SIGINT or SIGTERM does not abort the drain.
+SIGKILL, crashes and forced termination can still interrupt bookkeeping after a send is
+accepted; do not automatically resend an uncertain message.
 
 The library installs no process-wide handlers. Embedders supply cancellation and await
 `app::run_until` to drain accepted work; dropping its future does not await detached sends.

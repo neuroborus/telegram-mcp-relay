@@ -1,6 +1,7 @@
 //! Typed attachment access over both actual protocol transports and a synthetic Bot API.
 use super::*;
 use crate::{
+    config::BotApi,
     repositories::RouteKind,
     services::{ingress::IngressService, unix_millis},
 };
@@ -8,6 +9,15 @@ use std::os::unix::fs::MetadataExt;
 
 #[tokio::test]
 async fn attachments_expose_safe_own_handles_and_confined_files_across_both_protocols() {
+    attachment_downloads(BotApi::Cloud).await;
+}
+
+#[tokio::test]
+async fn local_attachments_use_the_approved_upstream_root_across_both_protocols() {
+    attachment_downloads(BotApi::Local).await;
+}
+
+async fn attachment_downloads(backend: BotApi) {
     let mut fixture = Fixture::new();
     for name in ["exports", "downloads"] {
         fs::DirBuilder::new()
@@ -18,6 +28,19 @@ async fn attachments_expose_safe_own_handles_and_confined_files_across_both_prot
     fixture.config.files.allowed_roots = vec![fixture.directory.join("exports")];
     fixture.config.downloads.enabled = true;
     fixture.config.downloads.roots = vec![fixture.directory.join("downloads")];
+    let upstream = fixture.directory.join("upstream");
+    let file_path = if backend == BotApi::Local {
+        fs::DirBuilder::new().mode(0o700).create(&upstream).unwrap();
+        let path = upstream.join("local.bin");
+        fs::write(&path, b"7").unwrap();
+        fixture.config.telegram.bot_api = backend;
+        fixture.config.telegram.local_bot_api_files_root = Some(upstream.clone());
+        fixture.config.downloads.max_file_bytes = 1 << 30;
+        fixture.config.downloads.max_total_bytes = 2 << 30;
+        path.to_str().unwrap().to_owned()
+    } else {
+        "documents/file.bin".into()
+    };
     let now = unix_millis().unwrap();
     let mut db = Database::open(&fixture.config.storage, &fixture.config.limits).unwrap();
     let owner = db.register_session(None, None, "Owner", None, now).unwrap();
@@ -44,21 +67,24 @@ async fn attachments_expose_safe_own_handles_and_confined_files_across_both_prot
             [source_expiry],
         )
         .unwrap();
-    let metadata = json!({"ok":true,"result":{"file_id":"private-file","file_unique_id":"stable","file_size":1,"file_path":"documents/file.bin"}});
-    let telegram = tools::Telegram::new(
-        &fixture.config,
-        vec![
-            (200, metadata.clone()),
-            (200, json!(7)),
-            (200, metadata),
-            (200, json!(7)),
-            (
-                400,
-                json!({"ok":false,"error_code":400,"description":"private diagnostic"}),
-            ),
-        ],
-    )
-    .await;
+    let metadata = json!({"ok":true,"result":{"file_id":"private-file","file_unique_id":"stable","file_size":1,"file_path":file_path}});
+    let mut responses = Vec::new();
+    for _ in 0..2 {
+        responses.push((200, metadata.clone()));
+        if backend == BotApi::Cloud {
+            responses.push((200, json!(7)));
+        }
+    }
+    responses.push((
+        400,
+        json!({"ok":false,"error_code":400,"description":"private diagnostic"}),
+    ));
+    if backend == BotApi::Local {
+        let mut unknown_size = metadata;
+        unknown_size["result"]["file_size"] = Value::Null;
+        responses.push((200, unknown_size));
+    }
+    let telegram = tools::Telegram::new(&fixture.config, responses).await;
     let handler = telegram.handler(&fixture);
     let mut http = fixture.serve(handler.clone(), None).await;
     tools::assert_tool_catalog(&http.rpc("tools/list", json!({})).await["result"]["tools"]);
@@ -188,6 +214,23 @@ async fn attachments_expose_safe_own_handles_and_confined_files_across_both_prot
         before
     );
     assert_eq!(db.update_cursor().unwrap(), Some(1));
+    if backend == BotApi::Local {
+        let source = upstream.join("local.bin");
+        fs::write(&source, b"78").unwrap();
+        let failed = http
+            .tool(
+                "telegram_get_attachment",
+                json!({"session_key":owner.session_key,"attachment_handle":handle}),
+            )
+            .await;
+        tools::failure(&failed, "FILE_TOO_LARGE");
+        assert_eq!(
+            failed["structuredContent"]["details"],
+            json!({"limit_bytes":1,"actual_bytes":2})
+        );
+        assert_eq!(fs::read(source).unwrap(), b"78");
+        assert_eq!(telegram.request_count(), 4);
+    }
     assert_eq!(
         fs::read_dir(&fixture.config.downloads.roots[0])
             .unwrap()

@@ -12,6 +12,10 @@ chat_id = 101
 allowed_chat_ids = [101]
 allowed_user_ids = [202]
 # Alternatively remove bot_token_env and use bot_token_file.
+# Optional operator-managed same-host Bot API started with --local:
+# bot_api = "local"
+# local_bot_api_url = "http://127.0.0.1:8081"
+# local_bot_api_files_root = "/home/synthetic/telegram-bot-api"
 
 [files]
 allowed_roots = ["/home/synthetic/agent-exports"]
@@ -27,6 +31,12 @@ max_total_bytes = 100000000
 max_files = 64
 concurrent = 2
 timeout_seconds = 600
+# For 1 GiB downloads in local mode, replace the corresponding values above:
+# enabled = true
+# roots = ["~/.local/state/telegram-mcp-relay/downloads"]
+# max_file_bytes = 1073741824
+# max_total_bytes = 4294967296
+# timeout_seconds = 3600
 retention_seconds = 3600
 cleanup_interval_seconds = 60
 min_free_bytes = 16777216

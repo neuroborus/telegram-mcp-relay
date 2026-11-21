@@ -81,6 +81,7 @@ impl DownloadStore {
         let mut policy = config.downloads.clone();
         policy.normalize(
             None,
+            config.telegram.bot_api,
             &config.files,
             &config.storage,
             [
@@ -118,17 +119,19 @@ impl DownloadStore {
         telegram: TelegramClient,
         file_id: String,
         unique_id: String,
+        retained_size: Option<u64>,
         authorize: impl Fn() -> Result<(), AppError> + Send + Sync + 'static,
     ) -> Result<DownloadedFile, AppError> {
         self.materialize_authorized(
-            move |file, limit, timeout| {
+            move |file, limit, timeout, source_io| {
                 Box::pin(async move {
                     telegram
-                        .download_file(&file_id, &unique_id, limit, timeout, file)
+                        .download_file(&file_id, &unique_id, limit, timeout, file, source_io)
                         .await
                 })
             },
             Arc::new(authorize),
+            retained_size,
         )
         .await
     }
@@ -138,17 +141,24 @@ impl DownloadStore {
     where
         W: for<'a> FnOnce(&'a mut File, u64, Duration) -> WriteFuture<'a> + Send + 'static,
     {
-        self.materialize_authorized(write, Arc::new(|| Ok(())))
-            .await
+        self.materialize_authorized(
+            move |file, limit, timeout, _| write(file, limit, timeout),
+            Arc::new(|| Ok(())),
+            None,
+        )
+        .await
     }
 
     async fn materialize_authorized<W>(
         &self,
         write: W,
         authorize: Authorization,
+        retained_size: Option<u64>,
     ) -> Result<DownloadedFile, AppError>
     where
-        W: for<'a> FnOnce(&'a mut File, u64, Duration) -> WriteFuture<'a> + Send + 'static,
+        W: for<'a> FnOnce(&'a mut File, u64, Duration, &'a TaskTracker) -> WriteFuture<'a>
+            + Send
+            + 'static,
     {
         if !self.0.policy.enabled {
             return Err(AppError::DownloadDisabled);
@@ -179,7 +189,7 @@ impl DownloadStore {
             self.0.tasks.spawn(async move {
                 let _permit = permit;
                 let result = store
-                    .write_owned(write, cancel, deadline, authorize)
+                    .write_owned(write, cancel, deadline, authorize, retained_size)
                     .await
                     .map(|file| DownloadHandoff {
                         store: store.clone(),
@@ -199,13 +209,16 @@ impl DownloadStore {
         cancel: CancellationToken,
         deadline: Instant,
         authorize: Authorization,
+        retained_size: Option<u64>,
     ) -> Result<DownloadedFile, AppError>
     where
-        W: for<'a> FnOnce(&'a mut File, u64, Duration) -> WriteFuture<'a> + Send + 'static,
+        W: for<'a> FnOnce(&'a mut File, u64, Duration, &'a TaskTracker) -> WriteFuture<'a>
+            + Send
+            + 'static,
     {
         self.ensure_running(&cancel, deadline)?;
         authorize()?;
-        let record = self.reserve()?;
+        let record = self.reserve(retained_size)?;
         let result = self
             .write_record(&record, write, &cancel, deadline, &authorize)
             .await;
@@ -230,12 +243,12 @@ impl DownloadStore {
         Ok(())
     }
 
-    fn reserve(&self) -> Result<DownloadRecord, AppError> {
+    fn reserve(&self, retained_size: Option<u64>) -> Result<DownloadRecord, AppError> {
         let now = (self.0.now)()?;
         let mut capacity = false;
         for root in &self.0.roots {
             root.current()?;
-            let (available, allocation_unit, available_files) = match root.available() {
+            let space = match root.available() {
                 Ok(space) => space,
                 Err(AppError::DownloadCapacity) => {
                     capacity = true;
@@ -248,14 +261,8 @@ impl DownloadStore {
                 .database
                 .lock()
                 .map_err(|_| AppError::StorageFailure)?
-                .reserve_download(
-                    &root.identity,
-                    &self.0.policy,
-                    now,
-                    available,
-                    allocation_unit,
-                    available_files,
-                ) {
+                .reserve_download(&root.identity, &self.0.policy, retained_size, now, space)
+            {
                 Ok(record) => return Ok(record),
                 Err(AppError::DownloadCapacity) => capacity = true,
                 Err(error) => return Err(error),
@@ -277,7 +284,9 @@ impl DownloadStore {
         authorize: &Authorization,
     ) -> Result<DownloadedFile, AppError>
     where
-        W: for<'a> FnOnce(&'a mut File, u64, Duration) -> WriteFuture<'a> + Send + 'static,
+        W: for<'a> FnOnce(&'a mut File, u64, Duration, &'a TaskTracker) -> WriteFuture<'a>
+            + Send
+            + 'static,
     {
         self.ensure_running(cancel, deadline)?;
         authorize()?;
@@ -295,7 +304,7 @@ impl DownloadStore {
             .own_download_inode(&record.id, &expected)?;
         let bytes = record.reserved_bytes;
         let temporary = tokio::task::spawn_blocking(move || {
-            Root::allocate(&temporary, bytes)?;
+            Root::allocate(&temporary, bytes.max(1))?;
             temporary
                 .sync_all()
                 .map_err(|_| AppError::DownloadStorageUnavailable)?;
@@ -318,12 +327,13 @@ impl DownloadStore {
             .checked_duration_since(Instant::now())
             .filter(|remaining| !remaining.is_zero())
             .ok_or(crate::error::TelegramError::Deadline)?;
+        let source_io = TaskTracker::new();
         let result = AssertUnwindSafe(async { tokio::select! {
             biased;
             _ = self.0.stop.cancelled() => Err(AppError::ServiceStopped),
             _ = cancel.cancelled() => Err(AppError::ServiceStopped),
             result = tokio::time::timeout_at(deadline, async {
-                let actual = write(&mut file, bytes, remaining).await?;
+                let actual = write(&mut file, bytes, remaining, &source_io).await?;
                 if actual > bytes { return Err(AppError::FileTooLarge { limit_bytes: bytes, actual_bytes: actual }); }
                 Ok(actual)
             }) => result.unwrap_or(Err(crate::error::TelegramError::Deadline.into())),
@@ -332,6 +342,9 @@ impl DownloadStore {
             self.close();
             Err(AppError::ServiceStopped)
         });
+        // The transfer future can be gone while a local open/read is still running.
+        source_io.close();
+        source_io.wait().await;
         // into_std waits for Tokio's outstanding blocking-file operation even after a
         // canceled write/flush future. Never unlink or release its reservation earlier.
         let file = file.into_std().await;

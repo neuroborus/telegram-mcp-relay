@@ -170,6 +170,7 @@ impl AttachmentService {
                 self.telegram.clone(),
                 source.file_id.clone(),
                 source.file_unique_id.clone(),
+                source.display.file_size,
                 move || {
                     let db = service
                         .database
@@ -230,6 +231,7 @@ fn same_source(first: &RetainedAttachment, second: &RetainedAttachment) -> bool 
         && first.source.message_id == second.source.message_id
         && first.source.sender_user_id == second.source.sender_user_id
         && first.display.kind == second.display.kind
+        && first.display.file_size == second.display.file_size
 }
 
 fn bounded(value: &str, limit: usize) -> bool {

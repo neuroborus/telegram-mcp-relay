@@ -85,7 +85,7 @@ fn initializes_private_database_and_reopens_without_resetting_state() {
     let fixture = Fixture::new();
     let settings = fixture.settings();
     let database = Database::open(&settings, &Limits::default()).unwrap();
-    assert_eq!(database.schema_version().unwrap(), 10);
+    assert_eq!(database.schema_version().unwrap(), 11);
     assert_eq!(
         fs::metadata(&settings.path).unwrap().permissions().mode() & 0o777,
         0o600
@@ -217,7 +217,7 @@ fn initializes_private_database_and_reopens_without_resetting_state() {
             .pragma_update(None, "user_version", version)
             .unwrap();
         let reopened = Database::open(&settings, &Limits::default()).unwrap();
-        assert_eq!(reopened.schema_version().unwrap(), 10);
+        assert_eq!(reopened.schema_version().unwrap(), 11);
         assert_eq!(reopened.session("a").unwrap().directory_label, None);
         assert_eq!(
             reopened.inbox_snapshot("a", None, 1, 150).unwrap().replies[0].processing_started_at,
@@ -531,7 +531,7 @@ fn v8_migration_preserves_completion_reconciliation_and_attachment_grants() {
         .unwrap();
     assert_eq!(attachment, "processing");
     assert_eq!(database.update_cursor().unwrap(), Some(13));
-    assert_eq!(database.schema_version().unwrap(), 10);
+    assert_eq!(database.schema_version().unwrap(), 11);
     assert!(
         !sql.prepare("PRAGMA foreign_key_check")
             .unwrap()
@@ -658,7 +658,7 @@ fn v9_download_migration_preserves_recovery_and_rolls_back_late_ddl_failure() {
             sql.execute_batch("DROP INDEX download_expiry").unwrap();
         }
         let database = Database::open(&fixture.settings(), &Limits::default()).unwrap();
-        assert_eq!(database.schema_version().unwrap(), 10);
+        assert_eq!(database.schema_version().unwrap(), 11);
         let saved: (String, String, String) = sql.query_row(
             "SELECT claim_token, reconciliation_request_id, reconciliation_from_token FROM replies", [],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap();

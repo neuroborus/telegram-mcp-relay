@@ -108,9 +108,15 @@ Relay defaults to Telegram's cloud API. To opt in to a same-host upstream:
    local_bot_api_files_root = "~/.local/share/telegram-bot-api"
    ```
 
-   Relay routes its Bot API calls to this origin. Set `downloads.enabled = false` before
-   starting Relay in local mode. Attachment retrieval currently supports cloud mode. Relay's
-   upload ceiling remains 50 MB.
+   Relay routes its Bot API calls to this origin and requires the configured upstream
+   directory to exist at startup. When downloads are enabled, the server's absolute paths
+   must resolve beneath that root on the same mount in Relay's filesystem namespace. Give
+   Relay read and traversal access while reserving upstream modification and cleanup for the
+   operator.
+   A relative getFile path returns `TELEGRAM_RESPONSE_INVALID`. Verify the server is running
+   with `--local` if it returns relative paths.
+   Relay copies the data into its own download root. The separate upload ceiling remains
+   50 MB. [Gigabyte-scale download settings](CONFIGURATION.md#private-download-storage)
 
 ## Configure paths and secrets
 
@@ -155,8 +161,8 @@ content: same-user hard links, mounts and in-place writes remain part of the loc
 Uploads stream the validated open handle, retain no file copy, and enforce the lower of the
 configured limit and 50,000,000 bytes. Keep files stable until the send completes.
 
-Downloads default off and use separate dedicated private roots. To enable downloads in cloud
-mode, create an absent root inside the existing state-directory writable boundary:
+Downloads default off and use separate dedicated private roots. To enable downloads, create
+an absent root inside the existing state-directory writable boundary:
 
 ```bash
 mkdir -m 700 "$HOME/.local/state/telegram-mcp-relay/downloads"
@@ -395,10 +401,11 @@ The [later baseline](MEASUREMENTS.md#dated-baseline-host-observations) records i
 the canonical unit and its runtime `218/CAPABILITIES` failure, with one transient process used
 for the limited text trial. Static verification does not test runtime access to protected
 settings, Telegram or MCP clients. Retain hardening/OS security; do not equate transient
-operation with canonical-unit startup success. Extension installation/restart/probes belong
-to the authorized post-DONE [HOST boundary](MEASUREMENTS.md#agent-experience-host-acceptance).
+operation with canonical-unit startup success. The [2026-11-01 HOST record](MEASUREMENTS.md#agent-experience-host-acceptance)
+covers installation, restart and probes for the earlier cloud release.
 SIGINT/SIGTERM close admission and drain accepted sends. The example allows 660 seconds before
-forced termination to accommodate uploads/downloads up to 600 seconds and bookkeeping; reassess
-that margin for your host. Tracked filesystem I/O must drain and is not forcibly preemptible.
+forced termination to accommodate uploads up to 600 seconds and bookkeeping. Shutdown
+cancels downloads and drains tracked filesystem I/O. Reassess that margin for your host
+because kernel I/O is not forcibly preemptible.
 SIGKILL, crashes or an external stop deadline can interrupt post-send persistence,
 so uncertain sends must never be blindly replayed. See [shutdown](ARCHITECTURE.md#runtime-and-ownership).

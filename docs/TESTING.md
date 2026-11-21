@@ -6,8 +6,8 @@ Accepted commit `e7575f2636480b35fa1da75134e337fadb9a4a00` completes the source/
 portion of the agent-experience continuation: bounded cloud downloads, confined owned storage,
 authorized attachment access, current guidance and extended mixed-protocol fixtures. Its
 fingerprint-bound FINALIZE and terminal confirmation accepted the unchanged committed content.
-This record supersedes the earlier pending-execution wording for those suites below; it does
-not inherit a PASS from the historical `968802` benchmark or require a fresh benchmark.
+This record covers the versions of those suites at that commit. It does not inherit a PASS
+from the historical `968802` benchmark or require a fresh benchmark.
 
 | Executed gate | Accepted result and boundary |
 | --- | --- |
@@ -24,8 +24,8 @@ versus legacy omission, native framing, wait/event/inbox/ask claims, recovery/fe
 authorized shared/own downloads. See [extended composition](../src/app/tests/extended.rs)
 and the feature-local coverage records below. Synthetic peers and controlled scheduling
 establish source behavior; no named-client/live Telegram, deployed-filesystem, idle-wake or
-fresh resource-use result follows. This later documentation change still requires its own
-C1/C2 FINALIZE; the earlier source results do not validate these edits.
+fresh resource-use result follows. The later documentation steps in that continuation have
+their own recorded check outcomes below.
 
 ## Agent-experience continuation status
 
@@ -219,10 +219,11 @@ declared and actual size limits, exact 20,000,000-byte streaming, lower configur
 absent/false sizes, unavailable/expired paths, redirects, partial/encoded responses and truncated
 bodies. Writer failure/backpressure, cancellation and whole-operation deadlines preserve safe
 errors without automatic replay. Generated chunked bodies use bounded buffers; no live credentials or API
-requests are needed. These cases passed in accepted complete C6; the separate
-[HOST trial](MEASUREMENTS.md#agent-experience-host-acceptance) verified one authorized 44-byte
-round trip, not all adapter edge cases. Owned-file cleanup and MCP authorization
-have separate owning coverage below.
+requests are needed. The [cloud composition baseline](#agent-experience-composition-validation)
+records the complete C6 result for its version of this suite. The separate
+[2026-11-01 HOST trial](MEASUREMENTS.md#agent-experience-host-acceptance) verified one
+authorized same-host 44-byte cloud round trip. Owned-file cleanup and MCP authorization have
+separate coverage below.
 
 ## Private download storage regressions
 
@@ -234,11 +235,12 @@ foreign symlinks, hard links and colliding
 names. Restart cases cover reservation-only, unnamed inode, linked partial and retiring-name
 crash points while preserving valid completed files and unknown files. Configuration cases
 reject inconsistent budgets and source/secret/storage overlap. Storage migration cases preserve
-older recovery data through v10, including v9 rollback after late DDL failure. The
-pre-RELAY-001 versions of these suites passed in the accepted complete C6. The separate
-[HOST trial](MEASUREMENTS.md#agent-experience-host-acceptance) verified a private mode-0600
-download on the deployed pinned root with matching device/inode identity. Other filesystem
-failure/restart cases in this suite were not all reproduced live.
+older recovery data across schema upgrades, including v9 rollback after late DDL failure. The
+[cloud composition baseline](#agent-experience-composition-validation) records complete C6 for
+the pre-RELAY-001 versions of these suites. The separate
+[2026-11-01 HOST trial](MEASUREMENTS.md#agent-experience-host-acceptance) verified one authorized
+same-host 44-byte cloud round trip. The resulting mode-0600 file on the deployed pinned root
+matched the returned device and inode.
 
 ### RELAY-001 download reservation accounting
 
@@ -252,6 +254,23 @@ The new regression results are pending FINALIZE. After DONE and workspace releas
 supervising operator owns pending HOST acceptance through an MCP attachment download on ext4
 under conditions that reproduce the old accounting failure.
 
+### RELAY-002 local Bot API downloads
+
+Synthetic fixtures cover path confinement, root replacement, rejection of special files,
+size mismatches, a sparse file above 1 GiB and bounded copy chunks. A controlled peer completes
+the original getFile response after the normal request timeout and tests that a stalled response
+closes at the transfer deadline without a retry. Owned-store tests
+cover partial-copy cancellation and expiry, admission held through blocking source I/O,
+reservation sizing and v10-to-v11 migration with populated ownership records at the SQLite
+page cap. Configuration and guidance tests cover backend-specific ceilings and the effective
+download limit. Retention tests exercise local-sized accounting without a large allocation.
+The attachment MCP fixture exercises local retrieval on both protocol revisions without
+Telegram credentials. It rejects a file that exceeds the retained reservation even when
+getFile supplies no size. C1–C6 for this step remain pending FINALIZE. After DONE and
+workspace release, the supervising operator owns the pending HOST transfer of an incoming
+gigabyte-scale file through MCP and an authorized real local Bot API. Record the streamed
+size and memory use separately from the synthetic results.
+
 ## Authorized attachment tool regressions
 
 Attachment authorization regressions in `src/services/attachments/tests.rs` cover own versus
@@ -261,8 +280,10 @@ queued-worker revocation, observational projections and revoked chat/user/histor
 strict arguments and the complete independent DTO catalog, confined generated file identities,
 untrusted display names, exact result envelopes and durable-data preservation after an upstream
 failure. Storage tests retain bounded cancellation/shutdown/restart cleanup and add unreceived
-completed-result cancellation and writer-panic supervision/drainage. These cases passed in
-accepted complete C6; live Telegram, filesystem deployment and HOST acceptance remain separate.
+completed-result cancellation and writer-panic supervision/drainage. The recorded attachment
+C6 and locked release results cover the prior cloud baseline identified in the
+[composition validation record](#agent-experience-composition-validation). The preceding
+RELAY-002 section defines synthetic coverage for local retrieval, pending this step's FINALIZE.
 
 ## Current interaction guidance regressions
 

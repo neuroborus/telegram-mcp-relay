@@ -128,10 +128,10 @@ impl Mock {
     }
 }
 
-struct PrivateDirectory(PathBuf);
+pub(super) struct PrivateDirectory(pub(super) PathBuf);
 
 impl PrivateDirectory {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         let mut random = [0; 8];
         getrandom::fill(&mut random).unwrap();
         let path = std::env::temp_dir().canonicalize().unwrap().join(format!(

@@ -637,8 +637,10 @@ read authorization. Fail closed for forged, foreign, expired or insufficient leg
 Reading shared content never confers another session's claim/processing/ack authority.
 
 Use official `getFile` through the existing HTTP client with bounded metadata responses.
-Validate returned file identity/path and fixed HTTPS Telegram origin; reject traversal,
-arbitrary origins and redirects. Stream bytes with a hard bound despite false/missing sizes.
+Validate the returned file identity and path. Use the fixed HTTPS Telegram origin for cloud
+retrieval and the approved pinned upstream root for opt-in local retrieval (§9.3). Reject
+traversal, arbitrary origins and redirects. Stream bytes with a hard bound despite false or
+missing sizes.
 The current cloud limit is **20 MB**: choose **20,000,000 bytes** as a conservative application
 interpretation, also enforcing any lower configured limit. Recheck upstream contracts during
 implementation. Report too-large, expired or unavailable files clearly, preserving durable
@@ -658,7 +660,8 @@ error, cancellation and shutdown; recover bounded cleanup after restart using br
 identity records. Delete only bridge-owned downloads, never user/agent source files. Store no
 binary blobs in SQLite and never buffer a whole download. Redact token-bearing URLs, upstream
 diagnostics, contents and full paths from default logs. Attachments are untrusted data, never
-instructions to execute. No userbot, MTProto or local Bot API service is introduced.
+instructions to execute. Relay uses the Bot API and leaves any local Bot API server under
+operator ownership.
 
 ### 9.3 Telegram size limits
 
@@ -667,7 +670,21 @@ As of this specification, Telegram Bot API documents:
 - `sendMessage`: text 1–4096 characters after entities parsing.
 - `sendDocument`: cloud upload up to 50 MB.
 - Document caption: up to 1024 characters after entities parsing (verify the platform's Unicode counting at implementation time; the bridge separately checks its own Unicode-scalar limit).
-- `getFile` download: up to 20 MB.
+- Cloud `getFile` download: up to 20 MB.
+- A [local Bot API server](https://core.telegram.org/bots/api#using-a-local-bot-api-server)
+  run with `--local` can download without a Telegram size limit, return absolute local paths
+  through `getFile` and upload up to 2,000 MB.
+
+**Authorized local-upstream revision (RELAY-002).** Cloud remains the default and retains its
+20,000,000-byte ceiling and HTTPS retrieval contract. The operator can opt in to a same-host
+local Bot API as an external upstream. Relay neither provisions nor manages it. In this mode,
+getFile uses the remaining transfer deadline and returns an absolute path. Relay validates
+the retained file identity, opens a bounded regular file below the approved pinned root
+without crossing symlinks or mount points, and copies it into private owned storage. The
+operator manages upstream storage. The local incoming ceiling is 4 GiB per file, with a
+64 GiB aggregate ceiling and a 3,600-second maximum deadline. Relay keeps its 50,000,000-byte
+outbound ceiling in both modes. A live gigabyte-scale transfer is a separate operator acceptance
+check.
 
 **The bridge intentionally imposes a 1,000-Unicode-scalar maximum on each outgoing text message and document caption, inclusive of its session prefix.** Telegram's larger text-message limit must not be treated as permission to send long chat messages; Telegram's separate caption limit may be stricter for supplementary Unicode. Do not auto-split or auto-truncate; report `TEXT_TOO_LONG` (or a distinct platform-length error where appropriate) and direct the agent to file sending. The 1,000-scalar bridge cap is an MVP policy constant, not an additional configuration setting. Enforce both bridge and platform limits and recheck the current official API documentation while implementing.
 
@@ -835,7 +852,7 @@ Consequences must be documented: Reply to a bot message after its route expires 
 - Limit request sizes, incoming Telegram payload parsing, message lengths (including the stricter 1,000-character outbound cap), attachment sizes, and concurrency. Enforce bounds instead of buffering unlimited data.
 - Do not leak full file paths, session keys, or sensitive message bodies into user-facing service notifications.
 - Keep server-owned header entities isolated from validated explicit body/caption entities. Preserve verbatim title/directory/body characters without a Markdown/HTML parser. Display metadata is never filesystem authority or a routing discriminator.
-- Separate approved outbound source roots from private pinned download roots. Download only through validated retained handles and official fixed-origin getFile paths, with exclusive safe files, stream/disk/concurrency/time limits and bridge-owned cleanup. Do not accept caller URLs, Telegram file IDs or unrestricted destinations. Redact token-bearing URLs and upstream error bodies.
+- Separate approved outbound source roots, private pinned download roots and any approved local Bot API root. Download only through validated retained handles and getFile, using the fixed cloud origin or approved pinned upstream root. Use exclusive safe files, stream/disk/concurrency/time limits and bridge-owned cleanup. Do not accept caller URLs, Telegram file IDs or unrestricted destinations. Redact token-bearing URLs, upstream paths and error bodies.
 - Protect the journal, provenance and download bookkeeping with the same SQLite permissions/migration/restart rules as the inbox. Bound metadata, retained bodies, queries, physical database/sidecar size and download disk usage; log no full shared conversations, secrets or file contents by default.
 
 ---
@@ -859,6 +876,10 @@ chat_id = 123456789
 allowed_user_ids = [123456789]
 transport = "long_poll"
 long_poll_timeout_seconds = 45
+# Optional external upstream, used only for explicit local mode:
+# bot_api = "local"
+# local_bot_api_url = "http://127.0.0.1:8081"
+# local_bot_api_files_root = "/srv/telegram-bot-api"
 
 [delivery]
 # Resource-change events remain enabled for every subscribed MCP client.
@@ -889,10 +910,10 @@ enabled = false
 # Explicitly configure a directory readable by the local bridge process.
 allowed_roots = ["/srv/agent-exports"]
 max_outbound_mb = 50
-# Required capability, enabled only with approved private download storage/budgets.
-incoming_downloads_enabled = false
-# Lower configured download ceiling must not exceed 20,000,000 bytes.
-# Configure pinned private roots, concurrency, total bytes/files, deadlines and retention.
+
+[downloads]
+enabled = false
+# Configure pinned private roots, concurrency, per-file and total bytes, deadlines and retention.
 ```
 
 **Security defaults:** Make users explicitly specify approved Telegram ID(s) and allowed file roots. Resolve `~` paths safely rather than relying on shell expansion in TOML. Document a safe `systemd --user` environment-file option for secrets. Do not silently delete existing Telegram webhooks or pending updates during setup: if a webhook is configured, explain the conflict and provide an explicit safe `deleteWebhook(drop_pending_updates=false)` setup step.
@@ -901,7 +922,11 @@ incoming_downloads_enabled = false
 shares bounded ask/wait admission (existing default 16 waiters), while retaining control-request
 capacity and separate typing/subscription limits. Keep the fixed 1,000-scalar policy, 50-grapheme
 title, 100-scalar directory and caption 1,024-UTF-16-unit bound outside arbitrary client control.
-Uploads/downloads enforce the lower configured bound or 50,000,000/20,000,000 bytes respectively.
+Uploads enforce the lower configured bound or 50,000,000 bytes. Reject incoming per-file,
+aggregate or deadline settings above the selected backend's ceiling. Cloud allows up to
+20,000,000 bytes per file, 1 GiB aggregate and 600 seconds. Local mode allows up to 4 GiB
+per file, 64 GiB aggregate and 3,600 seconds. Both require the aggregate to be at least the
+per-file limit and reserve the lesser of that limit and any retained file size.
 History requires authenticated opt-in, explicit finite retention/record/payload/metadata and
 page/response/search budgets; disabling it stops capture/shared reads, not retained-record expiry.
 Downloads require approved private roots and finite concurrent/aggregate-byte/file-count/time/
@@ -1077,7 +1102,7 @@ coverage, then reconcile public documentation with actual DTOs and tested capabi
 - [ ] Read-only history supports nonsecret session-display/chat filtering, bounded search, keyset pagination and incomplete-scan continuation under record/page/response/work limits. Current authorization is rechecked for every cursor; foreign chats and private credentials/claim/recovery handles are never exposed.
 - [ ] Shared reads do not claim/process/ack another agent's reply. Coverage reports local observation/retention/gaps honestly, including bot visibility, unavailable older outgoing bodies and the separate upstream 24-hour update limit; no past-chat API is implied.
 - [ ] Opaque attachment handles work for authorized own retained replies independently of history, and for authorized shared history when enabled. Forged/foreign/expired/insufficient-provenance handles fail closed before effects; no raw file ID, URL or caller destination is accepted.
-- [ ] Mocked getFile/download paths enforce fixed origin/path/identity checks, no redirects, bounded responses, the lower configured or **20,000,000-byte** ceiling despite false/missing sizes, deadlines/concurrency/aggregate disk/file quotas, exclusive private mode-0600 regular files and confinement under pinned roots.
+- [ ] Mocked cloud getFile/download paths enforce fixed origin/path/identity checks, no redirects, bounded responses, the lower configured or **20,000,000-byte** ceiling despite false/missing sizes, deadlines/concurrency/aggregate disk/file quotas, exclusive private mode-0600 regular files and confinement under pinned roots.
 - [ ] Download error/cancellation/shutdown/restart cleanup removes only bridge-owned output, preserves durable metadata and never overwrites/removes user source files. Token-bearing URLs/upstream contents/full paths are redacted from default diagnostics; returned paths are explicitly daemon-local.
 - [ ] Both protocol projections expose standard server instructions before tools, within 500 Unicode scalars and with all §5.4 recommendations in the first 512 characters. No handshake, adapter or private settings are exposed.
 - [ ] `telegram_guidance` returns versioned self-contained current instructions, actual catalog and nonsecret effective capabilities/limits. All interaction descriptions request it first per conversation while older clients remain usable. Guidance covers proactive focused status/questions, explicit waiting, actual host concurrency/deadlines, scoped send authorization and no silence-as-permission or automatic host wake claim.

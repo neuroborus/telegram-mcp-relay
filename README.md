@@ -345,18 +345,24 @@ replies for capacity. Telegram's **at-most-24-hour unconsumed-update window** is
 local retention. Read the [privacy, quota and cleanup contracts](docs/CONFIGURATION.md).
 
 Uploads stream existing approved files up to the lower configured limit or 50,000,000 bytes.
-Downloads enforce actual bytes up to the lower configured limit or 20,000,000 bytes, reserve
-partial work, and retain only owned copies (default one hour). Filenames never select storage
-paths. Startup/restart/cancellation/shutdown cleanup uses durable owned identities; offline
-time can delay retirement. SIGINT/SIGTERM drain admitted sends/bookkeeping and tracked download
-I/O. Kernel I/O is not forcibly preempted. Forced termination can interrupt accepted-send
+Cloud downloads enforce a ceiling of 20,000,000 bytes. An optional operator-managed local
+Bot API supports configured incoming downloads up to 4 GiB. Relay reads absolute upstream
+paths beneath the approved pinned root and keeps a separate private copy. Both modes use the
+lower configured limit and reserve at most the retained attachment size when known. Download
+copies default to one hour of retention. See the [backend limits and example configuration](docs/CONFIGURATION.md#private-download-storage).
+
+Filenames never select storage paths. Startup, restart, cancellation and shutdown cleanup
+use durable owned identities. Offline time can delay retirement. SIGINT/SIGTERM cancel
+downloads and drain tracked filesystem I/O, admitted sends and bookkeeping. Kernel I/O
+is not forcibly preempted. Forced termination can interrupt accepted-send
 bookkeeping and never authorizes replay. See [runtime ownership](docs/ARCHITECTURE.md#runtime-and-ownership).
 
 The [accepted mixed-protocol validation record](docs/TESTING.md#agent-experience-composition-validation)
-distinguishes executed source checks and both locked releases from separately dated
-[extension HOST observations](docs/MEASUREMENTS.md#agent-experience-host-acceptance). All
-fifteen planned steps reached DONE; later installation and bounded protocol/Telegram/file
-probes do not prove every client model's tool use or automatic idle-host wake.
+records source checks and both locked release builds for the earlier cloud composition baseline.
+All fifteen steps of that continuation reached DONE. The later
+[extension HOST observations](docs/MEASUREMENTS.md#agent-experience-host-acceptance) cover
+installation and bounded protocol, Telegram and file probes. Client model tool use and
+automatic idle-host wake remain unverified.
 Historical source `968802371f94f51eedab66998eff6031762db5ea` has a separate
 [mocked Linux capture](docs/MEASUREMENTS.md#recorded-host-capture): 10.07 MB probe idle RSS and
 10.43 MB sampled upload peak for a 49,999,999-byte file, with separate mock/driver accounting.

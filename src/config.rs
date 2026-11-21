@@ -14,14 +14,13 @@ use serde::Deserialize;
 use crate::error::AppError;
 
 mod downloads;
+pub(crate) use downloads::CLOUD_DOWNLOAD_BYTES;
 mod mounts;
 mod secrets;
 pub use secrets::{Secret, Secrets};
 
 /// Fixed final-text policy; this is deliberately not a TOML setting.
 pub const OUTBOUND_SCALAR_LIMIT: usize = 1_000;
-pub(crate) const CLOUD_DOWNLOAD_BYTES: u64 = 20_000_000;
-pub(crate) const DOWNLOAD_TIMEOUT_MAX: u64 = 600;
 // Internal MCP transport bounds, separate from durable application sessions.
 pub(crate) const MCP_SESSION_IDLE: std::time::Duration = std::time::Duration::from_secs(300);
 pub(crate) const MCP_SESSION_INIT: std::time::Duration = std::time::Duration::from_secs(10);
@@ -31,7 +30,7 @@ pub(crate) const MCP_SESSION_QUEUE: usize = 16;
 pub(crate) const MCP_CONTROL_REQUESTS: usize = 1;
 pub(crate) const INCOMING_ATTACHMENT_LIMIT: usize = 10;
 const CONFIG_BYTES: usize = 65_536;
-const LOCAL_BOT_API_FILES_ROOT: &str = "telegram.local_bot_api_files_root";
+pub(crate) const LOCAL_BOT_API_FILES_ROOT: &str = "telegram.local_bot_api_files_root";
 
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -366,12 +365,13 @@ impl Config {
             self.telegram.bot_token_file.as_deref(),
         ];
         self.telegram.local_bot_api_address()?;
-        require(
-            self.telegram.bot_api != BotApi::Local || !self.downloads.enabled,
-            "downloads.enabled",
+        self.downloads.normalize(
+            home,
+            self.telegram.bot_api,
+            &self.files,
+            &self.storage,
+            secrets,
         )?;
-        self.downloads
-            .normalize(home, &self.files, &self.storage, secrets)?;
         if let Some(root) = &mut self.telegram.local_bot_api_files_root {
             *root = expand_path(root, home)
                 .map_err(|_| AppError::InvalidConfig(LOCAL_BOT_API_FILES_ROOT))?;

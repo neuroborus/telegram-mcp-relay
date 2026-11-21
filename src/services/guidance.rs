@@ -3,8 +3,8 @@
 use crate::{
     clients::telegram::{REQUEST_TIMEOUT, UPLOAD_TIMEOUT},
     config::{
-        CLOUD_DOWNLOAD_BYTES, Config, MCP_CONTROL_REQUESTS, MCP_SESSION_ABANDONED,
-        MCP_SESSION_IDLE, OUTBOUND_SCALAR_LIMIT,
+        Config, MCP_CONTROL_REQUESTS, MCP_SESSION_ABANDONED, MCP_SESSION_IDLE,
+        OUTBOUND_SCALAR_LIMIT,
     },
     domain::outbound::{
         CAPTION_UTF16_LIMIT, DIRECTORY_SCALAR_LIMIT, FALLBACK_TITLE, SERVICE_PREFIX,
@@ -55,7 +55,10 @@ pub(crate) fn snapshot(config: &Config, history_enabled: bool) -> GuidanceResult
             transport_idle_seconds: MCP_SESSION_IDLE.as_secs(),
             transport_abandon_seconds: MCP_SESSION_ABANDONED.as_secs(),
             upload_bytes: (u64::from(config.files.max_outbound_mb) * 1_000_000).min(CLOUD_DOCUMENT_BYTES),
-            download_bytes: config.downloads.max_file_bytes.min(CLOUD_DOWNLOAD_BYTES),
+            download_bytes: config
+                .downloads
+                .max_file_bytes
+                .min(config.telegram.bot_api.download_ceiling()),
             download_concurrency: config.downloads.concurrent,
             download_total_bytes: config.downloads.max_total_bytes,
             download_files: config.downloads.max_files,
@@ -123,6 +126,9 @@ mod tests {
         assert_eq!(report.limits.download_timeout_seconds, 13);
         assert_eq!(report.limits.history_page_limit, 7);
         assert_eq!(report.limits.history_response_bytes, 4096);
+        config.telegram.bot_api = crate::config::BotApi::Local;
+        config.downloads.max_file_bytes = 1 << 30;
+        assert_eq!(snapshot(&config, false).limits.download_bytes, 1 << 30);
         let encoded = serde_json::to_string(&report).unwrap();
         for secret in ["/private/", "PRIVATE_SYNTHETIC_TOKEN_SOURCE", "987654321"] {
             assert!(!encoded.contains(secret));

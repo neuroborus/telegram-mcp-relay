@@ -554,9 +554,9 @@ to omission, preserving identities, routes, claims and notices.
 
 Version 9 rebuilds reply, completion, disposition and notice keys to allow update-ID reuse
 across sequences. It preserves every token/reconciliation field and attachment reference.
-Only during this protected migration, before BEGIN, foreign-key actions are disabled for
-SQLite's parent-table rebuild procedure; a full foreign-key check precedes commit and
-enforcement is restored after success or rollback. Capacity/DDL failures roll back all changes.
+Before a schema upgrade, Relay disables foreign-key actions for SQLite's parent-table rebuild
+procedure. It checks all foreign keys before commit and restores enforcement after success or
+rollback. Capacity or DDL failures roll back all changes.
 
 Initialization enables incremental auto-vacuum before the schema transaction. DDL, initial
 cursor, application ID and version commit together under an immediate transaction; errors
@@ -792,11 +792,12 @@ only message/reply IDs, sender/chat, text/caption and document/photo metadata; q
 are not recursively decoded. DTO and client Debug output is redacted. Outbound text passes
 the existing final scalar/native validator before I/O. No route or cursor changes occur here.
 
-Connection establishment has a five-second limit. Each attempt covers headers and the whole
+Connection establishment has a five-second limit. Standard calls cover headers and the whole
 response body within 15 seconds, configured poll seconds plus ten for `getUpdates`, or
-600 seconds for documents including upload.
+600 seconds for documents including upload. Local getFile uses the remaining download
+deadline and makes one attempt, as described below.
 Advertised and actual body sizes are capped by `limits.telegram_response_bytes` before JSON
-decoding. Reads allow three attempts with exponential 250/500 ms
+decoding. Retryable reads allow up to three attempts with exponential 250/500 ms
 backoff plus less than that interval of jitter. Telegram `retry_after` takes precedence;
 delays above 30 seconds are returned to the caller without shortening or sleeping. There
 are at most two retry sleeps, so each invocation remains finite. Cancellation drops the call.
@@ -824,55 +825,64 @@ minimum number of seconds before repeating a rate-limited request; typing lasts 
 five seconds and can clear on a new bot message. These are documented API contracts,
 not live bot observations.
 
-The [accepted composition suite](TESTING.md#agent-experience-composition-validation) passed in
-Runner FINALIZE through the read-only trusted route, including the HTTP client tests in that
-candidate. Earlier Native attempts failed at loopback `bind` with `Operation not permitted`.
-Runner executed the full suite, including the socket tests. The separate
-[HOST record](MEASUREMENTS.md#agent-experience-host-acceptance) verifies bounded live text,
-document and download effects; live rate-limit/retry, Unicode-boundary and other API edge cases
-remain unverified.
+At the historical cloud baseline `e7575f2636480b35fa1da75134e337fadb9a4a00`, Runner FINALIZE
+passed the full suite through the read-only trusted route, including the HTTP client socket
+tests. Earlier Native attempts failed at loopback `bind` with `Operation not permitted`.
+See the [cloud composition record](TESTING.md#agent-experience-composition-validation). The separate
+[2026-11-01 HOST record](MEASUREMENTS.md#agent-experience-host-acceptance) covers bounded live
+text and document effects and one authorized same-host 44-byte cloud download round trip.
+Live rate-limit/retry, Unicode-boundary and other API edge cases remain unverified.
 
-## Private cloud download adapter
+## Private attachment download adapter
 
 `clients::telegram::download` provides private `getFile` and streamed-download methods through
 the existing shared client. The authorized attachment service integrates this adapter with
 the private persistent store below, reserving an owned writer and checking retained provenance
 before calling it. The adapter itself never opens a destination path or creates files.
 
-The getFile envelope uses the existing bounded decoder and read-retry policy. The returned
+The getFile envelope uses the existing bounded decoder. The returned
 stable `file_unique_id` must match retained provenance; the bounded opaque `file_id` may differ
 because Telegram permits multiple valid IDs for one file. Missing paths are unavailable.
-Relative paths are bounded to 4,096 ASCII bytes with nonempty safe segments; traversal, URL
-syntax, percent encoding, controls and backslashes fail closed. File origin and token prefix
-come from the validated API origin. A `--local` server returns an absolute path. Startup rejects
-enabled downloads in local mode until Relay supports that retrieval path. Redirects, unsolicited
-partial responses and nonidentity content encoding fail; upstream error bodies are never exposed
-or consumed as file output.
+Cloud getFile retains the existing read-retry policy and returns relative paths bounded to
+4,096 ASCII bytes with safe segments. File origin and token prefix come from the validated
+API origin. Redirects, traversal, unsolicited partial responses and nonidentity content
+encoding fail closed. Relay never exposes upstream error bodies.
 
-Metadata/HTTP sizes can reject early, but actual streamed bytes independently enforce the lower
-caller limit or 20,000,000 bytes. Writes are at most 64 KiB, with no whole-file buffer. One
-positive caller deadline, at most 600 seconds, covers metadata retries/backoff, download,
-writer backpressure and flush. Streaming is attempted once. Success returns actual bytes;
-truncation, timeout, unavailable/expired paths and writer failure remain errors. Cancellation
-drops HTTP work; the implemented `services::downloads::DownloadStore` retires outstanding
-writer I/O and removes owned partial output before releasing reservations. Errors retain no URLs, IDs, OS diagnostics or paths.
-The existing lower configured/50,000,000-byte upload contract is unchanged.
+An opt-in operator-managed `--local` Bot API materializes the file on upstream disk during
+getFile and returns an absolute path. Relay makes one getFile request within the remaining
+transfer deadline. It accepts only normalized paths lexically below the approved source
+root. Relay checks the root's identity and uses `openat2` beneath the startup-pinned directory
+to reject symlinks, magic links and mount crossings. A path-only lookup screens for a regular
+file before the confined read-only open. Relay checks the read descriptor's identity, type and
+size before copying. The size must fit the reservation and match the returned size when present.
+Relay leaves the upstream file intact. Upstream paths can contain bot tokens and stay private.
+[Official local Bot API contract](https://core.telegram.org/bots/api#using-a-local-bot-api-server)
+
+Both backends enforce actual streamed bytes independently of metadata. Writes are at most
+64 KiB with no whole-file buffer. A single deadline covers metadata, streaming, writer
+backpressure and flush, with a backend ceiling of 600 seconds in cloud mode and 3,600
+seconds in local mode. On cancellation or failure the owned download store drains outstanding
+source and writer I/O and removes partial output before releasing reservations. Errors retain
+no URLs, IDs, OS diagnostics or paths. The separate upload limit stays at 50,000,000 bytes
+or the lower configured value.
 
 The saved official [getFile](https://core.telegram.org/bots/api#getfile) and
 [File](https://core.telegram.org/bots/api#file) reference fetched on 2026-10-29 was rechecked
 against its recorded SHA-256 during this implementation. It documents up-to-20-MB downloads,
 optional size/path fields, token-based download links valid for at least one hour and obtaining
 a fresh link through getFile after expiry. It does not guarantee filename/MIME preservation.
-The bridge's decimal-byte ceiling is conservative application policy. That recorded API
-reference check alone establishes no live result; complete composition C6 and the later
-[bounded HOST download](MEASUREMENTS.md#agent-experience-host-acceptance) are separate executed evidence.
+The bridge's decimal-byte cloud ceiling is conservative application policy.
 
 ## Private owned download store
 
 `services::downloads` backs the authorized attachment tool; its
 [central settings](CONFIGURATION.md#private-download-storage) default to disabled. Schema
-v10 adds `download_records` in the existing protected SQLite database, with no file bytes,
-source paths or Telegram identifiers. Immediate reservations bound count, concurrent work,
+v11 preserves `download_records` ownership and widens reservation bounds for local mode.
+The migration copies the bounded ownership records into SQLite's in-memory temporary schema
+and reuses the old table's pages within the same transaction.
+Records contain no file bytes, source paths or Telegram identifiers. Immediate reservations
+use the lower of the retained file size and the configured per-file limit, or the configured
+limit when the retained size is missing. Reservations bound count, concurrent work,
 logical payload bytes and pending filesystem demand before effects. The total payload quota
 counts reserved bytes until completion and actual bytes thereafter. Disk admission separately
 covers pending reservations on the same filesystem, the new reservation and minimum free-space
@@ -892,7 +902,7 @@ The internal `/proc/self/fd` source is a kernel-owned descriptor link, not a cal
 symlink. A crash before linking automatically drops the unnamed inode; a crash afterward has
 durable identity proof. No original filename/MIME affects this sequence.
 
-The shared HTTP adapter writes to that already reserved descriptor. A tracked worker owns
+The download adapter writes to that already reserved descriptor. A tracked worker owns
 the reservation and output even after caller cancellation. Its admission-time deadline covers
 scheduling, allocation, network/write work, final sync and bookkeeping. Blocked kernel
 operations are drained before cleanup rather than falsely reported as canceled. Completion
@@ -933,9 +943,12 @@ changes, expiry or authorization loss remove the owned output without altering r
 data. Final identity checks and durable expiry capping confine the returned path and ensure its
 lifetime cannot exceed the authorized source. Each successful call materializes its own bounded
 copy; results claim only daemon-local filesystem access to untrusted bytes, never remote access
-or permission to execute content. Complete composition/release checks passed; the separate
-[HOST record](MEASUREMENTS.md#agent-experience-host-acceptance) covers one authorized same-host
-44-byte round trip, not every attachment or remote-client scenario.
+or permission to execute content. The [composition validation record](TESTING.md#agent-experience-composition-validation)
+records complete C6 and locked release build passes for the historical cloud baseline at
+`e7575f2636480b35fa1da75134e337fadb9a4a00`. Current [local regressions](TESTING.md#relay-002-local-bot-api-downloads)
+define synthetic retrieval coverage on both MCP revisions and await FINALIZE. The
+[2026-11-01 HOST record](MEASUREMENTS.md#agent-experience-host-acceptance) covers one
+authorized same-host 44-byte cloud round trip under the original deployment conditions.
 
 ## Current agent guidance
 
@@ -1179,9 +1192,10 @@ Poller tests are included in the recorded complete C6 outcome.
 The binary registers SIGINT and SIGTERM before starting services, then passes their shutdown
 future to `app::run_until` and awaits completion. Registration failure emits the safe static
 `SHUTDOWN_SIGNAL_UNAVAILABLE` code and exits before service startup. `app::run_until` loads the
-supplied configuration path, resolves protected secrets, opens one SQLite connection, pins
-export roots and configured private download roots, and constructs all services before binding
-the loopback listener.
+supplied configuration path and resolves protected secrets. The Telegram client pins the
+upstream root in local Bot API mode. Startup then opens one SQLite connection and constructs
+the services, pinning export and configured private download roots before binding the loopback
+listener.
 The same `Arc<Mutex<Database>>` reaches MCP handlers, outbound delivery, ingress, cleanup and
 notices, plus attachment authorization/download bookkeeping. All Telegram adapters clone one
 reusable client. Post-commit subscription/wait
@@ -1206,11 +1220,12 @@ deletes or repairs operator files to roll back an error.
 and closes bounded subscription/wait interests, then cancels MCP connections and service loops.
 Synchronous ingress transactions finish before yielding; unresolved updates remain unconfirmed
 and recover from the durable cursor. Handler/listener futures and every admitted send are tracked
-and drained, including sends whose callers disconnected. Download admission closes, HTTP work
-is canceled, and tracked writers/partial-output retirement drain before the store releases its
-roots. Valid completed owned files remain until stored expiry. Kernel filesystem I/O cannot be
-forcibly preempted and can outlast a logical download deadline. No short shutdown timeout aborts route
-bookkeeping: existing 15-second text and 600-second upload deadlines bound network attempts,
+and drained, including sends whose callers disconnected. Download admission closes and active
+transfers are canceled. The store drains tracked local source and owned-file I/O before
+retiring partial output and releasing reservations. Valid completed owned files remain until
+stored expiry. Kernel filesystem I/O can outlast a logical download deadline and cannot be
+forcibly preempted. Route bookkeeping drains without a separate short shutdown timeout.
+Existing 15-second text and 600-second upload deadlines bound network attempts,
 followed by synchronous SQLite bookkeeping. Failure, uncertainty and failed bookkeeping never
 authorize replay or create a guessed route. Service errors survive draining; individual send
 failures retain their safe diagnostics. Detached send panics wake supervision and fail draining.

@@ -51,7 +51,7 @@ fn defaults_and_example_are_safe_and_independent() {
 }
 
 #[test]
-fn local_bot_api_accepts_explicit_loopback_and_keeps_cloud_transfer_limits() {
+fn local_bot_api_accepts_explicit_loopback_and_keeps_cloud_defaults() {
     let root = "local_bot_api_files_root = '~/upstream'";
     let settings = |url: &str| format!("bot_api = 'local'\n{root}\nlocal_bot_api_url = '{url}'");
     for address in ["127.0.0.2:8081", "[::1]:80"] {
@@ -69,16 +69,6 @@ fn local_bot_api_accepts_explicit_loopback_and_keeps_cloud_transfer_limits() {
         assert_eq!(config.files.max_outbound_mb, 50);
     }
     let local = settings("http://127.0.0.1:8081");
-    for extra in [
-        "[downloads]\nmax_file_bytes=20000001",
-        "[downloads]\nmax_total_bytes=1073741825",
-        "[downloads]\ntimeout_seconds=601",
-    ] {
-        assert_eq!(
-            parse_telegram(&local, extra).unwrap_err(),
-            AppError::InvalidConfig("downloads.budgets")
-        );
-    }
     let mut config = parse_telegram(&local, "").unwrap();
     config.files.max_outbound_mb = 51;
     assert_eq!(
@@ -88,17 +78,34 @@ fn local_bot_api_accepts_explicit_loopback_and_keeps_cloud_transfer_limits() {
 }
 
 #[test]
-fn local_bot_api_rejects_enabled_downloads_until_local_retrieval_is_supported() {
-    let downloads = "[downloads]\nenabled=true\nroots=['~/downloads']";
-    assert!(parse(downloads).unwrap().downloads.enabled);
-    assert_eq!(
-        parse_telegram(
+fn download_limits_follow_the_selected_backend() {
+    for (settings, file, total, timeout) in [
+        ("", 20_000_000_u64, 1 << 30, 600),
+        (
             "bot_api='local'\nlocal_bot_api_url='http://127.0.0.1:8081'\nlocal_bot_api_files_root='~/upstream'",
-            downloads,
-        )
-        .unwrap_err(),
-        AppError::InvalidConfig("downloads.enabled")
-    );
+            4 << 30,
+            64 << 30,
+            3_600,
+        ),
+    ] {
+        let parse = |file, total, timeout| {
+            parse_telegram(
+                settings,
+                &format!(
+                    "[downloads]\nenabled=true\nroots=['~/downloads']\nmax_file_bytes={file}\nmax_total_bytes={total}\ntimeout_seconds={timeout}"
+                ),
+            )
+        };
+        assert!(parse(file, total, timeout).unwrap().downloads.enabled);
+        for (result, field) in [
+            (parse(file + 1, total, timeout), "downloads.max_file_bytes"),
+            (parse(file, total + 1, timeout), "downloads.max_total_bytes"),
+            (parse(file, file - 1, timeout), "downloads.max_total_bytes"),
+            (parse(file, total, timeout + 1), "downloads.timeout_seconds"),
+        ] {
+            assert_eq!(result.unwrap_err(), AppError::InvalidConfig(field));
+        }
+    }
 }
 
 #[test]

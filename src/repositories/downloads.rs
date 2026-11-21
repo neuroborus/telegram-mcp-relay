@@ -5,8 +5,8 @@ use rusqlite::{OptionalExtension, TransactionBehavior, params};
 use super::{Database, registry::random_key};
 use crate::{config::Downloads, error::AppError};
 
-// The existing download_records schema bounds each stored disk charge.
-const MAX_STORED_DISK_BYTES: u64 = 1_073_741_824;
+// Matches the disk_bytes bound in download_sizes.sql, including allocation metadata.
+const MAX_STORED_DISK_BYTES: u64 = 64 * (1 << 30);
 
 /// Return block-rounded data bytes and the disk bytes reserved for data and metadata.
 /// At 4 KiB, an ext4 leaf holds 340 extents. One metadata block per 256 data
@@ -76,19 +76,21 @@ impl Database {
         &mut self,
         root: &FileIdentity,
         policy: &Downloads,
+        retained_size: Option<u64>,
         now: i64,
-        available_bytes: u64,
-        allocation_unit: u64,
-        available_files: u64,
+        (available_bytes, allocation_unit, available_files): (u64, u64, u64),
     ) -> Result<DownloadRecord, AppError> {
-        policy.validate()?;
         let expires_at = now
             .checked_add((policy.timeout_seconds * 1_000) as i64)
             .ok_or(AppError::InvalidRequest("download timestamp"))?;
         if now < 0 {
             return Err(AppError::InvalidRequest("download timestamp"));
         }
-        let (_, disk_bytes) = reservation_sizes(policy.max_file_bytes, allocation_unit)?;
+        let reserved_bytes = retained_size
+            .unwrap_or(policy.max_file_bytes)
+            .min(policy.max_file_bytes);
+        // Even an empty file needs an owned inode and a bounded temporary allocation.
+        let (_, disk_bytes) = reservation_sizes(reserved_bytes.max(1), allocation_unit)?;
         if disk_bytes > MAX_STORED_DISK_BYTES {
             return Err(AppError::DownloadCapacity);
         }
@@ -104,7 +106,7 @@ impl Database {
         let (pending, pending_files): (u64, u64) = transaction.query_row("SELECT coalesce(sum(disk_bytes), 0), count(*) FROM download_records WHERE state != 'complete' AND root_device = ?1", [&root.device], |row| Ok((row.get(0)?, row.get(1)?)))?;
         if count >= u64::from(policy.max_files)
             || active >= u64::from(policy.concurrent)
-            || reserved.saturating_add(policy.max_file_bytes) > policy.max_total_bytes
+            || reserved.saturating_add(reserved_bytes) > policy.max_total_bytes
             || pending_files.saturating_add(1) > available_files
             || pending
                 .saturating_add(disk_bytes)
@@ -119,13 +121,13 @@ impl Database {
             file: None,
             complete: false,
             retiring: false,
-            reserved_bytes: policy.max_file_bytes,
+            reserved_bytes,
             disk_bytes,
             actual_bytes: None,
             expires_at,
         };
         transaction.execute("INSERT INTO download_records(download_id, root_device, root_inode, state, reserved_bytes, disk_bytes, created_at, expires_at) VALUES(?1, ?2, ?3, 'reserved', ?4, ?5, ?6, ?7)",
-            params![record.id, root.device, root.inode, policy.max_file_bytes, disk_bytes, now, expires_at])?;
+            params![record.id, root.device, root.inode, reserved_bytes, disk_bytes, now, expires_at])?;
         transaction.commit()?;
         Ok(record)
     }

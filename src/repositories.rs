@@ -55,7 +55,7 @@ pub(crate) use history_read::{
     HistoryFile, HistoryPosition, HistoryRecord, HistoryScan, ScanDecision,
 };
 
-const SCHEMA_VERSION: i64 = 10;
+const SCHEMA_VERSION: i64 = 11;
 const APPLICATION_ID: i64 = 0x544d4352; // TMCR
 
 /// One private connection; services will expose narrowly scoped transactions, not raw SQL.
@@ -234,6 +234,9 @@ fn initialize_schema(connection: &mut Connection) -> Result<(), AppError> {
     if version < 10 {
         transaction.execute_batch(include_str!("repositories/downloads.sql"))?;
     }
+    if version < 11 {
+        transaction.execute_batch(include_str!("repositories/download_sizes.sql"))?;
+    }
     transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     let vacuum: i64 = transaction.pragma_query_value(None, "auto_vacuum", |r| r.get(0))?;
     if vacuum != 2 {
@@ -374,7 +377,7 @@ mod tests {
             ..Default::default()
         };
         let reserve = |db: &mut Database| {
-            db.reserve_download(&root, &policy, 1_000, u64::MAX, 4_096, u64::MAX)
+            db.reserve_download(&root, &policy, None, 1_000, (u64::MAX, 4_096, u64::MAX))
         };
         let first = reserve(&mut database).unwrap();
         assert_eq!(
@@ -395,6 +398,50 @@ mod tests {
             reserve(&mut database).unwrap_err(),
             AppError::DownloadCapacity
         );
+    }
+
+    #[test]
+    fn download_records_account_for_retained_sizes_through_local_ceiling() {
+        let directory = Directory::new();
+        let settings = Storage {
+            path: directory.0.join("test.sqlite"),
+            ..Storage::default()
+        };
+        let mut database = Database::open(&settings, &Limits::default()).unwrap();
+        let root = FileIdentity {
+            device: "0000000000000001".into(),
+            inode: "0000000000000002".into(),
+        };
+        let ceiling = 4_u64 << 30;
+        let policy = crate::config::Downloads {
+            max_file_bytes: ceiling,
+            max_total_bytes: 2 * ceiling,
+            ..Default::default()
+        };
+        for (retained, expected) in [
+            (None, ceiling),
+            (Some(ceiling + 1), ceiling),
+            (Some(123), 123),
+            (Some(0), 0),
+        ] {
+            let record = database
+                .reserve_download(&root, &policy, retained, 1_000, (u64::MAX, 4_096, 1))
+                .unwrap();
+            assert_eq!(record.reserved_bytes, expected);
+            assert!(record.disk_bytes > expected);
+            database.own_download_inode(&record.id, &root).unwrap();
+            let completed = database
+                .complete_download(&record.id, expected, record.disk_bytes, 1_000, 10)
+                .unwrap();
+            assert_eq!(completed.actual_bytes, Some(expected));
+            assert_eq!(completed.expires_at, 11_000);
+            assert_eq!(
+                database.cap_download_expiry(&record.id, 2_000, 1_001),
+                Ok(2_000)
+            );
+            database.retire_download(&record.id).unwrap();
+            database.forget_download(&record.id).unwrap();
+        }
     }
 
     #[test]
@@ -426,6 +473,76 @@ mod tests {
             .unwrap();
         initialize(&mut connection).unwrap();
         assert_eq!(check_schema(&connection).unwrap(), SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn v10_download_migration_preserves_records_at_the_page_cap() {
+        let directory = Directory::new();
+        let mut connection = Connection::open(directory.0.join("test.sqlite")).unwrap();
+        connection
+            .pragma_update(None, "temp_store", "MEMORY")
+            .unwrap();
+        initialize(&mut connection).unwrap();
+        connection
+            .execute_batch("DROP TABLE download_records; PRAGMA user_version = 10;")
+            .unwrap();
+        connection
+            .execute_batch(include_str!("repositories/downloads.sql"))
+            .unwrap();
+        let states = [
+            ("reserved", None, None),
+            ("writing", Some("0000000000000003"), None),
+            ("complete", Some("0000000000000004"), Some(9)),
+            ("retiring", Some("0000000000000005"), None),
+        ];
+        let transaction = connection.transaction().unwrap();
+        for index in 0..1024 {
+            let (state, file_inode, actual) = states[index % states.len()];
+            let id = (index * 577) % 1024;
+            transaction
+                .execute(
+                    "INSERT INTO download_records VALUES
+                     (?1, '0000000000000001', '0000000000000002',
+                      CASE WHEN ?2 IS NOT NULL THEN '0000000000000001' END,
+                      ?2, ?3, 20000000, 20004864, ?4, 1000, 2000)",
+                    rusqlite::params![format!("{id:064x}"), file_inode, state, actual],
+                )
+                .unwrap();
+        }
+        transaction.commit().unwrap();
+        // Compact the fixture so it has neither free pages nor slack from index splits.
+        connection.execute_batch("VACUUM").unwrap();
+        let pages: u32 = connection
+            .pragma_query_value(None, "page_count", |row| row.get(0))
+            .unwrap();
+        let free: u32 = connection
+            .pragma_query_value(None, "freelist_count", |row| row.get(0))
+            .unwrap();
+        assert_eq!(free, 0);
+        let cap: u32 = connection
+            .query_row(&format!("PRAGMA max_page_count = {pages}"), [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(cap, pages);
+
+        let read_rows = |connection: &Connection| {
+            connection
+                .prepare(
+                    "SELECT json_array(download_id, root_device, root_inode, file_device,
+                             file_inode, state, reserved_bytes, disk_bytes, actual_bytes,
+                             created_at, expires_at) FROM download_records ORDER BY download_id",
+                )
+                .unwrap()
+                .query_map([], |row| row.get::<_, String>(0))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        let before = read_rows(&connection);
+        initialize(&mut connection).unwrap();
+        assert_eq!(check_schema(&connection).unwrap(), SCHEMA_VERSION);
+        assert_eq!(read_rows(&connection), before);
     }
 
     #[test]

@@ -2,13 +2,14 @@ use super::*;
 use rustix::fs::{RenameFlags, renameat_with};
 use std::{
     fs::{self, DirBuilder, OpenOptions, Permissions},
-    io::Write,
+    io::{self, Write},
     os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt, symlink},
     path::Path,
     sync::atomic::{AtomicBool, AtomicI64, Ordering},
+    task::{Context, Poll},
 };
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::{AsyncReadExt, AsyncWrite, AsyncWriteExt},
     net::TcpListener,
 };
 
@@ -84,18 +85,30 @@ impl Drop for Fixture {
 }
 
 async fn save(store: &DownloadStore, bytes: &'static [u8]) -> Result<DownloadedFile, AppError> {
+    save_with_retained_size(store, bytes, None).await
+}
+
+async fn save_with_retained_size(
+    store: &DownloadStore,
+    bytes: &'static [u8],
+    retained_size: Option<u64>,
+) -> Result<DownloadedFile, AppError> {
     store
-        .materialize(move |file, _, _| {
-            Box::pin(async move {
-                file.write_all(bytes)
-                    .await
-                    .map_err(|_| AppError::DownloadWriteFailed)?;
-                file.flush()
-                    .await
-                    .map_err(|_| AppError::DownloadWriteFailed)?;
-                Ok(bytes.len() as u64)
-            })
-        })
+        .materialize_authorized(
+            move |file, _, _, _| {
+                Box::pin(async move {
+                    file.write_all(bytes)
+                        .await
+                        .map_err(|_| AppError::DownloadWriteFailed)?;
+                    file.flush()
+                        .await
+                        .map_err(|_| AppError::DownloadWriteFailed)?;
+                    Ok(bytes.len() as u64)
+                })
+            },
+            Arc::new(|| Ok(())),
+            retained_size,
+        )
         .await
 }
 
@@ -116,10 +129,9 @@ fn preallocation_accepts_the_reported_ext4_metadata_block_and_rejects_an_overrun
         .reserve_download(
             &store.0.roots[0].identity,
             &fixture.config.downloads,
+            None,
             1_000,
-            u64::MAX,
-            4_096,
-            1,
+            (u64::MAX, 4_096, 1),
         )
         .unwrap();
     let observed = 20_004_864;
@@ -146,6 +158,58 @@ fn preallocation_accepts_the_reported_ext4_metadata_block_and_rejects_an_overrun
     );
 }
 
+fn download_peer(
+    listener: TcpListener,
+    responses: Vec<(&'static str, Vec<u8>)>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        for (request_line, body) in responses {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut input = Vec::new();
+            loop {
+                let mut chunk = [0; 1_024];
+                let read = socket.read(&mut chunk).await.unwrap();
+                assert!(read > 0 && input.len() + read <= 8_192);
+                input.extend_from_slice(&chunk[..read]);
+                let Some(end) = input.windows(4).position(|part| part == b"\r\n\r\n") else {
+                    continue;
+                };
+                let headers = std::str::from_utf8(&input[..end]).unwrap();
+                assert_eq!(headers.lines().next().unwrap(), request_line);
+                let length = headers
+                    .lines()
+                    .find_map(|line| {
+                        let (key, value) = line.split_once(':')?;
+                        key.eq_ignore_ascii_case("content-length")
+                            .then(|| value.trim().parse::<usize>().unwrap())
+                    })
+                    .unwrap_or(0);
+                if input.len() != end + 4 + length {
+                    continue;
+                }
+                if length > 0 {
+                    assert_eq!(
+                        serde_json::from_slice::<serde_json::Value>(&input[end + 4..]).unwrap(),
+                        serde_json::json!({"file_id":"stored-id"})
+                    );
+                }
+                break;
+            }
+            socket
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        body.len()
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+            socket.write_all(&body).await.unwrap();
+        }
+    })
+}
+
 #[tokio::test]
 async fn private_download_composes_the_real_adapter_with_the_reserved_inode() {
     let fixture = Fixture::new();
@@ -156,42 +220,188 @@ async fn private_download_composes_the_real_adapter_with_the_reserved_inode() {
         format!("http://{}/botSynthetic/", listener.local_addr().unwrap()),
     )
     .unwrap();
-    let peer = tokio::spawn(async move {
-        for (request_line, body) in [
-            ("POST /botSynthetic/getFile HTTP/1.1", br#"{"ok":true,"result":{"file_id":"stored-id","file_unique_id":"stable-id","file_size":8,"file_path":"documents/file.bin"}}"#.as_slice()),
-            ("GET /file/botSynthetic/documents/file.bin HTTP/1.1", b"download".as_slice()),
-        ] {
-            let (mut socket, _) = listener.accept().await.unwrap();
-            let mut input = Vec::new();
-            loop {
-                let mut chunk = [0; 1_024];
-                let read = socket.read(&mut chunk).await.unwrap();
-                assert!(read > 0 && input.len() + read <= 8_192);
-                input.extend_from_slice(&chunk[..read]);
-                let Some(end) = input.windows(4).position(|part| part == b"\r\n\r\n") else { continue; };
-                let headers = std::str::from_utf8(&input[..end]).unwrap();
-                assert_eq!(headers.lines().next().unwrap(), request_line);
-                let length = headers.lines().find_map(|line| {
-                    let (key, value) = line.split_once(':')?;
-                    key.eq_ignore_ascii_case("content-length").then(|| value.trim().parse::<usize>().unwrap())
-                }).unwrap_or(0);
-                if input.len() != end + 4 + length { continue; }
-                if length > 0 {
-                    assert_eq!(serde_json::from_slice::<serde_json::Value>(&input[end + 4..]).unwrap(), serde_json::json!({"file_id":"stored-id"}));
-                }
-                break;
-            }
-            socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).as_bytes()).await.unwrap();
-            socket.write_all(body).await.unwrap();
-        }
-    });
+    let peer = download_peer(listener, vec![
+        ("POST /botSynthetic/getFile HTTP/1.1", br#"{"ok":true,"result":{"file_id":"stored-id","file_unique_id":"stable-id","file_size":8,"file_path":"documents/file.bin"}}"#.to_vec()),
+        ("GET /file/botSynthetic/documents/file.bin HTTP/1.1", b"download".to_vec()),
+    ]);
     let output = store
-        .download(client, "stored-id".into(), "stable-id".into(), || Ok(()))
+        .download(client, "stored-id".into(), "stable-id".into(), None, || {
+            Ok(())
+        })
         .await
         .unwrap();
     assert_eq!(output.bytes, 8);
     assert_eq!(fs::read(output.path).unwrap(), b"download");
     peer.await.unwrap();
+    store.shutdown().await.unwrap();
+}
+
+struct GatedOutput<'a> {
+    file: &'a mut File,
+    wrote: bool,
+    entered: Option<oneshot::Sender<()>>,
+}
+
+impl AsyncWrite for GatedOutput<'_> {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        bytes: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        if self.wrote {
+            if let Some(entered) = self.entered.take() {
+                entered.send(()).unwrap();
+            }
+            return Poll::Pending;
+        }
+        let result = Pin::new(&mut *self.file).poll_write(cx, bytes);
+        self.wrote = matches!(result, Poll::Ready(Ok(1..)));
+        result
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut *self.file).poll_flush(cx)
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut *self.file).poll_shutdown(cx)
+    }
+}
+
+#[tokio::test]
+async fn local_copy_cancellation_and_deadline_retire_owned_output_without_touching_source() {
+    for cancel in [true, false] {
+        let mut fixture = Fixture::new();
+        let upstream = fixture.base.join("upstream");
+        fs::create_dir(&upstream).unwrap();
+        let source = upstream.join("local.bin");
+        let size = 2 * 65_536;
+        let bytes = vec![b'x'; size];
+        fs::write(&source, &bytes).unwrap();
+        fixture.config.telegram.bot_api = crate::config::BotApi::Local;
+        fixture.config.telegram.local_bot_api_files_root = Some(upstream);
+        fixture.config.downloads.max_file_bytes = 1 << 30;
+        fixture.config.downloads.max_total_bytes = 1 << 30;
+        let database = fixture.database();
+        let store = fixture.store(database.clone());
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let client = TelegramClient::for_test(
+            &fixture.config,
+            format!("http://{}/botSynthetic/", listener.local_addr().unwrap()),
+        )
+        .unwrap();
+        let metadata = serde_json::json!({"ok":true,"result":{"file_id":"stored-id",
+            "file_unique_id":"stable-id","file_path":source,"file_size":size}});
+        let peer = download_peer(
+            listener,
+            vec![(
+                "POST /botSynthetic/getFile HTTP/1.1",
+                serde_json::to_vec(&metadata).unwrap(),
+            )],
+        );
+        let (entered, observed) = oneshot::channel();
+        let caller = store.clone();
+        let call = tokio::spawn(async move {
+            caller
+                .materialize_authorized(
+                    move |file, limit, timeout, source_io| {
+                        Box::pin(async move {
+                            let mut output = GatedOutput {
+                                file,
+                                entered: Some(entered),
+                                wrote: false,
+                            };
+                            client
+                                .download_file(
+                                    "stored-id",
+                                    "stable-id",
+                                    limit,
+                                    timeout,
+                                    &mut output,
+                                    source_io,
+                                )
+                                .await
+                        })
+                    },
+                    Arc::new(|| Ok(())),
+                    Some(size as u64),
+                )
+                .await
+        });
+        observed.await.unwrap();
+        assert_eq!(records(&database)[0].reserved_bytes, size as u64);
+        assert_eq!(fs::read_dir(fixture.root()).unwrap().count(), 1);
+        if cancel {
+            store.0.tasks.close();
+            call.abort();
+            assert!(call.await.unwrap_err().is_cancelled());
+            store.0.tasks.wait().await;
+            store.0.tasks.reopen();
+        } else {
+            tokio::time::pause();
+            tokio::time::advance(Duration::from_secs(601)).await;
+            assert_eq!(
+                call.await.unwrap().unwrap_err(),
+                crate::error::TelegramError::Deadline.into()
+            );
+            tokio::time::resume();
+        }
+        peer.await.unwrap();
+        assert!(records(&database).is_empty());
+        assert_eq!(fs::read_dir(fixture.root()).unwrap().count(), 0);
+        assert_eq!(fs::read(source).unwrap(), bytes);
+        let recovery = b"capacity recovered";
+        save_with_retained_size(&store, recovery, Some(recovery.len() as u64))
+            .await
+            .unwrap();
+        store.shutdown().await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn canceled_download_holds_admission_until_blocking_source_io_drains() {
+    let mut fixture = Fixture::new();
+    fixture.config.downloads.concurrent = 1;
+    let database = fixture.database();
+    let store = fixture.store(database.clone());
+    let (started, observed) = oneshot::channel();
+    let (release, blocked) = oneshot::channel();
+    let dropped = CancellationToken::new();
+    let guard = dropped.clone().drop_guard();
+    let caller = store.clone();
+    let call = tokio::spawn(async move {
+        caller
+            .materialize_authorized(
+                move |_, _, _, source_io| {
+                    Box::pin(async move {
+                        let _guard = guard;
+                        source_io
+                            .spawn_blocking(move || {
+                                started.send(()).unwrap();
+                                let _ = blocked.blocking_recv();
+                            })
+                            .await
+                            .unwrap();
+                        Ok(0)
+                    })
+                },
+                Arc::new(|| Ok(())),
+                Some(1),
+            )
+            .await
+    });
+    observed.await.unwrap();
+    store.0.tasks.close();
+    call.abort();
+    assert!(call.await.unwrap_err().is_cancelled());
+    dropped.cancelled().await;
+    assert_eq!(records(&database).len(), 1);
+    assert!(store.0.admission.try_acquire().is_err());
+    release.send(()).unwrap();
+    store.0.tasks.wait().await;
+    store.0.tasks.reopen();
+    assert!(records(&database).is_empty());
+    save(&store, b"capacity recovered").await.unwrap();
     store.shutdown().await.unwrap();
 }
 
@@ -267,10 +477,9 @@ async fn disk_reservations_bound_pending_space_inodes_and_concurrency() {
         db.lock().unwrap().reserve_download(
             &store.0.roots[0].identity,
             &fixture.config.downloads,
+            None,
             1_000,
-            available_bytes,
-            4_096,
-            available_files,
+            (available_bytes, 4_096, available_files),
         )
     };
     let disk_bytes = 3 * 4_096;
@@ -731,10 +940,9 @@ async fn foreign_symlinks_hard_links_and_exclusive_name_collisions_are_never_rem
         .reserve_download(
             &root.identity,
             &fixture.config.downloads,
+            None,
             1_000,
-            u64::MAX,
-            4_096,
-            u64::MAX,
+            (u64::MAX, 4_096, u64::MAX),
         )
         .unwrap();
     let temporary = root.temporary().unwrap();
@@ -775,10 +983,9 @@ async fn restart_recovers_each_publication_phase_and_preserves_live_files_and_un
             .reserve_download(
                 &root.identity,
                 &fixture.config.downloads,
+                None,
                 1_000,
-                u64::MAX,
-                4_096,
-                u64::MAX,
+                (u64::MAX, 4_096, u64::MAX),
             )
             .unwrap();
         if phase > 0 {
