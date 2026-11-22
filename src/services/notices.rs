@@ -135,8 +135,9 @@ impl NoticeService {
             let journal = database.reserve_outgoing(
                 text.as_str(),
                 session.as_ref(),
-                false,
-                Some(candidate.trigger_message_id),
+                crate::repositories::OutgoingKind::Notice {
+                    reply_to: candidate.trigger_message_id,
+                },
             )?;
             let Some(attempt) = database.take_notice_attempt(&self.policy, &candidate, now)? else {
                 return Ok(());

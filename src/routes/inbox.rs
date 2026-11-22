@@ -5,7 +5,7 @@ use crate::{
     repositories::{IngestOutcome, RouteKind},
     services::{ingress::IngressService, unix_millis},
 };
-use tools::failure;
+use tools::{Telegram, failure, protocol_tool, sent};
 
 impl Http {
     pub(super) async fn snapshot(&self, uri: &str) -> Value {
@@ -26,6 +26,12 @@ impl Http {
     }
 }
 
+fn text_reply_update(parent: i64, id: i64) -> Value {
+    json!({"update_id":id,"message":{"message_id":id+100,"date":1,
+        "chat":{"id":-101},"from":{"id":7,"is_bot":false},
+        "reply_to_message":{"message_id":parent},"text":format!("reply {id}")}})
+}
+
 pub(super) fn seed(fixture: &Fixture, session: &Value, parent: i64, ids: &[i64]) {
     let mut database = Database::open(&fixture.config.storage, &fixture.config.limits).unwrap();
     let now = unix_millis().unwrap();
@@ -36,10 +42,8 @@ pub(super) fn seed(fixture: &Fixture, session: &Value, parent: i64, ids: &[i64])
         .persist_route(reservation, -101, parent, RouteKind::Document, now, now)
         .unwrap();
     let ingress = IngressService::new(&fixture.config).unwrap();
-    for (index, id) in ids.iter().enumerate() {
-        let mut update = json!({"update_id":id,"message":{"message_id":id+100,"date":1,
-            "chat":{"id":-101},"from":{"id":7,"is_bot":false},
-            "reply_to_message":{"message_id":parent},"text":format!("reply {id}")}});
+    for (index, &id) in ids.iter().enumerate() {
+        let mut update = text_reply_update(parent, id);
         if index == 1 {
             update["message"].as_object_mut().unwrap().remove("text");
             update["message"]["document"] =
@@ -137,7 +141,9 @@ async fn stable_templates_and_direct_paginated_snapshots_never_claim_or_enumerat
 #[tokio::test]
 async fn competing_inbox_claims_reconcile_and_complete_durably_through_mcp() {
     let mut fixture = Fixture::new();
-    let state = fixture.state.clone();
+    fixture.config.activity.typing_enabled = false;
+    let telegram = Telegram::new(&fixture.config, vec![sent(31)]).await;
+    let state = telegram.handler(&fixture);
     let mut http = fixture.serve(state, None).await;
     let session = http
         .register(json!({"external_session_id":"thread","title":"Same","directory_label":"p"}))
@@ -160,17 +166,24 @@ async fn competing_inbox_claims_reconcile_and_complete_durably_through_mcp() {
     start["active"] = true.into();
     let started = http.success("telegram_processing", start.clone()).await;
     assert!(started["processing_started_at"].is_i64());
-    assert_eq!(http.success("telegram_processing", start).await, started);
+    assert_eq!(started["start_acknowledgment"], "sent");
+    let mut existing = started;
+    existing["start_acknowledgment"] = "already_started".into();
+    existing
+        .as_object_mut()
+        .unwrap()
+        .remove("outbound_message_id");
+    assert_eq!(http.success("telegram_processing", start).await, existing);
     let mut stop = args.clone();
     stop["active"] = false.into();
-    assert_eq!(http.success("telegram_processing", stop).await, started);
+    assert_eq!(http.success("telegram_processing", stop).await, existing);
     let resume = json!({"session_key":key,"reply_id":a["reply_id"],"claim_token":a["claim_token"],
         "reconcile_request_id":"synthetic-resume-id"});
     let rotated = http.success("telegram_processing", resume.clone()).await;
     assert_ne!(rotated["claim_token"], a["claim_token"]);
     assert_eq!(
         rotated["processing_started_at"],
-        started["processing_started_at"]
+        existing["processing_started_at"]
     );
     http.finish().await;
     let reopened = Arc::new(
@@ -228,6 +241,240 @@ async fn competing_inbox_claims_reconcile_and_complete_durably_through_mcp() {
         http.snapshot(session["inbox_uri"].as_str().unwrap()).await["replies"],
         json!([])
     );
+}
+
+#[tokio::test]
+async fn processing_sends_one_threaded_acknowledgment_without_guidance_on_both_protocols() {
+    for legacy in [false, true] {
+        let mut fixture = Fixture::new();
+        fixture.config.activity.typing_enabled = false;
+        let telegram = Telegram::new(
+            &fixture.config,
+            vec![
+                sent(31),
+                sent(32),
+                (200, json!(null)), // A lost or invalid result cannot establish delivery.
+                (400, json!({"ok":false,"error_code":400})),
+                sent(35),
+            ],
+        )
+        .await;
+        let state = telegram.handler(&fixture);
+        let (mut http, endpoint) = fixture.serve_endpoint(state.clone(), None).await;
+        let transport = if legacy {
+            Some(http.initialize(LEGACY_VERSION).await.0)
+        } else {
+            None
+        };
+        let call = |name, args| protocol_tool(&http, &endpoint, transport.as_deref(), name, args);
+        let session = call(
+            "telegram_register",
+            json!({"title":"🚀","directory_label":"relay"}),
+        )
+        .await["result"]["structuredContent"]
+            .clone();
+        let key = session["session_key"].as_str().unwrap();
+        let parent = 5;
+        let update_ids = [11, 12, 13, 14, 15];
+        seed(&fixture, &session, parent, &update_ids);
+        let claimed = call("telegram_inbox", json!({"session_key":key})).await;
+        assert_eq!(claimed["result"]["isError"], false);
+        let sql = rusqlite::Connection::open(&fixture.config.storage.path).unwrap();
+        sql.execute_batch(
+            "CREATE TRIGGER fail_ack_route BEFORE INSERT ON message_routes
+             WHEN NEW.telegram_message_id = 35
+             BEGIN SELECT RAISE(ABORT, 'synthetic route failure'); END;",
+        )
+        .unwrap();
+        let mut recovered = Vec::new();
+        for (index, (body, outcome, id, error_code, stored_state)) in [
+            (None, "sent", Some(31), None, "sent"),
+            (
+                Some("Starting *literal* [work"),
+                "sent",
+                Some(32),
+                None,
+                "sent",
+            ),
+            (None, "uncertain", None, None, "attempted"),
+            (None, "failed", None, None, "attempted"),
+            (
+                None,
+                "sent",
+                Some(35),
+                Some("SEND_BOOKKEEPING_FAILED"),
+                "sent",
+            ),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let claim = &claimed["result"]["structuredContent"]["replies"][index];
+            let args = json!({"session_key":key,"reply_id":claim["reply_id"],
+                "claim_token":claim["claim_token"]});
+            let reply_id = claim["reply_id"].as_str().unwrap();
+            let stored = || {
+                sql.query_row(
+                    "SELECT start_ack_state, start_ack_text FROM replies WHERE reply_id = ?1",
+                    [reply_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, Option<String>>(0)?,
+                            row.get::<_, Option<String>>(1)?,
+                        ))
+                    },
+                )
+                .unwrap()
+            };
+            if index == 0 {
+                for (action, code) in [
+                    (json!({"active":false,"message":"No"}), "REQUEST_INVALID"),
+                    (
+                        json!({"reconcile_request_id":"resume","message":"No"}),
+                        "REQUEST_INVALID",
+                    ),
+                    (
+                        json!({"active":true,"message":"x".repeat(990)}),
+                        "TEXT_TOO_LONG",
+                    ),
+                ] {
+                    let mut invalid = args.clone();
+                    invalid
+                        .as_object_mut()
+                        .unwrap()
+                        .extend(action.as_object().unwrap().clone());
+                    let invalid = call("telegram_processing", invalid).await;
+                    let result = &invalid["result"];
+                    failure(result, code);
+                    if code == "TEXT_TOO_LONG" {
+                        let guidance = result["structuredContent"]["details"]["guidance"]
+                            .as_str()
+                            .unwrap();
+                        assert!(guidance.contains("shorter message"));
+                        assert!(guidance.contains("re-register the same session"));
+                    }
+                }
+                let page = http.snapshot(session["inbox_uri"].as_str().unwrap()).await;
+                assert_eq!(page["replies"][0]["state"], "claimed");
+                assert_eq!(stored(), (None, None));
+                assert_eq!(telegram.request_count(), 0);
+            }
+            let mut start = args.clone();
+            start["active"] = true.into();
+            if let Some(body) = body {
+                start["message"] = body.into();
+            }
+            let result = call("telegram_processing", start.clone()).await;
+            assert_eq!(result["result"]["isError"], false, "{result}");
+            let result = &result["result"]["structuredContent"];
+            assert_eq!(result["start_acknowledgment"], outcome);
+            assert!(result["processing_started_at"].is_i64());
+            assert_eq!(
+                result.get("start_acknowledgment_error_code"),
+                error_code.map(Value::from).as_ref(),
+            );
+            match id {
+                Some(id) => {
+                    assert_eq!(result["outbound_message_id"], id);
+                    let db =
+                        Database::open(&fixture.config.storage, &fixture.config.limits).unwrap();
+                    let route = db.route(-101, id, unix_millis().unwrap()).unwrap();
+                    if error_code.is_some() {
+                        assert!(route.is_none());
+                    } else {
+                        let route = route.unwrap();
+                        assert_eq!(route.session_key, key);
+                        assert_eq!(route.kind, RouteKind::Text);
+                    }
+                }
+                None => assert!(result.get("outbound_message_id").is_none()),
+            }
+            let body = body.unwrap_or("✅ Request received. Working on it.");
+            assert_eq!(stored(), (Some(stored_state.into()), Some(body.into())));
+            assert_eq!(
+                telegram.text_request(index),
+                json!({"chat_id":-101,"text":format!("[🚀]\nrelay\n\n{body}"),
+                    "entities":[{"type":"bold","offset":0,"length":4},
+                                {"type":"italic","offset":5,"length":5}],
+                    "reply_parameters":{"message_id":claim["telegram_message_id"],
+                                        "allow_sending_without_reply":true}})
+            );
+            if index == 0 {
+                let mut database =
+                    Database::open(&fixture.config.storage, &fixture.config.limits).unwrap();
+                let update =
+                    serde_json::from_value(text_reply_update(parent, update_ids[0])).unwrap();
+                assert!(matches!(
+                    IngressService::new(&fixture.config)
+                        .unwrap()
+                        .ingest(&mut database, &update, unix_millis().unwrap())
+                        .unwrap(),
+                    IngestOutcome::Duplicate
+                ));
+                let page = http.snapshot(session["inbox_uri"].as_str().unwrap()).await;
+                let mut copies =
+                    page["replies"].as_array().unwrap().iter().filter(|reply| {
+                        reply["telegram_message_id"] == claim["telegram_message_id"]
+                    });
+                let original = copies.next().unwrap();
+                assert_eq!(original["reply_id"], reply_id);
+                assert_eq!(original["state"], "processing");
+                assert_eq!(
+                    original["processing_started_at"],
+                    result["processing_started_at"]
+                );
+                assert!(copies.next().is_none());
+            }
+            start["message"] = "Must not replace or resend the original".into();
+            let repeated = call("telegram_processing", start).await;
+            assert_eq!(repeated["result"]["isError"], false);
+            assert_eq!(
+                repeated["result"]["structuredContent"]["start_acknowledgment"],
+                "already_started"
+            );
+            let mut resume = args;
+            resume["reconcile_request_id"] = format!("synthetic-resume-{index}").into();
+            let reconciliation = call("telegram_processing", resume).await;
+            assert_eq!(reconciliation["result"]["isError"], false);
+            let rotated = &reconciliation["result"]["structuredContent"];
+            assert_eq!(rotated["start_acknowledgment"], "already_started");
+            recovered.push(json!({"session_key":key,"reply_id":reply_id,
+                "claim_token":rotated["claim_token"],"active":true}));
+            assert_eq!(stored(), (Some(stored_state.into()), Some(body.into())));
+            assert_eq!(telegram.request_count(), index + 1);
+        }
+        http.finish().await;
+        state.stop();
+        state.drain().await.unwrap();
+        drop(endpoint);
+        drop(state);
+
+        let (mut http, endpoint) = fixture
+            .serve_endpoint(telegram.handler(&fixture), None)
+            .await;
+        let transport = if legacy {
+            Some(http.initialize(LEGACY_VERSION).await.0)
+        } else {
+            None
+        };
+        for start in recovered {
+            let result = protocol_tool(
+                &http,
+                &endpoint,
+                transport.as_deref(),
+                "telegram_processing",
+                start,
+            )
+            .await;
+            assert_eq!(result["result"]["isError"], false, "{result}");
+            assert_eq!(
+                result["result"]["structuredContent"]["start_acknowledgment"],
+                "already_started"
+            );
+        }
+        assert_eq!(telegram.request_count(), 5);
+        http.finish().await;
+    }
 }
 
 #[tokio::test]

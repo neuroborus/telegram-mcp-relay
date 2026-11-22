@@ -4,6 +4,7 @@ use std::{
     net::SocketAddr,
     os::unix::fs::{DirBuilderExt, OpenOptionsExt},
     path::PathBuf,
+    time::Duration,
 };
 
 use http::{Request, Response};
@@ -288,8 +289,15 @@ impl Mock {
         }
     }
 
+    async fn receive(&mut self) -> TelegramRequest {
+        tokio::time::timeout(Duration::from_secs(10), self.requests.recv())
+            .await
+            .expect("Expected a request at the synthetic Telegram peer")
+            .unwrap()
+    }
+
     async fn next(&mut self, method: &str) -> TelegramRequest {
-        let request = self.requests.recv().await.unwrap();
+        let request = self.receive().await;
         assert_eq!(request.method, method);
         request
     }
@@ -395,10 +403,22 @@ async fn composition_cleans_before_polling_and_shares_send_ingress_and_typing() 
         json!({"session_key":key,"reply_id":reply["reply_id"],"claim_token":reply["claim_token"]});
     let mut processing = handle.clone();
     processing["active"] = true.into();
-    tool(address, "telegram_processing", processing).await;
-    mock.next("sendChatAction")
-        .await
-        .respond(json!({"ok":true,"result":true}));
+    let telegram = async {
+        let mut methods = Vec::new();
+        for _ in 0..2 {
+            let request = mock.receive().await;
+            methods.push(request.method.clone());
+            match request.method.as_str() {
+                "sendMessage" => request.respond(conversations::accepted(6)),
+                "sendChatAction" => request.respond(json!({"ok":true,"result":true})),
+                _ => panic!("unexpected Telegram method"),
+            }
+        }
+        methods.sort();
+        assert_eq!(methods, ["sendChatAction", "sendMessage"]);
+    };
+    let (started, ()) = tokio::join!(tool(address, "telegram_processing", processing), telegram);
+    assert_eq!(started["start_acknowledgment"], "sent");
     tool(address, "telegram_ack", handle).await;
     running.stop.cancel();
     (&mut running.task).await.unwrap().unwrap();

@@ -89,7 +89,8 @@ fn start_legacy_tool(
 async fn both_protocols_share_tools_resources_and_durable_routes() {
     let mut fixture = Fixture::new();
     fixture.config.delivery.wait_fallback_enabled = false;
-    let telegram = Telegram::new(&fixture.config, (7..13).map(sent).collect()).await;
+    fixture.config.activity.typing_enabled = false;
+    let telegram = Telegram::new(&fixture.config, (7..19).map(sent).collect()).await;
     let state = telegram.handler(&fixture);
     let (mut http, endpoint) = fixture.serve_endpoint(state.clone(), None).await;
     let (transport, _) = http.initialize(LEGACY_VERSION).await;
@@ -267,7 +268,8 @@ async fn both_protocols_share_tools_resources_and_durable_routes() {
 #[tokio::test]
 async fn mixed_claims_reconcile_fence_and_ack_across_restart() {
     let mut fixture = Fixture::new();
-    let mock = Mock::new(&fixture.config).await;
+    fixture.config.activity.typing_enabled = false;
+    let mut mock = Mock::new(&fixture.config).await;
     let (database, state) = mock.shared(&fixture);
     let (mut http, endpoint) = fixture.serve_endpoint(state.clone(), None).await;
     let (transport, _) = http.initialize(LEGACY_VERSION).await;
@@ -312,7 +314,10 @@ async fn mixed_claims_reconcile_fence_and_ack_across_restart() {
     assert_ne!(a["claim_token"], b["claim_token"]);
     let mut start = handle(&session, a);
     start["active"] = true.into();
-    let started = older.success(&http, "telegram_processing", start).await;
+    let (started, ()) = tokio::join!(
+        older.success(&http, "telegram_processing", start),
+        mock.accept(&database, 8),
+    );
     assert!(started["processing_started_at"].is_i64());
     let mut resume = handle(&session, a);
     resume["reconcile_request_id"] = "synthetic-mixed-reconcile".into();

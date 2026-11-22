@@ -48,44 +48,6 @@ impl McpHandler {
         claim(item, attachments)
     }
 
-    pub(super) fn processing(
-        &self,
-        request: ProcessingRequest,
-    ) -> Result<ProcessingResult, AppError> {
-        let mut database = self.database.lock().map_err(|_| AppError::StorageFailure)?;
-        let now = unix_millis()?;
-        let (status, token) = match (request.active, request.reconcile_request_id) {
-            (Some(active), None) => (
-                self.inbox.processing(
-                    &mut database,
-                    &request.session_key,
-                    &request.reply_id,
-                    &request.claim_token,
-                    active,
-                    now,
-                )?,
-                request.claim_token,
-            ),
-            (None, Some(id)) => {
-                let resumed = self.inbox.reconcile_processing(
-                    &mut database,
-                    &request.session_key,
-                    &request.reply_id,
-                    &request.claim_token,
-                    &id,
-                    now,
-                )?;
-                (resumed.status, resumed.claim_token)
-            }
-            _ => return Err(AppError::InvalidRequest("processing action")),
-        };
-        Ok(ProcessingResult {
-            reply_id: request.reply_id,
-            claim_token: token,
-            processing_started_at: status.processing_started_at,
-        })
-    }
-
     pub(super) fn acknowledge(&self, request: AckRequest) -> Result<AckResult, AppError> {
         let mut database = self.database.lock().map_err(|_| AppError::StorageFailure)?;
         self.inbox.acknowledge(

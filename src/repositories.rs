@@ -30,6 +30,7 @@ mod inbox;
 pub(crate) use inbox::valid_cursor_id;
 pub use inbox::{ClaimedReply, InboxCursor, InboxPage, InboxReply, ReplyState, ReplyTarget};
 mod processing;
+pub(crate) use processing::{PreparedStartAck, ProcessingAction, ProcessingTransition};
 pub use processing::{ProcessingStatus, ReconciledProcessing};
 mod notices;
 pub use notices::{NoticeAttempt, NoticeKind, NoticePolicy};
@@ -50,12 +51,12 @@ pub use history::{
     AttachmentInput, AttachmentKind, HistoryCoverage, HistoryUsage, JournalInput, MessageDirection,
     MessageSource, StoredMessage,
 };
-pub(crate) use history::{ConfirmedMessage, OutgoingJournal};
+pub(crate) use history::{ConfirmedMessage, OutgoingJournal, OutgoingKind};
 pub(crate) use history_read::{
     HistoryFile, HistoryPosition, HistoryRecord, HistoryScan, ScanDecision,
 };
 
-const SCHEMA_VERSION: i64 = 11;
+const SCHEMA_VERSION: i64 = 12;
 const APPLICATION_ID: i64 = 0x544d4352; // TMCR
 
 /// One private connection; services will expose narrowly scoped transactions, not raw SQL.
@@ -236,6 +237,9 @@ fn initialize_schema(connection: &mut Connection) -> Result<(), AppError> {
     }
     if version < 11 {
         transaction.execute_batch(include_str!("repositories/download_sizes.sql"))?;
+    }
+    if version < 12 {
+        transaction.execute_batch(include_str!("repositories/start_ack.sql"))?;
     }
     transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     let vacuum: i64 = transaction.pragma_query_value(None, "auto_vacuum", |r| r.get(0))?;
@@ -484,7 +488,12 @@ mod tests {
             .unwrap();
         initialize(&mut connection).unwrap();
         connection
-            .execute_batch("DROP TABLE download_records; PRAGMA user_version = 10;")
+            .execute_batch(
+                "ALTER TABLE replies DROP COLUMN start_ack_text;
+                 ALTER TABLE replies DROP COLUMN start_ack_state;
+                 DROP TABLE download_records;
+                 PRAGMA user_version = 10;",
+            )
             .unwrap();
         connection
             .execute_batch(include_str!("repositories/downloads.sql"))

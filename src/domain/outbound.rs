@@ -24,6 +24,7 @@ pub(crate) const SERVICE_PREFIX: &str = "🔧 ";
 pub(crate) const TEXT_UTF16_LIMIT: usize = 4_096;
 pub(crate) const CAPTION_UTF16_LIMIT: usize = 1_024;
 
+pub const START_ACK_TEXT: &str = "✅ Request received. Working on it.";
 pub(crate) const UNCONFIRMED_NOTICE: &str =
     "Reply saved, but the agent has not confirmed processing it yet.";
 pub(crate) const UNROUTABLE_NOTICE: &str = "Could not identify the target session for this Reply. Please reply to a newer message from that agent.";

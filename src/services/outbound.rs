@@ -14,7 +14,8 @@ use crate::{
     error::{AppError, TelegramError},
     repositories::{
         AttachmentInput, AttachmentKind, ConfirmedMessage, Database, MessageSource,
-        OutgoingJournal, RouteKind, RouteReservation,
+        OutgoingJournal, OutgoingKind, PreparedStartAck, ReplyTarget, RouteKind, RouteReservation,
+        Session,
     },
 };
 
@@ -23,6 +24,16 @@ use super::{files::ValidatedFile, typing::TypingService, unix_millis};
 enum Delivery {
     Text(FormattedMessage),
     Document(FormattedMessage, ValidatedFile),
+    StartAck {
+        text: FormattedMessage,
+        target: ReplyTarget,
+        reply_id: String,
+    },
+}
+
+pub(super) struct ConfirmedSend {
+    pub message: SentMessage,
+    pub bookkeeping: Result<(), AppError>,
 }
 
 /// Clones share send admission and the application's single database/client.
@@ -32,6 +43,7 @@ pub struct OutboundService {
     database: Arc<Mutex<Database>>,
     telegram: TelegramClient,
     chat_id: i64,
+    allowed_chats: Arc<[i64]>,
     admission: Arc<Semaphore>,
     tasks: TaskTracker,
     failed: watch::Sender<bool>,
@@ -40,7 +52,8 @@ pub struct OutboundService {
 }
 
 impl OutboundService {
-    /// Use the one configured, allowlisted destination; callers cannot override it.
+    /// Use the configured chat for outbound text and file tools. A start acknowledgment
+    /// goes to the owned reply's allowlisted chat.
     pub fn new(
         database: Arc<Mutex<Database>>,
         telegram: TelegramClient,
@@ -63,6 +76,7 @@ impl OutboundService {
             database,
             telegram,
             chat_id: config.telegram.chat_id,
+            allowed_chats: config.telegram.allowed_chat_ids.clone().into(),
             admission: Arc::new(Semaphore::new(config.limits.background_tasks as usize)),
             tasks: TaskTracker::new(),
             failed: watch::channel(false).0,
@@ -171,48 +185,89 @@ impl OutboundService {
         entities: &[MessageEntity],
         file: Option<ValidatedFile>,
     ) -> Result<SentMessage, AppError> {
-        // Track before admission: close/wait cannot miss a task that already has a permit,
-        // even when another thread closes admission before the task is spawned.
+        let confirmed = self
+            .send_prepared(|database| {
+                let session = database.session(session_key)?;
+                let directory = Some(session.outbound_directory_label()?);
+                let delivery = if let Some(file) = file {
+                    Delivery::Document(
+                        format_caption(&session.title, directory, body)?
+                            .with_body_entities(body, entities)?,
+                        file,
+                    )
+                } else {
+                    Delivery::Text(
+                        format_text(&session.title, directory, body)?
+                            .with_body_entities(body, entities)?,
+                    )
+                };
+                Ok((session, delivery))
+            })
+            .await?;
+        confirmed.bookkeeping?;
+        Ok(confirmed.message)
+    }
+
+    pub(super) async fn send_start_ack(
+        &self,
+        ack: PreparedStartAck,
+    ) -> Result<ConfirmedSend, AppError> {
+        if !self.allowed_chats.contains(&ack.target.chat_id) {
+            return Err(AppError::InvalidRequest("reply chat authorization"));
+        }
+        self.send_prepared(move |_| {
+            Ok((
+                ack.session,
+                Delivery::StartAck {
+                    text: ack.text,
+                    target: ack.target,
+                    reply_id: ack.reply_id,
+                },
+            ))
+        })
+        .await
+    }
+
+    async fn send_prepared(
+        &self,
+        prepare: impl FnOnce(&Database) -> Result<(Session, Delivery), AppError>,
+    ) -> Result<ConfirmedSend, AppError> {
+        // Track before admission: close/wait cannot miss a task that already has a permit.
         let task = self.tasks.token();
-        let (delivery, reservation, journal, permit) = {
+        let (delivery, reservation, journal, permit, session_key) = {
             let mut database = self.database.lock().map_err(|_| AppError::StorageFailure)?;
-            let session = database.session(session_key)?;
-            let directory = Some(session.outbound_directory_label()?);
-            let delivery = if let Some(file) = file {
-                Delivery::Document(
-                    format_caption(&session.title, directory, body)?
-                        .with_body_entities(body, entities)?,
-                    file,
-                )
-            } else {
-                Delivery::Text(
-                    format_text(&session.title, directory, body)?
-                        .with_body_entities(body, entities)?,
-                )
-            };
+            let (session, delivery) = prepare(&database)?;
             let permit = Arc::clone(&self.admission)
                 .try_acquire_owned()
                 .map_err(|_| AppError::SendCapacity)?;
-            let reservation = database.reserve_route(session_key)?;
-            let (text, document) = match &delivery {
-                Delivery::Text(text) => (text, false),
-                Delivery::Document(text, _) => (text, true),
+            let reservation = database.reserve_route(&session.session_key)?;
+            let (text, kind) = match &delivery {
+                Delivery::Text(text) => (text, OutgoingKind::Text { reply_to: None }),
+                Delivery::Document(text, _) => (text, OutgoingKind::Document),
+                Delivery::StartAck { text, target, .. } => (
+                    text,
+                    OutgoingKind::Text {
+                        reply_to: Some(target.message_id),
+                    },
+                ),
             };
-            let journal =
-                database.reserve_outgoing(text.as_str(), Some(&session), document, None)?;
-            (delivery, reservation, journal, permit)
+            let journal = database.reserve_outgoing(text.as_str(), Some(&session), kind)?;
+            (delivery, reservation, journal, permit, session.session_key)
         };
         // No await separates admission from transfer to the owned task. Dropping the join
         // handle cannot abort the send or the synchronous post-send transaction.
         let service = self.clone();
-        let session_key = session_key.to_owned();
         let outcome = SendOutcome(Some(self.failed.clone()));
         let handle = self.tasks.spawn(async move {
             let _permit = permit;
             let result = service
                 .send_reserved(delivery, reservation, journal, &session_key)
                 .await;
-            if let Err(error) = &result {
+            let error = match &result {
+                Ok(confirmed) => confirmed.bookkeeping.as_ref().err(),
+                Err(error) => Some(error),
+            };
+            if let Some(error) = error {
                 // Detached callers must not hide uncertainty; log only a safe static code.
                 tracing::warn!(code = error.code(), "Admitted Telegram send failed");
             }
@@ -232,11 +287,12 @@ impl OutboundService {
         reservation: RouteReservation,
         journal: Option<OutgoingJournal>,
         session_key: &str,
-    ) -> Result<SentMessage, AppError> {
-        let (sent, kind) = match delivery {
+    ) -> Result<ConfirmedSend, AppError> {
+        let (sent, kind, start_ack_id) = match delivery {
             Delivery::Text(text) => (
                 self.telegram.send_message(self.chat_id, &text).await?,
                 RouteKind::Text,
+                None,
             ),
             Delivery::Document(caption, file) => {
                 let (file, filename, size) = file.into_parts();
@@ -245,14 +301,31 @@ impl OutboundService {
                         .send_document(self.chat_id, caption, file, filename, size)
                         .await?,
                     RouteKind::Document,
+                    None,
                 )
             }
+            Delivery::StartAck {
+                text,
+                target,
+                reply_id,
+            } => (
+                self.telegram
+                    .send_message_with_reply(target.chat_id, &text, Some(target.message_id))
+                    .await?,
+                RouteKind::Text,
+                Some(reply_id),
+            ),
         };
-        // A known accepted result clears this session even if route persistence fails.
-        // Rejected or ambiguous sends cannot establish that the agent sent its result.
-        self.typing.stop_session(session_key);
-        self.record_success(reservation, &sent, kind, journal)?;
-        Ok(sent)
+        // Agent results clear typing. The start acknowledgment leaves work active.
+        if start_ack_id.is_none() {
+            self.typing.stop_session(session_key);
+        }
+        let bookkeeping =
+            self.record_success(reservation, &sent, kind, journal, start_ack_id.as_deref());
+        Ok(ConfirmedSend {
+            message: sent,
+            bookkeeping,
+        })
     }
 
     fn record_success(
@@ -261,13 +334,20 @@ impl OutboundService {
         sent: &SentMessage,
         kind: RouteKind,
         journal: Option<OutgoingJournal>,
+        start_ack_id: Option<&str>,
     ) -> Result<(), AppError> {
-        let confirmed = confirmed_message(sent)?;
-        let now = (self.now)().map_err(|_| AppError::SendBookkeepingFailed)?;
-        self.database
+        let route = confirmed_message(sent).and_then(|message| Ok((message, (self.now)()?)));
+        let mut database = self
+            .database
             .lock()
-            .map_err(|_| AppError::SendBookkeepingFailed)?
-            .persist_outgoing_route(reservation, &confirmed, kind, journal, now)
+            .map_err(|_| AppError::SendBookkeepingFailed)?;
+        // Telegram confirmation is independent of committing reply routing and history.
+        let marked = start_ack_id.map_or(Ok(()), |id| database.confirm_start_ack(id));
+        let persisted = route.and_then(|(confirmed, now)| {
+            database.persist_outgoing_route(reservation, &confirmed, kind, journal, now)
+        });
+        marked
+            .and(persisted)
             .map_err(|_| AppError::SendBookkeepingFailed)
     }
 }

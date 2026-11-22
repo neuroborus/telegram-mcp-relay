@@ -128,10 +128,19 @@ legacy transport state, initialize afresh and resume the independent private app
 and rotating `claim_token`. A resource snapshot contains no tokens and never claims. Preserve
 each current token before work. Pre-processing claims can expire (60 seconds by default);
 stale ownership must not perform new effects or acknowledge. Confirm actual work with
-`telegram_processing(active=true)`, end activity with `active=false`, and acknowledge only
-successful handling. Inactivity and typing expiry preserve durable processing ownership;
-they do not release or complete work. A completed reply may reappear after a crash before
-acknowledgment: reconcile known effects by `reply_id` rather than blindly executing again.
+`telegram_processing(active=true)`. On the first start, Relay replies to the user's Telegram
+message with “✅ Request received. Working on it.” Supply `message` with `active=true` to
+replace this body with literal text. The complete framed acknowledgment fits the usual
+1,000-scalar limit. Allow the ordinary text-send deadline. Follow
+`start_acknowledgment` for the outcome. If a `sent` result also includes
+`start_acknowledgment_error_code: "SEND_BOOKKEEPING_FAILED"`, Telegram confirmed the
+outbound ID and the reply route may be missing. Continue handling the original reply and use a
+regular routed send or ask for any further reply you need. The recorded start and typing
+lease survive delivery failures. Never resend the start acknowledgment.
+
+End activity with `active=false` and acknowledge only successful handling. Inactivity and
+typing expiry preserve durable processing ownership. If a reply reappears after a crash
+before completion was recorded, reconcile known effects by `reply_id` before repeating work.
 
 To resume already-started processing explicitly, save a fresh random `reconcile_request_id`
 (1–64 UTF-8 bytes) and your current token before calling `telegram_processing` with that ID,

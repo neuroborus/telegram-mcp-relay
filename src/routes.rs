@@ -34,7 +34,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
 
 use crate::{
-    config::{Config, MCP_CONTROL_REQUESTS, Secret},
+    config::{Config, MCP_CONTROL_REQUESTS, MCP_PROCESSING_START_REQUESTS, Secret},
     error::AppError,
     handlers::McpHandler,
 };
@@ -67,6 +67,7 @@ struct Endpoint<S> {
     auth: Option<HeaderValue>,
     admission: Arc<Semaphore>,
     recovery: Arc<Semaphore>,
+    processing_start: Arc<Semaphore>,
     concurrency: usize,
     request_bytes: usize,
     versions: Vec<ProtocolVersion>,
@@ -139,6 +140,7 @@ impl<S: ServerHandler> McpEndpoint<S> {
                 auth,
                 admission: Arc::new(Semaphore::new(config.limits.concurrent_requests as usize)),
                 recovery: Arc::new(Semaphore::new(MCP_CONTROL_REQUESTS)),
+                processing_start: Arc::new(Semaphore::new(MCP_PROCESSING_START_REQUESTS)),
                 concurrency: config.limits.concurrent_requests as usize,
                 request_bytes: config.limits.request_bytes as usize,
                 versions,
@@ -158,6 +160,8 @@ impl<S: ServerHandler> McpEndpoint<S> {
             return Err(AppError::InvalidConfig("MCP listener"));
         }
         let mut connections = JoinSet::new();
+        // Leave room for recovery even at concurrency one with a start send in flight.
+        let connection_limit = self.inner.concurrency * 2 + MCP_PROCESSING_START_REQUESTS;
         let result = loop {
             tokio::select! {
                 biased;
@@ -167,7 +171,7 @@ impl<S: ServerHandler> McpEndpoint<S> {
                         break Err(AppError::McpUnavailable);
                     }
                 }
-                accepted = listener.accept(), if connections.len() < self.inner.concurrency * 2 => {
+                accepted = listener.accept(), if connections.len() < connection_limit => {
                     let (socket, _) = match accepted {
                         Ok(accepted) => accepted,
                         Err(_) => break Err(AppError::McpUnavailable),
@@ -233,7 +237,7 @@ impl<S: ServerHandler> McpEndpoint<S> {
         if !self.valid_protocol_headers(&request) {
             return rejection(StatusCode::BAD_REQUEST);
         }
-        let (permit, control_only) = match self.inner.admission.clone().try_acquire_owned() {
+        let (mut permit, control_only) = match self.inner.admission.clone().try_acquire_owned() {
             Ok(permit) => (permit, false),
             Err(_) => match self.inner.recovery.clone().try_acquire_owned() {
                 Ok(permit) => (permit, true),
@@ -259,7 +263,7 @@ impl<S: ServerHandler> McpEndpoint<S> {
         let response = tokio::select! {
             biased;
             _ = self.inner.shutdown.cancelled() => return rejection(StatusCode::SERVICE_UNAVAILABLE),
-            response = self.dispatch(request, control_only)
+            response = self.dispatch(request, control_only, &mut permit)
                 .instrument(tracing::info_span!("mcp_request", request_id = correlation.as_str())) => response,
         };
         let mut response = safe_response(response, self.inner.request_bytes).await;
@@ -284,7 +288,12 @@ impl<S: ServerHandler> McpEndpoint<S> {
     /// rmcp's complete inline metadata selects stateless routing even with a
     /// legacy version and session header. Reject that ambiguity before dispatch;
     /// leave the original bytes and SDK negotiation/validation unchanged.
-    async fn dispatch<B>(&self, request: Request<B>, control_only: bool) -> Response<ResponseBody>
+    async fn dispatch<B>(
+        &self,
+        request: Request<B>,
+        control_only: bool,
+        permit: &mut OwnedSemaphorePermit,
+    ) -> Response<ResponseBody>
     where
         B: Body<Data = Bytes> + Send + 'static,
         B::Error: std::fmt::Display,
@@ -313,12 +322,18 @@ impl<S: ServerHandler> McpEndpoint<S> {
         };
         let message = serde_json::from_slice::<ClientJsonRpcMessage>(&bytes).ok();
         // Classify the parsed body, never client-controlled method/name headers.
-        if control_only
-            && message
-                .as_ref()
-                .is_none_or(|message| !control_message(message))
-        {
-            return rejection(StatusCode::SERVICE_UNAVAILABLE);
+        if control_only {
+            match message.as_ref().map(message_class) {
+                Some(RequestClass::Control) => (),
+                Some(RequestClass::ProcessingStart) => {
+                    let Ok(start) = self.inner.processing_start.clone().try_acquire_owned() else {
+                        return rejection(StatusCode::SERVICE_UNAVAILABLE);
+                    };
+                    // Free recovery admission before waiting for the Telegram response.
+                    *permit = start;
+                }
+                _ => return rejection(StatusCode::SERVICE_UNAVAILABLE),
+            }
         }
         if session && let Some(ClientJsonRpcMessage::Request(rpc)) = &message {
             let meta = rpc.request.get_meta();
@@ -413,26 +428,51 @@ impl<S: ServerHandler> McpEndpoint<S> {
     }
 }
 
-fn control_request(request: &ClientRequest) -> bool {
+enum RequestClass {
+    Ordinary,
+    Control,
+    ProcessingStart,
+}
+
+fn request_class(request: &ClientRequest) -> RequestClass {
     match request {
-        ClientRequest::CallToolRequest(call) => matches!(
-            call.params.name.as_ref(),
-            "telegram_register" | "telegram_inbox" | "telegram_processing" | "telegram_ack"
-        ),
-        ClientRequest::ReadResourceRequest(_) | ClientRequest::PingRequest(_) => true,
-        _ => false,
+        ClientRequest::CallToolRequest(call) => match call.params.name.as_ref() {
+            "telegram_processing" => {
+                let active = call
+                    .params
+                    .arguments
+                    .as_ref()
+                    .and_then(|args| args.get("active"))
+                    .and_then(serde_json::Value::as_bool);
+                if active == Some(true) {
+                    RequestClass::ProcessingStart
+                } else {
+                    RequestClass::Control
+                }
+            }
+            "telegram_register" | "telegram_inbox" | "telegram_ack" => RequestClass::Control,
+            _ => RequestClass::Ordinary,
+        },
+        ClientRequest::ReadResourceRequest(_) | ClientRequest::PingRequest(_) => {
+            RequestClass::Control
+        }
+        _ => RequestClass::Ordinary,
     }
 }
 
-fn control_message(message: &ClientJsonRpcMessage) -> bool {
+fn message_class(message: &ClientJsonRpcMessage) -> RequestClass {
     match message {
-        ClientJsonRpcMessage::Request(rpc) => control_request(&rpc.request),
-        ClientJsonRpcMessage::Notification(n) => matches!(
-            n.notification,
-            ClientNotification::CancelledNotification(_)
-                | ClientNotification::InitializedNotification(_)
-        ),
-        _ => false,
+        ClientJsonRpcMessage::Request(rpc) => request_class(&rpc.request),
+        ClientJsonRpcMessage::Notification(n)
+            if matches!(
+                n.notification,
+                ClientNotification::CancelledNotification(_)
+                    | ClientNotification::InitializedNotification(_)
+            ) =>
+        {
+            RequestClass::Control
+        }
+        _ => RequestClass::Ordinary,
     }
 }
 

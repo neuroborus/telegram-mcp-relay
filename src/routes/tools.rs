@@ -45,6 +45,13 @@ impl Telegram {
         self.requests.lock().unwrap().len()
     }
 
+    pub(super) fn text_request(&self, index: usize) -> Value {
+        let requests = self.requests.lock().unwrap();
+        let request = &requests[index];
+        assert_eq!(request.method, "/botSynthetic/sendMessage");
+        serde_json::from_slice(&request.body).unwrap()
+    }
+
     pub(super) async fn new(config: &Config, responses: Vec<(u16, Value)>) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let client = TelegramClient::for_test(
@@ -862,7 +869,7 @@ async fn legacy_session_metadata_gates_outbound_and_processing_until_recovery_on
         let mut fixture = Fixture::new();
         fixture.config.limits.waiters = 1;
         fixture.config.activity.typing_enabled = false;
-        let telegram = Telegram::new(&fixture.config, vec![sent(7), sent(8), sent(9)]).await;
+        let telegram = Telegram::new(&fixture.config, (6..=9).map(sent).collect()).await;
         let shared = Arc::new(Mutex::new(
             Database::open(&fixture.config.storage, &fixture.config.limits).unwrap(),
         ));
@@ -999,6 +1006,14 @@ async fn legacy_session_metadata_gates_outbound_and_processing_until_recovery_on
         .await;
         assert_eq!(processing["result"]["isError"], false);
         assert!(processing["result"]["structuredContent"]["processing_started_at"].is_i64());
+        assert_eq!(
+            processing["result"]["structuredContent"]["start_acknowledgment"],
+            "sent"
+        );
+        assert_eq!(
+            processing["result"]["structuredContent"]["outbound_message_id"],
+            6
+        );
         let saturated = protocol_tool(
             &http,
             &endpoint,
@@ -1009,7 +1024,7 @@ async fn legacy_session_metadata_gates_outbound_and_processing_until_recovery_on
         .await;
         failure(&saturated["result"], "WAIT_CAPACITY");
         drop(interest);
-        assert_eq!(telegram.request_count(), 0);
+        assert_eq!(telegram.request_count(), 1);
         for (tool, arguments) in [
             ("telegram_send", json!({"session_key":key,"text":"Update"})),
             (
@@ -1045,7 +1060,7 @@ async fn legacy_session_metadata_gates_outbound_and_processing_until_recovery_on
                 .unwrap();
         assert_eq!(asked["result"]["isError"], false);
         assert!(asked["result"]["structuredContent"]["reply"].is_object());
-        assert_eq!(telegram.request_count(), 3);
+        assert_eq!(telegram.request_count(), 4);
         http.finish().await;
     }
 }

@@ -114,10 +114,13 @@ sessions, and thirty seconds for abandoned calls, with a one-second reclamation 
 Attached long-running calls retain their service deadlines. These are centralized constants,
 not new TOML settings, and do not change `limits.sessions` or durable retention.
 
-At saturated HTTP/request-work admission, one additional bounded recovery slot at each layer
-keeps registration, inbox/processing/ack, resource reads and ping usable. HTTP also accepts
-legacy DELETE and cancellation/initialized notifications; SDK notification admission remains
-separate. Parsed bodies select the recovery lane; sends, waits and subscriptions cannot use it.
+At saturated HTTP/request-work admission, one additional bounded slot at each layer admits
+processing calls with `active=true`. A separate recovery slot at each layer keeps registration,
+inbox, processing inactivity and reconciliation, acknowledgment, resource reads and ping
+usable during the Telegram send. HTTP also accepts legacy DELETE and cancellation/initialized
+notifications. SDK notification admission remains separate. Parsed POST bodies select fallback
+admission.
+Sends, waits and subscriptions cannot use either fallback slot.
 Legacy HTTP routing is enabled for MCP 2025-06-18 and uses these bounds independently
 of modern stateless HTTP admission. Transport IDs do not replace durable application keys. See
 [SDK session ownership](ARCHITECTURE.md#sdk-transport-session-bounds) for reclamation and shutdown.

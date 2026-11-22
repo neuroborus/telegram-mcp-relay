@@ -385,44 +385,49 @@ async fn saturated_waits_leave_processing_ack_and_inbox_capacity_on_both_protoco
         }
         let ingress = IngressService::new(&fixture.config).unwrap();
         ingest(&ingress, &database, 10, 6).unwrap();
-        let claim = InboxService::new(&fixture.config.delivery)
+        ingest(&ingress, &database, 11, 6).unwrap();
+        let claims = InboxService::new(&fixture.config.delivery)
             .unwrap()
             .claim(
                 &mut database.lock().unwrap(),
                 &key,
                 None,
-                1,
+                2,
                 unix_millis().unwrap(),
             )
-            .unwrap()
-            .pop()
             .unwrap();
+        let [claim, other] = claims.as_slice() else {
+            panic!("Expected two claims");
+        };
         let observed = Arc::new(Observed {
             state,
             started: tokio::sync::Notify::new(),
             ended: tokio::sync::Notify::new(),
         });
-        let (http, endpoint) = fixture.serve_endpoint(observed.clone(), None).await;
+        let (mut http, endpoint) = fixture.serve_endpoint(observed.clone(), None).await;
         let transport = if legacy {
             Some(http.initialize(LEGACY_VERSION).await.0)
         } else {
             None
         };
-        let args = json!({"session_key":key,"outbound_message_id":7});
-        let mut body = message("tools/call");
-        body["id"] = 200.into();
-        body["params"]["name"] = "telegram_wait".into();
-        body["params"]["arguments"] = args;
-        let request = if let Some(transport) = &transport {
-            http.legacy_post(
-                json!({"jsonrpc":"2.0","id":200,"method":"tools/call",
-                "params":{"name":"telegram_wait","arguments":body["params"]["arguments"]}}),
-                Some(transport),
-            )
-        } else {
-            http.post(body)
+        let request = |id: i64, name: &str, arguments: Value| {
+            let mut body = message("tools/call");
+            body["id"] = id.into();
+            body["params"]["name"] = name.into();
+            body["params"]["arguments"] = arguments;
+            if let Some(transport) = &transport {
+                body["params"].as_object_mut().unwrap().remove("_meta");
+                http.legacy_post(body, Some(transport))
+            } else {
+                http.post(body)
+            }
         };
-        let pending = tokio::spawn(request.send());
+        let wait = request(
+            200,
+            "telegram_wait",
+            json!({"session_key":key,"outbound_message_id":7}),
+        );
+        let pending = tokio::spawn(wait.send());
         observed.started.notified().await;
         assert_eq!(endpoint.inner.admission.available_permits(), 0);
         // A forged fast-tool header cannot put a send on the reserved recovery lane.
@@ -438,8 +443,11 @@ async fn saturated_waits_leave_processing_ack_and_inbox_capacity_on_both_protoco
         // The rejected response holds the HTTP recovery permit until its body retires.
         rejected.bytes().await.unwrap();
         let mut action = json!({"session_key":key,"reply_id":claim.reply.reply_id,"claim_token":claim.claim_token,"active":true});
-        for active in [true, false] {
-            action["active"] = active.into();
+        let processing = tokio::spawn(request(201, "telegram_processing", action.clone()).send());
+        let respond = mock.next().await;
+        // Both the wait and the first processing call remain outstanding during recovery.
+        tokio::time::timeout(Duration::from_secs(2), async {
+            action["active"] = false.into();
             call(
                 &http,
                 transport.as_deref(),
@@ -448,7 +456,27 @@ async fn saturated_waits_leave_processing_ack_and_inbox_capacity_on_both_protoco
             )
             .await;
             endpoint.inner.sessions.wait_recovery_released().await;
-        }
+            let completed = call(
+                &http,
+                transport.as_deref(),
+                "telegram_ack",
+                json!({"session_key":key,"reply_id":other.reply.reply_id,"claim_token":other.claim_token}),
+            )
+            .await;
+            assert_eq!(completed["acknowledged"], true);
+            endpoint.inner.sessions.wait_recovery_released().await;
+        })
+        .await
+        .expect("Recovery calls must complete while waiting for the Telegram response");
+        respond.send(sent(8).1).unwrap();
+        // Start the legacy SSE read deadline only after the deliberate Telegram hold.
+        let response = processing.await.unwrap().unwrap();
+        let started = if legacy {
+            legacy::sse_message(response).await
+        } else {
+            response.json().await.unwrap()
+        };
+        assert_eq!(tool_data(started)["start_acknowledgment"], "sent");
         action.as_object_mut().unwrap().remove("active");
         call(&http, transport.as_deref(), "telegram_ack", action).await;
         endpoint.inner.sessions.wait_recovery_released().await;
@@ -463,7 +491,7 @@ async fn saturated_waits_leave_processing_ack_and_inbox_capacity_on_both_protoco
             json!([])
         );
         endpoint.inner.sessions.wait_recovery_released().await;
-        ingest(&ingress, &database, 11, 7).unwrap();
+        ingest(&ingress, &database, 12, 7).unwrap();
         // Start the response-read deadline only after releasing the held waiter.
         let response = pending.await.unwrap().unwrap();
         let result = if legacy {
@@ -476,6 +504,7 @@ async fn saturated_waits_leave_processing_ack_and_inbox_capacity_on_both_protoco
             "reply_received"
         );
         mock.assert_idle();
+        http.finish().await;
     }
 }
 

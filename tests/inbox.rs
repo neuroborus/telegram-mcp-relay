@@ -4,6 +4,7 @@ use rusqlite::Connection;
 use serde_json::{Value, json};
 use telegram_mcp_relay::{
     config::{Config, Delivery, Limits, Storage},
+    domain::outbound::START_ACK_TEXT,
     error::AppError,
     repositories::{Database, InboxReply, IngestOutcome, ReplyState, ReplyTarget, RouteKind},
     services::{inbox::InboxService, ingress::IngressService},
@@ -240,6 +241,133 @@ fn restart_recovers_claims_at_lease_boundary_without_reclaiming_processing_work(
         )
         .unwrap();
     assert_eq!(processing_token, original[1].claim_token);
+}
+
+#[test]
+fn competing_starts_consume_one_attempt_before_delivery_and_redelivery_keeps_it() {
+    let fixture = Fixture::new(Limits::default());
+    let mut db = fixture.open();
+    let key = fixture.session(&mut db, -101);
+    let incoming = input(11, -101, 5);
+    let id = fixture.receive(&mut db, incoming.clone(), 1_000);
+    let claim = claims()
+        .claim(&mut db, &key, None, 1, 2_000)
+        .unwrap()
+        .remove(0);
+    let token = claim.claim_token;
+    let barrier = Arc::new(std::sync::Barrier::new(2));
+    std::thread::scope(|scope| {
+        let workers = [db, fixture.open()]
+            .into_iter()
+            .zip([2_001, 2_002])
+            .map(|(mut db, now)| {
+                let (key, id, token, barrier) = (&key, &id, &token, &barrier);
+                scope.spawn(move || {
+                    barrier.wait();
+                    claims()
+                        .processing(&mut db, key, id, token, true, now)
+                        .unwrap()
+                })
+            })
+            .collect::<Vec<_>>();
+        let mut results = workers.into_iter().map(|worker| worker.join().unwrap());
+        let first = results.next().unwrap();
+        assert!(matches!(first.processing_started_at, Some(2_001 | 2_002)));
+        assert_eq!(results.next().unwrap(), first);
+    });
+
+    // No sender ran. A restart cannot distinguish this crash window from an uncertain send.
+    let sql = fixture.sql();
+    let stored = || {
+        sql.query_row(
+            "SELECT start_ack_state, start_ack_text, processing_started_at FROM replies",
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            },
+        )
+        .unwrap()
+    };
+    let before = stored();
+    assert_eq!(before.0, "attempted");
+    assert_eq!(before.1, START_ACK_TEXT);
+    let mut db = fixture.open();
+    let redelivered = serde_json::from_value(incoming).unwrap();
+    assert!(matches!(
+        IngressService::new(&fixture.0)
+            .unwrap()
+            .ingest(&mut db, &redelivered, 3_000)
+            .unwrap(),
+        IngestOutcome::Duplicate
+    ));
+    let rotated = claims()
+        .reconcile_processing(&mut db, &key, &id, &token, "resume", 3_001)
+        .unwrap();
+    assert_eq!(
+        claims().processing(&mut db, &key, &id, &token, true, 3_002),
+        Err(AppError::InvalidClaim)
+    );
+    assert_eq!(
+        claims()
+            .processing(&mut db, &key, &id, &rotated.claim_token, true, 3_002)
+            .unwrap()
+            .processing_started_at,
+        Some(before.2)
+    );
+    assert_eq!(stored(), before);
+}
+
+#[test]
+fn v11_processing_reply_never_acquires_a_start_attempt_after_migration() {
+    let fixture = Fixture::new(Limits::default());
+    let mut db = fixture.open();
+    let key = fixture.session(&mut db, -101);
+    let id = fixture.receive(&mut db, input(11, -101, 5), 1_000);
+    let claim = claims()
+        .claim(&mut db, &key, None, 1, 2_000)
+        .unwrap()
+        .remove(0);
+    drop(db);
+    let sql = fixture.sql();
+    sql.execute_batch(
+        "ALTER TABLE replies DROP COLUMN start_ack_text;
+         ALTER TABLE replies DROP COLUMN start_ack_state;
+         UPDATE replies SET state = 'processing', processing_started_at = 2001,
+             claim_expires_at = NULL;
+         PRAGMA user_version = 11;",
+    )
+    .unwrap();
+    let mut db = fixture.open();
+    assert_eq!(db.schema_version().unwrap(), 12);
+    // An existing start must remain recoverable even if the current header leaves
+    // too little room for the default acknowledgment.
+    let title = format!("a{}", "\u{301}".repeat(980));
+    db.register_session(None, Some(&key), &title, None, 2_002)
+        .unwrap();
+    assert_eq!(
+        claims()
+            .processing(&mut db, &key, &id, &claim.claim_token, true, 3_000)
+            .unwrap()
+            .processing_started_at,
+        Some(2_001)
+    );
+    let saved = sql
+        .query_row(
+            "SELECT start_ack_state, start_ack_text FROM replies",
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                ))
+            },
+        )
+        .unwrap();
+    assert_eq!(saved, (None, None));
 }
 
 #[test]
@@ -928,9 +1056,10 @@ fn receipt_pressure_preserves_processing_payload_and_valid_ack_retry_is_free() {
 #[test]
 fn reconciliation_and_ack_account_for_replacement_bytes_and_outstanding_sends() {
     const BASE: u32 = 197 + 192 + 256 + 64;
+    const START_ACK: u32 = START_ACK_TEXT.len() as u32;
     const PROOF: u32 = 64 + 6; // Prior token plus the UTF-8 request ID "resume".
     let mut fixture = Fixture::new(Limits {
-        metadata_bytes: BASE + PROOF + 192 - 1,
+        metadata_bytes: BASE + START_ACK + PROOF + 192 - 1,
         ..Limits::default()
     });
     let mut db = fixture.open();
@@ -941,6 +1070,20 @@ fn reconciliation_and_ack_account_for_replacement_bytes_and_outstanding_sends() 
         .unwrap()
         .remove(0)
         .claim_token;
+    drop(db);
+    fixture.0.limits.metadata_bytes = BASE + START_ACK - 1;
+    let mut db = fixture.open();
+    assert_eq!(
+        claims().processing(&mut db, &key, &id, &token, true, 2_001),
+        Err(AppError::StorageCapacity)
+    );
+    assert_eq!(
+        db.inbox_snapshot(&key, None, 1, 2_001).unwrap().replies[0].state,
+        ReplyState::Claimed
+    );
+    drop(db);
+    fixture.0.limits.metadata_bytes = BASE + START_ACK + PROOF + 192 - 1;
+    let mut db = fixture.open();
     claims()
         .processing(&mut db, &key, &id, &token, true, 2_001)
         .unwrap();
@@ -954,7 +1097,7 @@ fn reconciliation_and_ack_account_for_replacement_bytes_and_outstanding_sends() 
         .reconcile_processing(&mut db, &key, &id, &token, "resume", 2_002)
         .unwrap();
     drop(db);
-    fixture.0.limits.metadata_bytes = BASE + PROOF;
+    fixture.0.limits.metadata_bytes = BASE + START_ACK + PROOF;
     let mut db = fixture.open();
     // Replacing a proof of the same size consumes no additional metadata.
     let rotated = claims()
@@ -972,7 +1115,7 @@ fn reconciliation_and_ack_account_for_replacement_bytes_and_outstanding_sends() 
         Err(AppError::StorageCapacity)
     );
     drop(db);
-    // Completion sheds the recovery proof even when retained rows exceed a lowered cap.
+    // Completion sheds the start acknowledgment and recovery proof at a lowered cap.
     fixture.0.limits.metadata_bytes = BASE;
     let mut db = fixture.open();
     claims()

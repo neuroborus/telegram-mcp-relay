@@ -373,7 +373,7 @@ async fn channel_setup_ready_across_retirement_releases_an_unpolled_late_stream(
     let manager = BoundedSessions::new(2, CancellationToken::new());
     let client = connect(&manager, true).await;
     let session = manager.session(&client.id).unwrap();
-    let usage = manager.admit(&session, None, false, false).unwrap();
+    let usage = manager.admit(&session, None, &manager.work, None).unwrap();
     let receiver = session.handle.establish_common_channel().await.unwrap();
     let registered = session.stream(receiver, usage);
     let sweep = Arc::new(SweepWitness(Notify::new()));
@@ -383,7 +383,7 @@ async fn channel_setup_ready_across_retirement_releases_an_unpolled_late_stream(
         .waker
         .register(&futures_util::task::waker_ref(&sweep));
 
-    let late_usage = manager.admit(&session, None, false, false).unwrap();
+    let late_usage = manager.admit(&session, None, &manager.work, None).unwrap();
     let receiver = session.handle.establish_common_channel().await.unwrap();
     let setup = std::future::ready(Ok::<_, SessionError>(receiver));
     manager.close_session(&client.id).await.unwrap();

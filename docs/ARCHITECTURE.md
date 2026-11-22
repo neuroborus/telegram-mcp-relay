@@ -34,7 +34,8 @@ explicit reconciliation and acknowledgment operations are available. MCP registr
 outbound tools, read-only inbox resources and inbox/processing/acknowledgment tools are
 available. Modern resource subscriptions deliver bounded post-commit inbox invalidations;
 bounded asks use the common claim path without disabling events. Confirmed processing now drives
-one shared, capped typing scheduler in the library.
+one shared, capped typing scheduler in the library and consumes one visible start
+acknowledgment attempt per reply.
 Durable notice-attempt arbitration and one bounded factual-notice dispatcher are available
 in the library, including service-Reply loop suppression across restart and uncertain sends.
 Indexed bounded retention cleanup, incremental disk reclamation and a startup/daily library
@@ -182,15 +183,17 @@ errors retain their existing behavior. Ordinary session calls remain under bound
 work admission, cancellation and DELETE ownership.
 Request bodies are bounded incrementally, including chunked bodies. Admission lasts through response
 completion/drop, including SSE; saturation returns 503. Connections are limited to twice request
-admission, with 32 headers, 16 KiB header/buffer bounds and a ten-second header deadline. There
-is no global call timeout. Shutdown closes admission, connections and pending body reads before
-draining accepted work; stalled clients cannot extend that drain.
+admission plus one, with 32 headers, 16 KiB header/buffer bounds and a ten-second header
+deadline. There is no global call timeout. Shutdown closes admission, connections and pending
+body reads before draining accepted work. Stalled clients cannot extend that drain.
 
-One additional bounded HTTP slot admits recovery under saturated calls: registration,
-inbox/processing/ack tools, resource reads, ping, cancellation/initialized notifications and
-legacy DELETE. A bounded parsed request body selects this lane, never method/name headers;
-sends, asks, waits and subscription streams cannot use it. The same authentication, metadata,
-body limits, safe errors and shutdown cancellation remain in force.
+Under saturated calls, a reserved HTTP slot admits registration, inbox, processing inactivity
+and reconciliation, acknowledgment, resource reads, ping, cancellation/initialized notifications
+and legacy DELETE. A processing call with `active=true` moves from that slot to a separate
+bounded slot as soon as its body is classified, so recovery remains available while Telegram
+delivery is pending. Admission uses the bounded parsed body. Sends, asks, waits and subscription
+streams cannot use either fallback slot. Authentication, metadata, body limits, safe errors and
+shutdown cancellation still apply.
 
 Correlation uses fresh random IDs, never client-supplied IDs. Authorization, proxy authorization,
 cookies and client correlation headers are removed before SDK dispatch. HTTP rejection text is
@@ -219,9 +222,10 @@ release and response stream EOF/drop. Retaining a completed stream does not reta
 Their permits remain charged through channel removal. No event store or completed-stream
 replay is enabled. Standalone/shadow stream creation consumes the same bounded stream budget.
 
-One separate fallback request slot admits the same synchronous recovery requests when legacy
-work is saturated; its lifetime includes SDK context and channel retirement. Notification
-admission remains separate. HTTP and SDK recovery slots do not increase waiter admission.
+When legacy work is saturated, recovery requests and processing calls with `active=true` use
+one separate fallback slot each. Both include SDK context and channel retirement in their
+lifetimes. Notification admission remains separate. HTTP and SDK fallback slots do not increase
+waiter admission.
 
 The adapter requires initialization and `notifications/initialized` within ten seconds,
 expires idle sessions after five minutes, and checks active sessions at most once per second
@@ -305,20 +309,32 @@ The locked SDK also requires `Mcp-Name` to match `params.uri` on resource reads.
 `telegram_inbox({session_key, limit?})` uses the common ordered claim transaction and returns
 `replies` with fresh `claim_token` values. It claims only pending or lease-expired
 pre-processing replies and never completes them. Preserve each reply ID and current token.
-`telegram_processing({session_key, reply_id, claim_token, active})` records the first start
-when active, or preserves ownership when inactive; neither operation acknowledges a reply.
-Confirmed start drives the [shared typing scheduler](#confirmed-processing-typing).
+`telegram_processing({session_key, reply_id, claim_token, active, message?})` records the first
+start when active and preserves ownership when inactive. The first start drives the
+[shared typing scheduler](#confirmed-processing-typing) and consumes one send attempt for a
+framed reply to the originating Telegram message. Relay validates optional literal `message`
+with the complete framing before changing state. Omission uses “✅ Request received. Working
+on it.” `message` with any other action returns `REQUEST_INVALID`.
 For explicit processing recovery, omit `active` and instead supply
 `reconcile_request_id`: save a fresh random 1–64-byte request ID with the current token before
 dispatch. Exactly one action is required. The result returns the reply ID, current token and
 original first start. Save the rotated token; retry a lost response with the identical saved
-request ID and prior token. Registration alone never rotates ownership.
+request ID and prior token. Registration alone never rotates ownership. The result also
+reports `start_acknowledgment` as `sent`, `uncertain`, `failed` or `already_started`.
+Confirmed delivery returns `sent` with the outbound ID, and includes
+`start_acknowledgment_error_code: "SEND_BOOKKEEPING_FAILED"` if local bookkeeping fails.
+That code means the reply route may be missing. Reconciliation, inactivity and repeated starts
+return `already_started` without a send.
 
 `telegram_ack({session_key, reply_id, claim_token})` removes the successfully handled payload
 through the existing bounded receipt transaction and returns `reply_id`/`acknowledged=true`.
 Identical valid-token retries succeed while the receipt remains valid; stale or wrong-session
 claims return `CLAIM_INVALID`. The recorded C6 outcome covers the original synthetic MCP
 interaction cases. Named-client interoperability has separate evidence.
+The processing-start cases defined in the current `src/routes/inbox.rs` exercise both protocol
+revisions with a synthetic Telegram peer and no guidance call. The current composition and
+storage cases also cover typing, opt-in journaling and preservation of v11 processing state
+through migration. Current execution evidence comes from the applicable Runner FINALIZE receipts.
 
 ## MCP resource subscriptions
 
@@ -570,6 +586,8 @@ to omission, preserving identities, routes, claims and notices.
 
 Version 9 rebuilds reply, completion, disposition and notice keys to allow update-ID reuse
 across sequences. It preserves every token/reconciliation field and attachment reference.
+Version 12 adds nullable start acknowledgment state and bounded literal text to replies.
+Existing processing replies retain their first start and leave both columns null.
 Before a schema upgrade, Relay disables foreign-key actions for SQLite's parent-table rebuild
 procedure. It checks all foreign keys before commit and restores enforcement after success or
 rollback. Capacity or DDL failures roll back all changes.
@@ -714,17 +732,27 @@ permit acquisition so concurrent close cannot miss an admitted send. Crashes and
 termination can still interrupt bookkeeping. With authenticated history opt-in, admission also
 reserves the exact visible body/display and bounded returned document metadata. Other journal
 writes honor outstanding reservations. Success atomically commits the route, activity and
-journal/provenance; default-disabled history retains no outbound body. Presentation is captured
+journal/provenance. The disabled history journal stores no outbound body. Presentation is captured
 before sending, so an in-flight rename cannot relabel the historical message. Reservations
 are logical admission, not a guarantee against later disk or SQLite failure. Missing older
 outgoing bodies cannot be reconstructed.
 
+The first processing acknowledgment uses the same send permit, route and opt-in outgoing
+journal. It threads to the owned reply in its currently allowlisted chat using Telegram
+`reply_parameters`. The acknowledgment may still be delivered if the original Telegram
+message is unavailable. The journal records the intended parent, and replies to the
+acknowledgment use its ordinary text route. The acknowledgment leaves the reply's typing lease
+active. The initial tool call can take the usual text-send deadline plus local bookkeeping.
+See [Telegram ReplyParameters](https://core.telegram.org/bots/api#replyparameters).
+
 A consistent 4xx rejection remains definitive. A lost/invalid response remains
 `TELEGRAM_DELIVERY_UNCERTAIN`, with no fabricated route. A confirmed accepted send whose
 route transaction fails returns `SEND_BOOKKEEPING_FAILED`, explicitly warning that Telegram
-accepted it but reply routing could not be saved. Neither outcome authorizes automatic
-resending. Failures from detached work log only a static error code. Successful completion
-requires a committed route; reservations and task permits release on completion/failure.
+accepted it but reply routing could not be saved. For a start acknowledgment this code
+appears alongside the confirmed outbound ID in the successful processing result. Neither
+outcome authorizes automatic resending. Failures from detached work log only a static error
+code. Ordinary outbound tool success requires a committed route. Reservations and task
+permits release on completion or failure.
 The [recorded C6 outcome](TESTING.md#recorded-validation-evidence) covers the original text
 delivery cases. The current tests define assertions for required project framing and final
 length boundaries. Their execution evidence comes from the applicable Runner FINALIZE receipts.
@@ -1113,12 +1141,17 @@ Pre-processing claims become eligible exactly at lease expiry, including after r
 the same reply ID and a rotated token. Leases never extend reply retention. Processing replies
 are excluded from automatic recovery; reads/claims never acknowledge, delete or start typing.
 
-`InboxService::processing` validates the session/reply/current token and unexpired reply.
+The inbox service validates the session, unexpired reply and current token.
 Pre-processing claims must also have an unexpired lease. The first active call atomically
-records processing start and removes the claim lease; repeated calls preserve that first
-timestamp. Inactivity preserves durable ownership and does not complete or requeue a reply.
-The repository transaction has no network effects or typing timers. The shared inbox service
-updates optional RAM typing activity only after a successful fenced transition.
+records processing start, removes the claim lease, and records the acknowledgment as
+`attempted` with its literal body. Retained acknowledgment text counts against the metadata
+budget and is removed with the reply at completion or expiry. This retention applies even
+with shared history disabled. The inbox service updates RAM
+typing after the fenced transition and hands the consumed attempt to the outbound service.
+After Telegram confirms delivery, Relay records `sent` if the reply is still retained. A
+crash after the transition, a failure or an uncertain send leaves the attempt consumed.
+Repeated starts preserve the original timestamp and never send another copy. Inactivity
+preserves durable ownership.
 
 Explicit `reconcile_processing` requires the saved current token as a compare-and-swap fence
 for a processing reply and a fresh, unguessable client request ID of 1–64 UTF-8 bytes
@@ -1163,7 +1196,7 @@ Cooldowns survive quick stop/start races, limiting each chat to one attempt per 
 The durable first-start timestamp bounds activity at 600 seconds (or a lower configured cap).
 Monotonic caps survive inactivity, reconciliation and expiry, so a backwards wall-clock change
 cannot extend them on a later active call. Valid inactivity or acknowledgment stops that reply;
-a known accepted text/document send stops only its session,
+a known accepted agent text/document send stops only its session,
 including when detached bookkeeping later fails. Rejected/uncertain sends preserve activity.
 Other active sessions keep the merged chat eligible. Failed transitions have no typing effect.
 
@@ -1311,8 +1344,9 @@ network/protocol behavior and cancellation. Shared state contains handles, not d
 - Start typing only after confirmed processing, cap refresh at ten minutes and keep idle free
   of typing activity. Warn once after the grace period only if processing never started.
 - Bound task counts, timers, parser sizes, upload buffers and inbox capacity. Stream files
-  through approved roots with safe opening; never persist outbound file contents. Outbound body
-  capture requires the explicit bounded history opt-in.
+  through approved roots with safe opening. Outgoing bodies enter the journal only with the
+  explicit bounded history opt-in. The start acknowledgment body is also retained as private
+  reply state until completion or expiry. Outbound file contents are never persisted.
 
 ## Retention and security
 

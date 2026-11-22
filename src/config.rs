@@ -28,6 +28,7 @@ pub(crate) const MCP_SESSION_ABANDONED: std::time::Duration = std::time::Duratio
 pub(crate) const MCP_SESSION_SWEEP: std::time::Duration = std::time::Duration::from_secs(1);
 pub(crate) const MCP_SESSION_QUEUE: usize = 16;
 pub(crate) const MCP_CONTROL_REQUESTS: usize = 1;
+pub(crate) const MCP_PROCESSING_START_REQUESTS: usize = 1;
 pub(crate) const INCOMING_ATTACHMENT_LIMIT: usize = 10;
 const CONFIG_BYTES: usize = 65_536;
 pub(crate) const LOCAL_BOT_API_FILES_ROOT: &str = "telegram.local_bot_api_files_root";

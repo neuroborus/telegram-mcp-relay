@@ -590,6 +590,11 @@ Rules:
 - Each acquired claim returns an unpredictable `claim_token` (or equivalent fencing/version value) together with the stable `reply_id`. The agent must pass the token to `telegram_processing` and `telegram_ack`; reject stale or mismatched tokens so an expired claimant cannot complete another claimant's work.
 - If a claim is abandoned **before** processing starts, it becomes claimable again after a short, bounded claim lease; this does **not** time out the agent's work. Never expire a processing claim merely because the user-facing 10-minute typing cap elapsed.
 - Once processing is explicitly started, keep the reply recoverable in SQLite until a final `telegram_ack` or 30-day retention expiry. Do not automatically redeliver it to other concurrent consumers while marked `processing`.
+- On the first fenced `telegram_processing(active=true)` transition, atomically consume one visible start acknowledgment attempt and retain its bounded text with the reply. An optional `message` is literal and valid only with `active=true`. Validate the complete framed text before effects. Omission uses “✅ Request received. Working on it.” Send it as a reply to the user's Telegram message and record confirmed delivery. The processing start survives send failure or uncertainty. Repeated starts, reconciliation, redelivery and restart never send another copy, including after a crash between committing the attempt and dispatch.
+  The attempt text is private reply state retained until completion or expiry. This is the
+  exception to §16's history opt-in rule for outgoing bodies. Journaling the confirmed
+  acknowledgment requires the usual history opt-in.
+- Return `start_acknowledgment` as `sent`, `uncertain`, `failed` or `already_started`. Include the outbound message ID when Telegram confirms delivery. If local bookkeeping fails after delivery, include `start_acknowledgment_error_code: "SEND_BOOKKEEPING_FAILED"` with `sent`. The caller can keep handling the original reply and use a regular routed send or ask when another reply is needed. Inactivity, reconciliation and repeated starts return `already_started` without sending. Check `processing_started_at` to determine whether processing has started. Successful completion still requires `telegram_ack`.
 - On explicit session resume, allow retrieval/reconciliation of previously `processing` but unacknowledged replies so a crashed agent can decide whether to resume. Always include the same `reply_id` for idempotency.
 - For explicit reconciliation, privately persist a fresh random `reconcile_request_id` and the prior `claim_token` **before** requesting `telegram_processing` with those values, the session/reply IDs and no `active`. After response loss retry that same request ID/prior-token pair; retain the returned rotated token. Registration alone does not reconcile ownership. Preserve the original processing start and typing cap.
 - A canceled ask/wait, disconnected client, expired wait, or server restart cannot delete an unacknowledged reply.
@@ -631,7 +636,8 @@ The bridge is not a monitoring system for agent processes. It has no reliable kn
 
 | Trigger | Behavior |
 |---|---|
-| Normal send / Reply / claim / acknowledgment | Silent. |
+| Normal send / Reply / claim / final `telegram_ack` | Silent. |
+| First confirmed processing start | One attempted threaded acknowledgment using the normal session header and text route. Use the supplied literal `message` or “✅ Request received. Working on it.” The normal typing lease continues. |
 | Reply saved, but not confirmed as **started processing** within a configurable 60-second grace period | At most one factual notification for that Reply. Do not notify merely because final acknowledgment is pending while processing is already underway. |
 | Reply to unknown/expired route | One concise unroutable notification; do not guess agent. |
 | Ask or after-send wait exceeds its wait timeout | Return timeout to caller; **no Telegram notice**. |
@@ -639,7 +645,7 @@ The bridge is not a monitoring system for agent processes. It has no reliable kn
 | Agent runs for hours | Do nothing unless it sends an update. |
 | Bridge reconnects after transient Telegram network failure | Retry quietly; log locally. |
 
-Every service message **MUST begin with exactly `🔧 `**, before any session header or body.
+Every factual service notice **MUST begin with exactly `🔧 `**, before any session header or body.
 This prefix is sufficient to identify service voice; no additional notice label is required.
 Apply §4.2's complete visible-length checks to all service messages, and native header entities
 when a session is known. Suggested text (title rendered bold):

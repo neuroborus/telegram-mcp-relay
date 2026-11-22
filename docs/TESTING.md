@@ -197,9 +197,11 @@ formatted output in a real agent workflow. The resource probe driver caption
 After-send wait coverage in `src/routes/wait.rs` defines text/document catch-up without signals
 or resending across both protocols, shared ask/wait admission and single claims, target/chat/
 ownership/expiry rejection, disabled outcomes, and cancellation/600-second timeout/shutdown with
-late-reply restart recovery. Saturated HTTP and legacy work retain processing/ack/inbox capacity;
-forged headers cannot send through the recovery lane. Existing ask/event arming-race proofs
-exercise the shared wait loop. The accepted composition C6 covers the original cases.
+late-reply restart recovery. The saturation fixture holds the Telegram response to a first
+processing start while independent processing inactivity and acknowledgment calls complete.
+Forged headers cannot route an ordinary send through reserved capacity. Existing ask/event
+arming-race cases exercise the shared wait loop. The accepted composition C6 covers the
+original cases. The current assertions require their Runner FINALIZE receipts.
 Live acceptance remains separate.
 
 ## History storage regressions
@@ -681,6 +683,11 @@ attachment-only payloads and delivery-state snapshots without tokens, claims or 
 changes. Concurrent inbox calls return distinct durable claims. Processing start/inactivity,
 explicit reconciliation, a lost reconciliation response across a fresh handler/database,
 stale/wrong-session fencing and idempotent per-reply completion use the shared transitions.
+The processing-start case exercises both protocols without a guidance call. It checks that
+redelivery after a confirmed start preserves the processing reply and that a repeated start
+leaves the acknowledgment send count at one. It also distinguishes ambiguous Telegram delivery
+from confirmed delivery with a failed route transaction. Current execution evidence comes from
+the applicable Runner FINALIZE receipts.
 Invalid URIs, limits, listing cursors and tool arguments return safe errors without claiming.
 Fixtures honor TMPDIR and use private randomized directories; no live Telegram calls are made.
 These cases cover the read/claim/recovery portion of

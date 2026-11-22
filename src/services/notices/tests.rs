@@ -840,7 +840,11 @@ async fn service_journal_failure_and_cancellation_preserve_consumed_attempts_wit
         let reservation = db
             .lock()
             .unwrap()
-            .reserve_outgoing("Synthetic", None, false, Some(111))
+            .reserve_outgoing(
+                "Synthetic",
+                None,
+                crate::repositories::OutgoingKind::Notice { reply_to: 111 },
+            )
             .unwrap();
         drop(reservation);
         drop(service);

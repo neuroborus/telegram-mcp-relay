@@ -331,7 +331,9 @@ async fn subscribed_ask_and_inbox_claims_reconcile_and_recover_missed_acknowledg
     let original = handle(&session, claim);
     let mut start = original.clone();
     start["active"] = true.into();
-    let started = tool(address, "telegram_processing", start).await;
+    let (started, ()) = tokio::join!(tool(address, "telegram_processing", start), async {
+        mock.next("sendMessage").await.respond(accepted(8));
+    });
     assert!(started["processing_started_at"].is_i64());
     let mut resume = original.clone();
     resume["reconcile_request_id"] = "resume-a".into();

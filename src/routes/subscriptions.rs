@@ -128,7 +128,9 @@ impl Http {
 async fn accepted_filters_fan_out_only_authorized_committed_inboxes() {
     let mut fixture = Fixture::new();
     fixture.config.limits.concurrent_requests = 8;
-    let (database, state) = shared(&fixture);
+    fixture.config.activity.typing_enabled = false;
+    let mut telegram = ask::Mock::new(&fixture.config).await;
+    let (database, state) = telegram.shared(&fixture);
     let http = fixture.serve(state, None).await;
     let a = http
         .register(json!({"title":"Same","directory_label":"p"}))
@@ -270,7 +272,15 @@ async fn accepted_filters_fan_out_only_authorized_committed_inboxes() {
         ),
     ] {
         let stale = arguments["claim_token"] == "stale";
-        assert_eq!(http.tool(name, arguments).await["isError"], stale);
+        let call = http.tool(name, arguments);
+        let result = if name == "telegram_processing" && changed {
+            let (result, ()) = tokio::join!(call, telegram.accept(&database, 3));
+            assert_eq!(result["structuredContent"]["start_acknowledgment"], "sent");
+            result
+        } else {
+            call.await
+        };
+        assert_eq!(result["isError"], stale);
         if changed {
             single.updated(uri).await;
             both.updated(uri).await;

@@ -344,7 +344,7 @@ impl Database {
 
     /// Record a successful text/document send and refresh session activity atomically.
     /// `created_at` is the original Telegram message time, not bookkeeping/retry time.
-    /// A failed commit after Telegram success must be reported as uncertain by the service.
+    /// A failed commit after confirmation is a bookkeeping failure.
     pub fn persist_route(
         &mut self,
         reservation: RouteReservation,
@@ -544,6 +544,7 @@ pub(super) fn usage(connection: &Connection) -> Result<Usage, AppError> {
              + coalesce(length(CAST(claim_token AS BLOB)), 0)
              + coalesce(length(CAST(reconciliation_request_id AS BLOB)), 0)
              + coalesce(length(CAST(reconciliation_from_token AS BLOB)), 0)
+             + coalesce(length(CAST(start_ack_text AS BLOB)), 0)
              + coalesce(length(CAST(attachment_metadata_json AS BLOB)), 0)), 0) FROM replies)
          + (SELECT coalesce(sum(128 + length(CAST(reply_id AS BLOB)) + length(CAST(session_key AS BLOB))
              + length(CAST(claim_token AS BLOB))), 0) FROM acknowledgment_receipts)

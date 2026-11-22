@@ -5,17 +5,38 @@ use std::{fmt, sync::atomic::Ordering};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior};
 
 use super::{
-    Database,
-    inbox::{TOKEN_BYTES, ensure_session},
+    Database, Session,
+    inbox::{ReplyTarget, TOKEN_BYTES, ensure_session},
     registry::{expiry, random_key, session_by, usage},
 };
-use crate::error::AppError;
+use crate::{
+    domain::outbound::{FormattedMessage, START_ACK_TEXT, format_text},
+    error::AppError,
+};
 
 /// Durable first start, independent of any in-memory typing activity.
 #[derive(PartialEq, Eq)]
 pub struct ProcessingStatus {
     pub telegram_chat_id: i64,
     pub processing_started_at: Option<i64>,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum ProcessingAction<'a> {
+    Start { message: Option<&'a str> },
+    Stop,
+}
+
+pub(crate) struct ProcessingTransition {
+    pub status: ProcessingStatus,
+    pub start_ack: Option<PreparedStartAck>,
+}
+
+pub(crate) struct PreparedStartAck {
+    pub session: Session,
+    pub reply_id: String,
+    pub target: ReplyTarget,
+    pub text: FormattedMessage,
 }
 
 impl fmt::Debug for ProcessingStatus {
@@ -42,37 +63,90 @@ impl Database {
         session_key: &str,
         reply_id: &str,
         claim_token: &str,
-        active: bool,
+        action: ProcessingAction<'_>,
         now: i64,
-    ) -> Result<ProcessingStatus, AppError> {
+    ) -> Result<ProcessingTransition, AppError> {
         validate_transition(reply_id, claim_token, now)?;
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if active {
-            session_by(&transaction, "session_key", session_key)?
-                .ok_or(AppError::SessionNotFound)?
-                .outbound_directory_label()?;
+        let session = if matches!(action, ProcessingAction::Start { .. }) {
+            Some(
+                session_by(&transaction, "session_key", session_key)?
+                    .ok_or(AppError::SessionNotFound)?,
+            )
         } else {
             ensure_session(&transaction, session_key)?;
-        }
+            None
+        };
+        let directory = session
+            .as_ref()
+            .map(Session::outbound_directory_label)
+            .transpose()?;
         let mut owned = owned_reply(&transaction, session_key, reply_id, claim_token, now)?;
-        let started = active && owned.status.processing_started_at.is_none();
-        if started {
+        let first_start = owned.status.processing_started_at.is_none();
+        // Validate explicit text on every active call. The default is only used on first start.
+        let body = match action {
+            ProcessingAction::Start { message } => {
+                message.or(first_start.then_some(START_ACK_TEXT))
+            }
+            ProcessingAction::Stop => None,
+        };
+        let prepared = match (session.as_ref(), body) {
+            (Some(session), Some(body)) => {
+                Some((format_text(&session.title, directory, body)?, body))
+            }
+            _ => None,
+        };
+        let start_ack = if let Some((session, (text, body))) = session.zip(prepared)
+            && first_start
+        {
+            if usage(&transaction)?.metadata_bytes
+                + self.reserved_routes.bytes.load(Ordering::SeqCst)
+                + body.len() as u64
+                > self.registry.metadata_bytes
+            {
+                return Err(AppError::StorageCapacity);
+            }
             transaction.execute(
                 "UPDATE replies SET state = 'processing', processing_started_at = ?4,
-                 claim_expires_at = NULL
+                 claim_expires_at = NULL, start_ack_state = 'attempted', start_ack_text = ?5
                  WHERE session_key = ?1 AND reply_id = ?2 AND claim_token = ?3",
-                (session_key, reply_id, claim_token, now),
+                (session_key, reply_id, claim_token, now, body),
             )?;
             owned.status.processing_started_at = Some(now);
-        }
+            Some(PreparedStartAck {
+                session,
+                reply_id: reply_id.to_owned(),
+                target: ReplyTarget {
+                    chat_id: owned.status.telegram_chat_id,
+                    message_id: owned.message_id,
+                },
+                text,
+            })
+        } else {
+            None
+        };
         // Inactivity stops typing only; durable ownership and first start never reset.
         transaction.commit()?;
-        if started {
+        if start_ack.is_some() {
             self.inbox_notifications.publish(session_key);
         }
-        Ok(owned.status)
+        Ok(ProcessingTransition {
+            status: owned.status,
+            start_ack,
+        })
+    }
+
+    /// The attempt belongs to the reply, even if its claim was rotated mid-send.
+    /// Completion or expiry may already have removed the reply and its retained text.
+    pub(crate) fn confirm_start_ack(&self, reply_id: &str) -> Result<(), AppError> {
+        self.connection.execute(
+            "UPDATE replies SET start_ack_state = 'sent'
+             WHERE reply_id = ?1 AND start_ack_state = 'attempted'",
+            [reply_id],
+        )?;
+        Ok(())
     }
 
     /// Return the recovered/new result and whether this call committed a new token rotation.
@@ -173,9 +247,12 @@ impl Database {
         let owned = owned_reply(&transaction, session_key, reply_id, claim_token, now)?;
         let expires_at = expiry(now, self.registry.reply_ttl_ms)?;
         let used = usage(&transaction)?;
-        // A receipt sheds attachments and the latest reconciliation recovery proof.
+        // A receipt sheds attachments, the recovery proof and the start acknowledgment text.
         if used.receipts >= u64::from(self.registry.receipts)
-            || used.metadata_bytes - owned.attachment_bytes - owned.reconciliation_bytes
+            || used.metadata_bytes
+                - owned.attachment_bytes
+                - owned.reconciliation_bytes
+                - owned.start_ack_bytes
                 + self.reserved_routes.bytes.load(Ordering::SeqCst)
                 > self.registry.metadata_bytes
         {
@@ -212,6 +289,7 @@ struct OwnedReply {
     message_id: i64,
     attachment_bytes: u64,
     reconciliation_bytes: u64,
+    start_ack_bytes: u64,
 }
 
 fn owned_reply(
@@ -226,7 +304,8 @@ fn owned_reply(
             "SELECT telegram_chat_id, processing_started_at, telegram_update_id,
              coalesce(length(CAST(attachment_metadata_json AS BLOB)), 0),
              coalesce(length(CAST(reconciliation_request_id AS BLOB)), 0)
-                + coalesce(length(CAST(reconciliation_from_token AS BLOB)), 0), telegram_message_id
+                + coalesce(length(CAST(reconciliation_from_token AS BLOB)), 0), telegram_message_id,
+             coalesce(length(CAST(start_ack_text AS BLOB)), 0)
              FROM replies WHERE session_key = ?1 AND reply_id = ?2 AND claim_token = ?3
              AND expires_at > ?4 AND (state = 'processing'
                 OR (state = 'claimed' AND claim_expires_at > ?4))",
@@ -241,6 +320,7 @@ fn owned_reply(
                     attachment_bytes: r.get(3)?,
                     reconciliation_bytes: r.get(4)?,
                     message_id: r.get(5)?,
+                    start_ack_bytes: r.get(6)?,
                 })
             },
         )

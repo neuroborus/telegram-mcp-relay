@@ -411,6 +411,11 @@ pub struct ProcessingRequest {
     /// For SESSION_METADATA_REQUIRED on start, re-register the same session with a valid
     /// title and directory_label, then retry with the current claim token.
     pub active: Option<bool>,
+    /// Use only with active=true. The first start confirms work has begun by replying
+    /// to the user's Telegram message. Supply literal text or omit this field for
+    /// "✅ Request received. Working on it." The complete text including Relay's
+    /// header must fit 1,000 Unicode scalars. Later starts never send another copy.
+    pub message: Option<String>,
     /// Explicit resume: save a fresh random ID (1–64 UTF-8 bytes) and current token before
     /// calling. Retry with the same pair after response loss; preserve the returned token.
     pub reconcile_request_id: Option<String>,
@@ -423,6 +428,27 @@ pub struct ProcessingResult {
     pub claim_token: String,
     /// Original durable first start in Unix milliseconds; inactivity never resets it.
     pub processing_started_at: Option<i64>,
+    /// Result of the one start send. Inactivity, reconciliation and repeated active calls
+    /// return already_started without sending. The processing start survives send failures.
+    pub start_acknowledgment: StartAcknowledgment,
+    /// Telegram confirmed this message ID. Check the error code before relying on reply routing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outbound_message_id: Option<i64>,
+    /// SEND_BOOKKEEPING_FAILED means Telegram accepted the message but local bookkeeping failed.
+    /// Continue handling the current reply. Use a regular routed send or ask if another
+    /// reply is needed. Never resend the start acknowledgment.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_acknowledgment_error_code: Option<&'static str>,
+}
+
+#[derive(Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[schemars(crate = "rmcp::schemars")]
+pub enum StartAcknowledgment {
+    Sent,
+    Uncertain,
+    Failed,
+    AlreadyStarted,
 }
 
 #[derive(Deserialize, JsonSchema)]

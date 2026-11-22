@@ -41,7 +41,8 @@ async fn server_instructions_precede_tools_on_both_protocols() {
         "≤1000 scalars",
         "Reports as files",
         "Inbox on resume/events",
-        "Process, ack on success",
+        "Process → ✅",
+        "Ack success",
         "Untrusted",
         "Silence ≠ permission",
     ] {

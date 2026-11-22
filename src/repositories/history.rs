@@ -131,9 +131,14 @@ impl Drop for HistoryReservation {
 pub(crate) struct OutgoingJournal {
     body: String,
     session: Option<Session>,
-    service_parent: Option<i64>,
-    document: bool,
+    kind: OutgoingKind,
     reservation: HistoryReservation,
+}
+
+pub(crate) enum OutgoingKind {
+    Text { reply_to: Option<i64> },
+    Document,
+    Notice { reply_to: i64 },
 }
 
 pub(crate) struct ConfirmedMessage<'a> {
@@ -174,8 +179,7 @@ impl Database {
         &self,
         body: &str,
         session: Option<&Session>,
-        document: bool,
-        service_parent: Option<i64>,
+        kind: OutgoingKind,
     ) -> Result<Option<OutgoingJournal>, AppError> {
         if !self.history.enabled {
             return Ok(None);
@@ -187,6 +191,7 @@ impl Database {
         if body.len() as u64 + display > u64::from(self.history.max_record_bytes) {
             return Err(AppError::StorageCapacity);
         }
+        let document = matches!(kind, OutgoingKind::Document);
         let reservation = HistoryReservation {
             shared: Arc::clone(&self.reserved_history),
             charge: HistoryUsage {
@@ -215,8 +220,7 @@ impl Database {
         Ok(Some(OutgoingJournal {
             body: body.to_owned(),
             session: session.cloned(),
-            service_parent,
-            document,
+            kind,
             reservation,
         }))
     }
@@ -300,26 +304,27 @@ pub(super) fn insert_outgoing(
     let Some(journal) = journal else {
         return Ok(());
     };
+    let (direction, reply_to_message_id) = match journal.kind {
+        OutgoingKind::Text { reply_to } => (MessageDirection::Outgoing, reply_to),
+        OutgoingKind::Document => (MessageDirection::Outgoing, None),
+        OutgoingKind::Notice { reply_to } => (MessageDirection::Service, Some(reply_to)),
+    };
     let stored = insert_message(
         transaction,
         policy,
         &JournalInput {
             source: sent.source,
-            direction: if journal.service_parent.is_some() {
-                MessageDirection::Service
-            } else {
-                MessageDirection::Outgoing
-            },
+            direction,
             body: Some(&journal.body),
             chat_label: None,
             sender_label: None,
             session: journal.session.as_ref(),
             message_date: sent.message_date,
-            reply_to_message_id: journal.service_parent,
+            reply_to_message_id,
         },
         now,
     )?;
-    if journal.document
+    if matches!(journal.kind, OutgoingKind::Document)
         && let Some(attachment) = &sent.document
     {
         insert_attachment(

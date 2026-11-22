@@ -173,13 +173,23 @@ impl TelegramClient {
         chat_id: i64,
         text: &FormattedMessage,
     ) -> Result<SentMessage, AppError> {
+        self.send_message_with_reply(chat_id, text, None).await
+    }
+
+    pub(crate) async fn send_message_with_reply(
+        &self,
+        chat_id: i64,
+        text: &FormattedMessage,
+        reply_to: Option<i64>,
+    ) -> Result<SentMessage, AppError> {
+        let mut payload =
+            json!({"chat_id": chat_id, "text": text.as_str(), "entities": text.entities()});
+        if let Some(message_id) = reply_to {
+            payload["reply_parameters"] =
+                json!({"message_id": message_id, "allow_sending_without_reply": true});
+        }
         let sent: SentMessage = self
-            .call(
-                "sendMessage",
-                &json!({"chat_id": chat_id, "text": text.as_str(), "entities": text.entities()}),
-                false,
-                REQUEST_TIMEOUT,
-            )
+            .call("sendMessage", &payload, false, REQUEST_TIMEOUT)
             .await?;
         validate_sent(&sent, chat_id)?;
         Ok(sent)

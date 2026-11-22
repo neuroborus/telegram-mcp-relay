@@ -372,7 +372,11 @@ impl ServerHandler for McpHandler {
                 }
             }
             "telegram_inbox" => tool_result(self.claim_inbox(arguments(&request)?)),
-            "telegram_processing" => tool_result(self.processing(arguments(&request)?)),
+            "telegram_processing" => tool_result(
+                self.inbox
+                    .process(&self.database, &self.outbound, arguments(&request)?)
+                    .await,
+            ),
             "telegram_ack" => tool_result(self.acknowledge(arguments(&request)?)),
             "telegram_history" => tool_result(self.history(arguments(&request)?)),
             "telegram_get_attachment" => {
@@ -398,7 +402,7 @@ fn tools() -> Vec<Tool> {
             .with_input_schema::<SendFileRequest>().with_output_schema::<SendResult>(),
         Tool::new("telegram_inbox", "Atomically claim eligible replies on startup, resume or notification; preserve reply IDs and tokens. Never poll periodically. Read resources for snapshots without claiming.", serde_json::Map::new())
             .with_input_schema::<InboxRequest>().with_output_schema::<InboxResult>(),
-        Tool::new("telegram_processing", "Confirm processing start or inactivity with active; neither completes the reply. Typing merges per chat and stops by ten minutes from first start. For explicit resume supply only reconcile_request_id and the saved token, then confirm active to resume typing; retain the rotated token.", serde_json::Map::new())
+        Tool::new("telegram_processing", "Call active=true when work begins. On the first start, Relay confirms work has started by replying to the user's Telegram message with your literal message or, if omitted, '✅ Request received. Working on it.' The complete framed text must fit 1,000 Unicode scalars. Supply message only with active=true. The start persists even if delivery fails or is uncertain. A sent result with SEND_BOOKKEEPING_FAILED confirms Telegram delivery and warns that reply routing may be unavailable. Never resend the acknowledgment. Call active=false to end typing, and telegram_ack after successful handling. Typing merges per chat and stops by ten minutes from first start. For explicit resume supply reconcile_request_id and the saved token, then use the rotated token and active=true to resume typing without another message.", serde_json::Map::new())
             .with_input_schema::<ProcessingRequest>().with_output_schema::<ProcessingResult>(),
         Tool::new("telegram_ack", "Acknowledge successful handling with the current session, reply ID and token. Identical valid-token retries are idempotent; stale tokens cannot complete work.", serde_json::Map::new())
             .with_input_schema::<AckRequest>().with_output_schema::<AckResult>(),

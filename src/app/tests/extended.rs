@@ -432,7 +432,30 @@ async fn shared_composition_preserves_claims_and_attachment_authority_across_pro
     assert_eq!(fixture.count("acknowledgment_receipts"), 0);
 
     let mut action = json!({"session_key":owner["session_key"],"reply_id":claim["reply_id"],"claim_token":claim["claim_token"],"active":true});
-    legacy.tool("telegram_processing", action.clone()).await;
+    let (started, ()) = tokio::join!(legacy.tool("telegram_processing", action.clone()), async {
+        let request = mock.next("sendMessage").await;
+        assert_eq!(
+            request.payload["reply_parameters"]["allow_sending_without_reply"],
+            true
+        );
+        request.respond(accepted(14));
+    });
+    assert_eq!(started["start_acknowledgment"], "sent");
+    let journal: (String, i64) = rusqlite::Connection::open(&fixture.config.storage.path)
+        .unwrap()
+        .query_row(
+            "SELECT direction, reply_to_message_id FROM journal_records WHERE chat_id = -101 AND message_id = 14",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        journal,
+        (
+            "outgoing".into(),
+            claim["telegram_message_id"].as_i64().unwrap()
+        )
+    );
     action.as_object_mut().unwrap().remove("active");
     action["reconcile_request_id"] = json!("saved-extended-reconciliation");
     let rotated = modern.tool("telegram_processing", action.clone()).await;

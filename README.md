@@ -72,7 +72,7 @@ argument; it is not part of the field name. Examples below show tool arguments, 
 | `telegram_ask` | `session_key`, `text`, `format?`, `entities?` | `{telegram_chat_id, outbound_message_id, status, reply}`; `status` is `sent` when waiting is disabled, otherwise `reply_received` or `wait_timeout`; `reply` is a nullable `ClaimedReplyResult` |
 | `telegram_wait` | `session_key`, `outbound_message_id` | Same fields as ask; `status` is `disabled`, `reply_received` or `wait_timeout`; validates the caller's retained configured-chat route even when disabled |
 | `telegram_inbox` | `session_key`, `limit?` (default 100, 1–100 within payload budget) | `{replies: [ClaimedReplyResult]}`; claims eligible pending or lease-expired unstarted replies |
-| `telegram_processing` | `session_key`, `reply_id`, `claim_token`, exactly one of `active` or `reconcile_request_id` | `{reply_id, claim_token, processing_started_at}`; start time is nullable; preserve the returned current token |
+| `telegram_processing` | `session_key`, `reply_id`, `claim_token`, exactly one of `active` or `reconcile_request_id`, `message?` with `active: true` only | `{reply_id, claim_token, processing_started_at, start_acknowledgment, outbound_message_id?, start_acknowledgment_error_code?}`. Start time is nullable. Preserve the returned current token. |
 | `telegram_ack` | `session_key`, `reply_id`, `claim_token` | `{reply_id, acknowledged: true}` after successful handling; identical valid-token retries are idempotent within receipt retention |
 | `telegram_history` | `session_key`, `chat_id?`, `session_display_id?`, `query?`, `cursor?`, `limit?` | `{messages: [HistoryMessage], next_cursor, scan_incomplete, coverage: HistoryCoverage}`; cursor is nullable; observational, authenticated opt-in |
 | `telegram_get_attachment` | `session_key`, `attachment_handle` | `{attachment: HistoryAttachment, download_id, path, file_identity: {device, inode}, size_bytes, expires_at}`; checked private download, with actual bytes and daemon-local identity |
@@ -290,19 +290,43 @@ uncertain delivery. No lifecycle heartbeat is required.
 
 When `telegram_inbox`, `telegram_ask` or `telegram_wait` returns a claim, save its stable reply ID
 and current token.
-Reconcile known effects before repeating work after a crash. Mark actual handling with
-`telegram_processing`, then end activity with `active: false` and acknowledge only success:
+Reconcile known effects before repeating work after a crash. Call `telegram_processing`
+with `active: true` when work begins. Relay attempts one threaded reply to the user's Telegram
+message. With `message` omitted, it sends “✅ Request received. Working on it.”
 
 ```json
 {"session_key":"SESSION","reply_id":"REPLY","claim_token":"TOKEN","active":true}
 ```
 
+To supply your own literal text, include `message`. Relay adds the usual title and project
+header and applies the 1,000-scalar limit to the complete visible text before recording
+the start. `message` on inactivity or reconciliation returns `REQUEST_INVALID`.
+For `TEXT_TOO_LONG`, retry with a shorter `message` or re-register the same session with
+a shorter title and project label.
+
+```json
+{"session_key":"SESSION","reply_id":"REPLY","claim_token":"TOKEN","active":true,"message":"✅ Starting the review."}
+```
+
+`start_acknowledgment` is `sent` with an `outbound_message_id` when Telegram confirms delivery,
+`uncertain` when delivery is ambiguous, or `failed` after a definitive rejection or admission
+failure. A `sent` result can also include `start_acknowledgment_error_code: "SEND_BOOKKEEPING_FAILED"`.
+Continue handling the original reply. The acknowledgment's route may be missing, so use a
+regular routed send or ask for any further reply you need from the user. Inactivity,
+reconciliation and repeated starts return `already_started` without sending. The start is
+durable even if the send fails. Relay never repeats the attempt after failure, response loss,
+redelivery or restart.
+Relay retains the acknowledgment body with the private reply until completion or expiry,
+including when shared history is disabled.
+
+End activity with `active: false`. Call `telegram_ack` only after successful handling.
+
 ```json
 {"session_key":"SESSION","reply_id":"REPLY","claim_token":"TOKEN"}
 ```
 
-The second object is for `telegram_ack`. Processing start is not completion. Unstarted claims
-have a lease (default 60 seconds); stale tokens cannot authorize effects or acknowledgment.
+Unstarted claims have a lease (default 60 seconds). Stale tokens cannot authorize effects or
+acknowledgment.
 Inactivity and typing expiry preserve durable processing ownership. To resume started work,
 **before dispatch** privately save a fresh random `reconcile_request_id` (1–64 UTF-8 bytes)
 and prior token. Call `telegram_processing` with that pair, session/reply IDs, and omit `active`.
@@ -412,6 +436,9 @@ All fifteen steps of that continuation reached DONE. The later
 [extension HOST observations](docs/MEASUREMENTS.md#agent-experience-host-acceptance) cover
 installation and bounded protocol, Telegram and file probes. Client model tool use and
 automatic idle-host wake remain unverified.
+The current start acknowledgment cases define synthetic coverage on both MCP revisions.
+Current execution evidence comes from the Runner FINALIZE receipts. A real-agent trial of the
+acknowledgment appearing before longer work completes remains pending operator acceptance.
 Historical source `968802371f94f51eedab66998eff6031762db5ea` has a separate
 [mocked Linux capture](docs/MEASUREMENTS.md#recorded-host-capture): 10.07 MB probe idle RSS and
 10.43 MB sampled upload peak for a 49,999,999-byte file, with separate mock/driver accounting.

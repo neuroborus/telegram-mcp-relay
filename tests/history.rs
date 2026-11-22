@@ -314,6 +314,8 @@ fn failed_v7_migration_preserves_old_schema_and_records_transactionally() {
     let sql = fixture.sql();
     sql.execute_batch(
         "DROP INDEX receipts_message; ALTER TABLE acknowledgment_receipts DROP COLUMN telegram_message_id;
+        ALTER TABLE replies DROP COLUMN start_ack_text;
+        ALTER TABLE replies DROP COLUMN start_ack_state;
         ALTER TABLE acknowledgment_receipts DROP COLUMN telegram_chat_id;
         ALTER TABLE telegram_cursor DROP COLUMN telegram_message_id;
         ALTER TABLE telegram_cursor DROP COLUMN telegram_chat_id;
@@ -338,7 +340,7 @@ fn failed_v7_migration_preserves_old_schema_and_records_transactionally() {
     assert!(!exists);
     sql.execute_batch("DROP TABLE history_coverage").unwrap();
     let db = fixture.open();
-    assert_eq!(db.schema_version().unwrap(), 11);
+    assert_eq!(db.schema_version().unwrap(), 12);
     assert_eq!(
         db.session(&session.session_key).unwrap().title.as_str(),
         "Preserve"

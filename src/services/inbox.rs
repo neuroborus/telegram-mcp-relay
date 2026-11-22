@@ -1,11 +1,17 @@
 //! Reply ownership shared by inbox tools and question waiters, with post-commit RAM activity.
 
-use super::typing::TypingService;
+use std::sync::Mutex;
+
+use super::{outbound::OutboundService, typing::TypingService, unix_millis};
 
 use crate::{
     config::Delivery,
-    error::AppError,
-    repositories::{ClaimedReply, Database, ProcessingStatus, ReconciledProcessing, ReplyTarget},
+    dto::{ProcessingRequest, ProcessingResult, StartAcknowledgment},
+    error::{AppError, TelegramError},
+    repositories::{
+        ClaimedReply, Database, ProcessingAction, ProcessingStatus, ProcessingTransition,
+        ReconciledProcessing, ReplyTarget,
+    },
 };
 
 pub struct InboxService {
@@ -44,8 +50,8 @@ impl InboxService {
         database.claim_replies(session_key, target, limit, self.claim_lease_ms, now)
     }
 
-    /// Confirm the first start durably. Inactivity preserves processing ownership;
-    /// the returned first start anchors future in-memory typing, without resetting it.
+    /// Apply the state and typing transition without a Telegram sender. A first start
+    /// still consumes its acknowledgment attempt, as it would before a process crash.
     pub fn processing(
         &self,
         database: &mut Database,
@@ -55,15 +61,117 @@ impl InboxService {
         active: bool,
         now: i64,
     ) -> Result<ProcessingStatus, AppError> {
-        let status = database.processing(session_key, reply_id, claim_token, active, now)?;
+        let action = if active {
+            ProcessingAction::Start { message: None }
+        } else {
+            ProcessingAction::Stop
+        };
+        self.transition(database, session_key, reply_id, claim_token, action, now)
+            .map(|transition| transition.status)
+    }
+
+    fn transition(
+        &self,
+        database: &mut Database,
+        session_key: &str,
+        reply_id: &str,
+        claim_token: &str,
+        action: ProcessingAction<'_>,
+        now: i64,
+    ) -> Result<ProcessingTransition, AppError> {
+        let transition = database
+            .processing(session_key, reply_id, claim_token, action, now)
+            .map_err(|mut error| {
+                if let AppError::TextTooLong(details) = &mut error {
+                    details.guidance = "Retry telegram_processing with a shorter message, or re-register the same session with a shorter title and project label.";
+                }
+                error
+            })?;
         if let Some(typing) = &self.typing {
-            if active {
-                typing.start(session_key, reply_id, &status, now);
-            } else {
-                typing.stop(reply_id);
+            match action {
+                ProcessingAction::Start { .. } => {
+                    typing.start(session_key, reply_id, &transition.status, now);
+                }
+                ProcessingAction::Stop => typing.stop(reply_id),
             }
         }
-        Ok(status)
+        Ok(transition)
+    }
+
+    pub(crate) async fn process(
+        &self,
+        database: &Mutex<Database>,
+        outbound: &OutboundService,
+        request: ProcessingRequest,
+    ) -> Result<ProcessingResult, AppError> {
+        let (status, token, start_ack) = {
+            let mut database = database.lock().map_err(|_| AppError::StorageFailure)?;
+            let now = unix_millis()?;
+            match (
+                request.active,
+                request.reconcile_request_id,
+                request.message,
+            ) {
+                (Some(active), None, message) if active || message.is_none() => {
+                    let action = if active {
+                        ProcessingAction::Start {
+                            message: message.as_deref(),
+                        }
+                    } else {
+                        ProcessingAction::Stop
+                    };
+                    let transition = self.transition(
+                        &mut database,
+                        &request.session_key,
+                        &request.reply_id,
+                        &request.claim_token,
+                        action,
+                        now,
+                    )?;
+                    (transition.status, request.claim_token, transition.start_ack)
+                }
+                (None, Some(id), None) => {
+                    let resumed = self.reconcile_processing(
+                        &mut database,
+                        &request.session_key,
+                        &request.reply_id,
+                        &request.claim_token,
+                        &id,
+                        now,
+                    )?;
+                    (resumed.status, resumed.claim_token, None)
+                }
+                _ => {
+                    return Err(AppError::InvalidRequest(
+                        "processing action (supply exactly one of active or reconcile_request_id, and use message only with active=true)",
+                    ));
+                }
+            }
+        };
+        let (start_acknowledgment, outbound_message_id, start_acknowledgment_error_code) =
+            if let Some(ack) = start_ack {
+                match outbound.send_start_ack(ack).await {
+                    Ok(confirmed) => (
+                        StartAcknowledgment::Sent,
+                        Some(confirmed.message.message_id),
+                        confirmed.bookkeeping.err().map(|error| error.code()),
+                    ),
+                    Err(AppError::Telegram(TelegramError::DeliveryUncertain)) => {
+                        (StartAcknowledgment::Uncertain, None, None)
+                    }
+                    Err(_) => (StartAcknowledgment::Failed, None, None),
+                }
+            } else {
+                (StartAcknowledgment::AlreadyStarted, None, None)
+            };
+        Ok(ProcessingResult {
+            reply_id: request.reply_id,
+            claim_token: token,
+            processing_started_at: status.processing_started_at,
+            start_acknowledgment,
+            outbound_message_id,
+            start_acknowledgment_error_code,
+        })
     }
 
     /// Save a fresh, unguessable request ID (1–64 UTF-8 bytes) with the token before resume.
