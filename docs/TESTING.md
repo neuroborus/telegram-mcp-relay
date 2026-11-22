@@ -139,9 +139,9 @@ Domain cases cover invisible formatting, supported Unicode wrappers, relative la
 bracketed placeholders, including legacy cutoffs and placeholders exposed by title truncation.
 The notice fixture checks safe framing, native spans, journal admission and authorized reads of
 new incoming and service snapshots on synthetic routes. The earlier native-framing scope
-assigned P1/P2 to Native FINALIZE for its Python measurement fixture changes. The updated
-RELAY-005 framing fixtures require the C1–C6 FINALIZE receipts described under
-[Strict Markdown regressions](#strict-markdown-regressions).
+assigned P1/P2 to Native FINALIZE for its Python measurement fixture changes. The
+[interaction acceptance record](#interaction-rules-acceptance) records C1–C6 for the updated
+RELAY-005 framing fixtures.
 
 ## Server instructions and restored framing regressions
 
@@ -155,9 +155,10 @@ inventing lost input. Notice cases retain old plain/bracketed/native shapes and 
 Actual text/question JSON and document multipart fixtures include bracketed astral headers,
 shifted body entities, exact 1,000/1,001-scalar and 1,024/1,025-UTF-16 boundaries, final-text
 journaling and mixed-protocol document/wait composition. The recorded mixed-protocol
-composition baseline included the C11/R1 and C12/R2 locked release builds. The changed
-server-instruction and framing fixtures require current C1–C6 FINALIZE receipts.
-Both locked release builds belong to Native FINALIZE in the later integration step.
+composition baseline included the C11/R1 and C12/R2 locked release builds. The
+[interaction acceptance record](#interaction-rules-acceptance) records the accepted integration and
+the operator's release-build diagnostics for the changed server-instruction and framing
+fixtures.
 
 ## Explicit native body-entity regressions
 
@@ -168,7 +169,7 @@ headers/directories, exact protocol envelopes, nonempty legacy-array compatibili
 visible-text journaling. Invalid schemas, metadata, ranges and nesting leave HTTP sends,
 routes, journal and activity unchanged; saturated waiter capacity cannot mask invalid questions.
 The existing cancellation/rename/restart journal fixture also sends explicit entities.
-These are source-defined regressions; their required C1–C6 FINALIZE results remain pending.
+The [interaction acceptance record](#interaction-rules-acceptance) records their C1–C6 results.
 
 ## Strict Markdown regressions
 
@@ -186,8 +187,8 @@ missing-path and saturated-waiter cases require `TEXT_TOO_LONG` for overlong ren
 captions and questions, including the native caption limit. The modern boundary fixtures
 check the maximum accepted lengths.
 
-Current results require C1–C6 FINALIZE receipts. C1–C3 are Native and C4–C6 are the selected
-Runner-trusted vectors. The composition baseline covers its original fixtures.
+The [interaction acceptance record](#interaction-rules-acceptance) records their C1–C6 results.
+The composition baseline covers its original fixtures.
 After DONE and workspace release, the supervising operator owns pending HOST acceptance of
 formatted output in a real agent workflow. The resource probe driver caption
 `Synthetic near-limit upload.` is unchanged by default Markdown.
@@ -211,9 +212,9 @@ The timeout fixture advances Tokio's clock after admission.
 The modern disconnect regression waits for admission before closing the socket, then checks
 that the slot is available and the late reply stays pending. The legacy cancellation regression
 holds Telegram's document response until MCP work admission is released, then checks that the
-route commits without arming a waiter or resending. Current execution evidence comes from the
-applicable Runner FINALIZE receipts. Real-agent acceptance remains operator-owned after DONE
-and workspace release.
+route commits without arming a waiter or resending. The
+[interaction acceptance record](#interaction-rules-acceptance) records their execution. Real-agent
+acceptance remains operator-owned after DONE and workspace release.
 
 ## History storage regressions
 
@@ -304,10 +305,10 @@ metadata-inclusive reservation. The storage tests cover an allocation above the 
 exact logical quota with `max_total_bytes == max_file_bytes`, completed payload accounting,
 disk headroom including pending reservations, inode and file-count limits, and concurrency.
 Pure sizing cases cover gigabyte-scale values and overflow without creating large files.
-The [interaction acceptance record](#interaction-rules-acceptance) records the operator's
-synthetic diagnostics. The current C6 FINALIZE receipt remains pending. After DONE and
-workspace release, the supervising operator owns the MCP attachment download on ext4 under
-conditions that reproduced the old accounting failure.
+The [interaction acceptance record](#interaction-rules-acceptance) records the passing
+full workspace suite. After DONE and workspace release, the supervising operator owns the
+pending HOST MCP attachment download on ext4 under conditions that reproduced the old
+accounting failure.
 
 ### RELAY-002 local Bot API downloads
 
@@ -321,10 +322,11 @@ page cap. Configuration and guidance tests cover backend-specific ceilings and t
 download limit. Retention tests exercise local-sized accounting without a large allocation.
 The attachment MCP fixture exercises local retrieval on both protocol revisions without
 Telegram credentials. It rejects a file that exceeds the retained reservation even when
-getFile supplies no size. C1–C6 for this step remain pending FINALIZE. After DONE and
-workspace release, the supervising operator owns the pending HOST transfer of an incoming
-gigabyte-scale file through MCP and an authorized real local Bot API. Record the streamed
-size and memory use separately from the synthetic results.
+getFile supplies no size. The [interaction acceptance record](#interaction-rules-acceptance)
+records C1–C6 for the integrated result. After DONE and workspace release, the supervising
+operator owns the pending HOST transfer of an incoming gigabyte-scale file through MCP and an
+authorized live local Bot API. Record the streamed size and memory use separately from the
+synthetic results.
 
 ## Authorized attachment tool regressions
 
@@ -338,7 +340,8 @@ failure. Storage tests retain bounded cancellation/shutdown/restart cleanup and 
 completed-result cancellation and writer-panic supervision/drainage. The recorded attachment
 C6 and locked release results cover the prior cloud baseline identified in the
 [composition validation record](#agent-experience-composition-validation). The preceding
-RELAY-002 section defines synthetic coverage for local retrieval, pending this step's FINALIZE.
+RELAY-002 section and the [interaction acceptance record](#interaction-rules-acceptance)
+cover synthetic local retrieval and its executed validation.
 
 ## Current interaction guidance regressions
 
@@ -351,7 +354,8 @@ and exclusion of synthetic private settings/paths/allowlist identities. Self-con
 content follows specification §§5.4/14. The earlier version-1 cases passed in accepted
 complete C6 at the [composition baseline](#agent-experience-composition-validation).
 Version 6 adds assertions for compact instructions, tool and field descriptions, and full
-policy examples. Current execution requires the current Runner FINALIZE receipts.
+policy examples. The [interaction acceptance record](#interaction-rules-acceptance) records their
+execution.
 Source inspection does not establish named-client, live Telegram, host concurrency or idle wake.
 
 ## Interaction rules acceptance
@@ -359,16 +363,15 @@ Source inspection does not establish named-client, live Telegram, host concurren
 | Evidence | Status and scope |
 | --- | --- |
 | Executed synthetic composition baseline | The [accepted baseline](#agent-experience-composition-validation) ran the original daemon cases with ordinary MCP HTTP clients, an isolated synthetic Telegram peer and both protocol revisions. Its C6 and locked release results cover those baseline cases. |
-| Executed operator diagnostics | After the previous polishing run released the workspace, the operator reported passing repository, whitespace and formatting checks, Clippy, rustdoc, the full locked offline workspace suite and both locked release builds on the candidate as released at F1, based on `43078be`. Clippy, rustdoc and tests used the same isolated trusted profiles, with the full suite repeated. The suite includes both MCP revisions against the synthetic peer and the [ext4 accounting regression](#relay-001-download-reservation-accounting). Current FINALIZE receipts remain pending. |
-| Current synthetic coverage | The [daemon composition test](../src/app/tests/extended.rs) uses both protocol revisions without fetching guidance. It exercises display repair under the same identity, effect-free Markdown rejection and explicit plain recovery, formatted file approval, timeout and late inbox recovery, known-ID catch-up, stale-token rejection, one threaded start per reply, token-free resource reads of started replies and explicit completion. [After-send wait cases](#after-send-wait-regressions) cover on-time file approval and recovery after post-send wait admission failure. The [ext4 accounting regression](#relay-001-download-reservation-accounting) models the extra allocation block deterministically. Use current C6 FINALIZE receipts for execution of these source-defined cases and current C11/C12 receipts for the locked daemon and unchanged probe builds. |
+| Executed locked release builds | On the Rust source at `e3c7fab523fd2c485cb842e16ecec388438698f4`, the operator ran the two locked release builds after the integration commit. `cargo build --locked --release --bin telegram-mcp-relay` and `cargo build --locked --release --example resource_probe` both exited 0 outside Runner. They are not Runner C11/C12 receipts. |
+| Executed RELAY-001–007 integration | Run `1e2601a4-8210-41b3-a961-ab53a6d08e6e` reached DONE at revision 229 for `e3c7fab523fd2c485cb842e16ecec388438698f4`, with accepted FINALIZE at revision 201 and reviewer confirmation at revision 210 bound to finalized/reviewed fingerprint `d0232e890221`. The accepted FINALIZE covers C1–C3 for repository, whitespace and formatting and C4–C6 for Clippy, rustdoc and the full locked workspace suite through the Runner-trusted aliases. The suite exercises both MCP protocol revisions against the synthetic peer. The release commands have separate operator results above. |
+| Current synthetic coverage | The [daemon composition test](../src/app/tests/extended.rs) uses both protocol revisions without fetching guidance. It exercises display repair under the same identity, effect-free Markdown rejection and explicit plain recovery, formatted file approval, timeout and late inbox recovery, known-ID catch-up, stale-token rejection, one threaded start per reply, token-free resource reads of started replies and explicit completion. [After-send wait cases](#after-send-wait-regressions) cover on-time file approval and recovery after post-send wait admission failure. The [ext4 accounting regression](#relay-001-download-reservation-accounting) models the extra allocation block deterministically. The C6 result above includes these cases. |
 | Pending operator HOST acceptance | Download through MCP on ext4 under conditions that reproduced the old allocation rejection. Transfer an incoming gigabyte-scale file through MCP with an authorized live local Bot API and record bytes and memory use. Use a real agent to verify formatting, an on-time reply, late recovery, file approval, and visible acknowledgment before longer work finishes. The supervising operator owns these trials after DONE and workspace release. |
 
-The previous polishing run passed independent review before finalization stopped at F1.
-The public report identified no failing command or test.
-The current interaction integration uses C1–C3 and C11–C12 in Worker FINALIZE and
-C4–C6 through the selected Runner-trusted commands after Worker FINALIZE. The synthetic
-accounting case and the HOST ext4 download exercise different evidence boundaries. Whether an
-agent can wait in the background or wake on a notification depends on its host.
+The integration plan assigned C1–C3 and C11/C12 to Worker FINALIZE and C4–C6 to the
+selected Runner-trusted commands. The synthetic accounting case and the HOST ext4 download
+exercise different evidence boundaries. Whether an agent can wait in the background or wake
+on a notification depends on its host.
 
 ## Final mixed-protocol composition regressions
 
@@ -574,8 +577,9 @@ draining/reopen, plus credential/remote-peer/listener rejection before storage o
 effects and failed cleanup without readiness. The example's pure argument tests reject DNS,
 remote/unspecified/zero-port peers and extra/missing arguments. The
 [recorded C6 outcome](#recorded-validation-evidence) covers the original probe cases. The
-current MCP probe cases use the required project label and require their own Runner FINALIZE
-receipts for execution evidence. The HOST probe capture covers a separate synthetic workload.
+current MCP probe cases use the required project label; the
+[interaction acceptance record](#interaction-rules-acceptance) records their C6 execution.
+The HOST probe capture covers a separate synthetic workload.
 
 Binary tests in `src/main.rs` launch isolated test subprocesses using the binary's shutdown
 signal registration. They send actual SIGINT and SIGTERM after a readiness gate, hold synthetic
@@ -718,8 +722,8 @@ stale/wrong-session fencing and idempotent per-reply completion use the shared t
 The processing-start case exercises both protocols without a guidance call. It checks that
 redelivery after a confirmed start preserves the processing reply and that a repeated start
 leaves the acknowledgment send count at one. It also distinguishes ambiguous Telegram delivery
-from confirmed delivery with a failed route transaction. Current execution evidence comes from
-the applicable Runner FINALIZE receipts.
+from confirmed delivery with a failed route transaction. The
+[interaction acceptance record](#interaction-rules-acceptance) records its execution.
 Invalid URIs, limits, listing cursors and tool arguments return safe errors without claiming.
 Fixtures honor TMPDIR and use private randomized directories; no live Telegram calls are made.
 These cases cover the read/claim/recovery portion of
@@ -934,8 +938,9 @@ routes, redacted errors, atomic rollback, released admission and restart-visible
 routes with seconds-to-milliseconds conversion. An explicitly gated HTTP response allows
 caller cancellation while a send remains admitted; competing sends stay bounded and the
 detached task finishes durable bookkeeping. Fixtures honor TMPDIR and use private randomized
-directories. The recorded complete C6 outcome covers the baseline cases. The current
-project-label cases require their own Runner FINALIZE receipts.
+directories. The recorded complete C6 outcome covers the baseline cases. The
+[interaction acceptance record](#interaction-rules-acceptance) records C6 for the project-label
+cases.
 
 `services::outbound::tests::documents` adds actual multipart HTTP/SQLite scenarios: complete
 caption scalar/native rejection without effects, exact 1,000-scalar/1,024-UTF-16-unit captions,

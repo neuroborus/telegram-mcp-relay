@@ -14,24 +14,27 @@ Tokio's current-thread runtime; measure before adding concurrency or a SQLite wo
 hold blocking database guards across `.await` or buffer whole uploads. Verify current official
 SDK/API versions and choose minimal crate features when introducing dependencies.
 
-Protect distinct Unicode contracts: title graphemes, final outgoing Unicode scalar count,
-and the native caption UTF-16 bound. Native entity offsets also use UTF-16. Validate bounded
-body-relative entity ranges, metadata and nesting before effects, then shift them past the
-server-owned bold `[title]`, optional italic directory and blank line. Preserve literal defaults,
-50-grapheme titles with a reserved truncation ellipsis, and the service `🔧 ` prefix. Display
-metadata never authorizes files or routing. Validate complete visible output before effects.
-Persist authorized observations, routed replies/provenance and cursor atomically before
-signaling both subscribers and waiters. All reply-claiming consumers share one atomic fence;
-processing start never substitutes for completion acknowledgment.
+Validate meaningful titles, project labels, strict Markdown and body-relative entities
+before effects. Preserve the explicit plain and legacy entity paths. Count title graphemes,
+final Unicode scalars and caption UTF-16 units separately. Shift body-relative UTF-16 offsets
+past Relay's bold `[title]`, italic project line and separating blank line. Service notices
+begin with `🔧 `. Display metadata grants no file or routing authority.
 
-Ask and post-send/file wait share bounded target-authorized claims without resending. Arm
-interest before querying durable state; timeout/cancellation preserves late replies and grants
-no permission. Shared history is opted-in observation, never another session's claim authority.
-Download only from retained authorized opaque handles through the fixed cloud origin into
-private pinned owned storage, with bounded streams/reservations and owned-only cleanup.
-Keep the concise server instructions, `telegram_guidance` and tool descriptions aligned with
-actual schemas/capabilities, without private settings, protocol adapters or host wake/concurrency
-promises.
+Commit authorized observations, routed replies, provenance and cursor atomically before
+signaling subscribers or waiters. Keep one claim fence for all consumers. Consume the visible
+start acknowledgment once with the first fenced processing transition. Retain completion
+acknowledgment as a distinct operation.
+
+Ask, opt-in send waiting and post-send waiting share target-authorized claims. Arm interest
+before querying durable state. Preserve late replies and known outbound IDs for recovery
+after timeout or cancellation. Shared history is opted-in observation and grants no claim
+authority over another session. Download only from retained authorized opaque handles through
+the fixed cloud origin or an opt-in operator-managed local Bot API. Confine local paths to
+approved upstream storage and publish a copy into private pinned owned storage. Bound streams
+and reservations and clean up only owned files. Keep the concise server instructions,
+`telegram_guidance` and tool descriptions aligned with the
+[agent operating policy](../../../docs/AGENT_POLICY.md) and actual schemas and capabilities.
+Exclude private settings, protocol adapters and promises about host wake or concurrency.
 
 Return typed, structured errors with stable safe codes; preserve MCP protocol errors. Use
 redacted tracing and safe request correlation. Enforce loopback Host/Origin policy, explicit
