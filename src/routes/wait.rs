@@ -8,7 +8,7 @@ use crate::{
 use ask::Mock;
 use std::sync::Mutex;
 use subscriptions::{ingest, route};
-use tools::{Telegram, sent};
+use tools::{Telegram, protocol_tool, sent};
 
 async fn call(http: &Http, transport: Option<&str>, name: &str, args: Value) -> Value {
     let params = json!({"name":name,"arguments":args});
@@ -17,6 +17,10 @@ async fn call(http: &Http, transport: Option<&str>, name: &str, args: Value) -> 
     } else {
         http.rpc("tools/call", params).await
     };
+    tool_data(response)
+}
+
+fn tool_data(response: Value) -> Value {
     assert!(response.get("error").is_none(), "{response}");
     assert_eq!(response["result"]["isError"], false, "{response}");
     response["result"]["structuredContent"].clone()
@@ -44,8 +48,11 @@ async fn text_and_file_then_wait_catch_up_without_signals_or_resending_on_both_p
     let mut fixture = Fixture::new();
     let telegram = Telegram::new(&fixture.config, (7..11).map(sent).collect()).await;
     let state = telegram.handler(&fixture);
-    let http = fixture.serve(state, None).await;
+    let (http, endpoint) = fixture.serve_endpoint(state, None).await;
     let (transport, _) = http.initialize(LEGACY_VERSION).await;
+    let call = async |transport: Option<&str>, name: &str, args: Value| {
+        tool_data(protocol_tool(&http, &endpoint, transport, name, args).await)
+    };
     let database = Arc::new(Mutex::new(
         Database::open(&fixture.config.storage, &fixture.config.limits).unwrap(),
     ));
@@ -54,7 +61,6 @@ async fn text_and_file_then_wait_catch_up_without_signals_or_resending_on_both_p
     fs::write(&path, b"synthetic file").unwrap();
     for transport in [None, Some(transport.as_str())] {
         let registered = call(
-            &http,
             transport,
             "telegram_register",
             json!({"title":"Synthetic","directory_label":"p"}),
@@ -68,12 +74,11 @@ async fn text_and_file_then_wait_catch_up_without_signals_or_resending_on_both_p
                 json!({"session_key":key,"path":path,"caption":"Report"}),
             ),
         ] {
-            let sent = call(&http, transport, name, args).await;
+            let sent = call(transport, name, args).await;
             let parent = sent["outbound_message_id"].as_i64().unwrap();
             // This independent connection cannot signal the handler's RAM interests.
             ingest(&ingress, &database, parent + 100, parent).unwrap();
             let reply = call(
-                &http,
                 transport,
                 "telegram_wait",
                 json!({"session_key":key,"outbound_message_id":parent}),
@@ -417,14 +422,7 @@ async fn saturated_waits_leave_processing_ack_and_inbox_capacity_on_both_protoco
         } else {
             http.post(body)
         };
-        let pending = tokio::spawn(async move {
-            let response = request.send().await.unwrap();
-            if legacy {
-                legacy::sse_message(response).await
-            } else {
-                response.json::<Value>().await.unwrap()
-            }
-        });
+        let pending = tokio::spawn(request.send());
         observed.started.notified().await;
         assert_eq!(endpoint.inner.admission.available_permits(), 0);
         // A forged fast-tool header cannot put a send on the reserved recovery lane.
@@ -435,10 +433,10 @@ async fn saturated_waits_leave_processing_ack_and_inbox_capacity_on_both_protoco
         forged
             .headers_mut()
             .insert("mcp-name", "telegram_ack".parse().unwrap());
-        assert_eq!(
-            http.client.execute(forged).await.unwrap().status(),
-            StatusCode::SERVICE_UNAVAILABLE
-        );
+        let rejected = http.client.execute(forged).await.unwrap();
+        assert_eq!(rejected.status(), StatusCode::SERVICE_UNAVAILABLE);
+        // The rejected response holds the HTTP recovery permit until its body retires.
+        rejected.bytes().await.unwrap();
         let mut action = json!({"session_key":key,"reply_id":claim.reply.reply_id,"claim_token":claim.claim_token,"active":true});
         for active in [true, false] {
             action["active"] = active.into();
@@ -466,7 +464,13 @@ async fn saturated_waits_leave_processing_ack_and_inbox_capacity_on_both_protoco
         );
         endpoint.inner.sessions.wait_recovery_released().await;
         ingest(&ingress, &database, 11, 7).unwrap();
-        let result = pending.await.unwrap();
+        // Start the response-read deadline only after releasing the held waiter.
+        let response = pending.await.unwrap().unwrap();
+        let result = if legacy {
+            legacy::sse_message(response).await
+        } else {
+            response.json::<Value>().await.unwrap()
+        };
         assert_eq!(
             result["result"]["structuredContent"]["status"],
             "reply_received"

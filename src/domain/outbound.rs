@@ -1,12 +1,15 @@
-//! Verbatim outbound text, isolated native header/body entities and final Unicode limits.
+//! Outbound body formatting, isolated native header/body entities and final Unicode limits.
 
 use std::{borrow::Cow, fmt};
 
 use unicode_segmentation::UnicodeSegmentation;
 
 mod entities;
+mod markup;
 pub(crate) use entities::validate_body_entities;
 pub use entities::{EntityKind, MessageEntity};
+pub use markup::OutboundFormat;
+pub(crate) use markup::prepare_body;
 
 use crate::{
     config::OUTBOUND_SCALAR_LIMIT,

@@ -7,6 +7,23 @@ use crate::error::AppError;
 
 pub(crate) const BODY_ENTITY_LIMIT: usize = 100;
 
+pub(super) fn valid_entity_url(url: &str) -> bool {
+    url.len() <= 2_048
+        && !url.chars().any(|c| c.is_whitespace() || c.is_control())
+        && reqwest::Url::parse(url).is_ok_and(|parsed| {
+            matches!(parsed.scheme(), "http" | "https" | "tg" | "mailto" | "tel")
+                && (parsed.host_str().is_some() || !parsed.path().is_empty())
+        })
+}
+
+pub(super) fn valid_pre_language(language: &str) -> bool {
+    !language.is_empty()
+        && language.len() <= 64
+        && !language
+            .chars()
+            .any(|c| c.is_whitespace() || c.is_control())
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[schemars(crate = "rmcp::schemars")]
@@ -89,24 +106,15 @@ pub(crate) fn validate_body_entities(
         {
             return Err(invalid());
         }
-        if let Some(url) = &entity.url {
-            if url.len() > 2_048 || url.chars().any(|c| c.is_whitespace() || c.is_control()) {
-                return Err(invalid());
-            }
-            let parsed = reqwest::Url::parse(url).map_err(|_| invalid())?;
-            if !matches!(parsed.scheme(), "http" | "https" | "tg" | "mailto" | "tel")
-                || (parsed.host_str().is_none() && parsed.path().is_empty())
-            {
-                return Err(invalid());
-            }
-        }
-        if entity.language.as_ref().is_some_and(|language| {
-            language.is_empty()
-                || language.len() > 64
-                || language
-                    .chars()
-                    .any(|c| c.is_whitespace() || c.is_control())
-        }) {
+        if entity
+            .url
+            .as_deref()
+            .is_some_and(|url| !valid_entity_url(url))
+            || entity
+                .language
+                .as_deref()
+                .is_some_and(|language| !valid_pre_language(language))
+        {
             return Err(invalid());
         }
         for &(start, previous_end, kind) in &spans {

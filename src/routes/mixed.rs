@@ -15,6 +15,7 @@ use tools::{Telegram, failure, sent};
 enum Client<'a> {
     Modern,
     Legacy(&'a str),
+    SequentialLegacy(&'a str, &'a McpEndpoint),
 }
 
 impl Client<'_> {
@@ -22,6 +23,10 @@ impl Client<'_> {
         match self {
             Self::Modern => http.rpc(method, params).await,
             Self::Legacy(transport) => http.legacy_rpc(transport, method, params).await,
+            Self::SequentialLegacy(transport, endpoint) => {
+                http.sequential_legacy_rpc(endpoint, transport, method, params)
+                    .await
+            }
         }
     }
 
@@ -86,7 +91,7 @@ async fn both_protocols_share_tools_resources_and_durable_routes() {
     fixture.config.delivery.wait_fallback_enabled = false;
     let telegram = Telegram::new(&fixture.config, (7..13).map(sent).collect()).await;
     let state = telegram.handler(&fixture);
-    let mut http = fixture.serve(state.clone(), None).await;
+    let (mut http, endpoint) = fixture.serve_endpoint(state.clone(), None).await;
     let (transport, _) = http.initialize(LEGACY_VERSION).await;
     let sql = rusqlite::Connection::open(&fixture.config.storage.path).unwrap();
     assert_eq!(
@@ -94,7 +99,10 @@ async fn both_protocols_share_tools_resources_and_durable_routes() {
             .unwrap(),
         0
     );
-    let clients = [Client::Legacy(&transport), Client::Modern];
+    let clients = [
+        Client::SequentialLegacy(&transport, &endpoint),
+        Client::Modern,
+    ];
     let file = fixture.directory.join("report.bin");
     fs::write(&file, b"synthetic report\0\xff").unwrap();
     let mut sessions = Vec::new();
@@ -261,9 +269,9 @@ async fn mixed_claims_reconcile_fence_and_ack_across_restart() {
     let mut fixture = Fixture::new();
     let mock = Mock::new(&fixture.config).await;
     let (database, state) = mock.shared(&fixture);
-    let mut http = fixture.serve(state.clone(), None).await;
+    let (mut http, endpoint) = fixture.serve_endpoint(state.clone(), None).await;
     let (transport, _) = http.initialize(LEGACY_VERSION).await;
-    let older = Client::Legacy(&transport);
+    let older = Client::SequentialLegacy(&transport, &endpoint);
     let modern = Client::Modern;
     let session = older
         .success(
@@ -317,15 +325,16 @@ async fn mixed_claims_reconcile_fence_and_ack_across_restart() {
         started["processing_started_at"]
     );
     http.finish().await;
+    drop(endpoint);
     state.stop();
     state.drain().await.unwrap();
     drop(state);
     drop(database);
     let (reopened, state) = mock.shared(&fixture);
-    let mut http = fixture.serve(state.clone(), None).await;
+    let (mut http, endpoint) = fixture.serve_endpoint(state.clone(), None).await;
     let (replacement, _) = http.initialize(LEGACY_VERSION).await;
     assert_ne!(replacement, transport);
-    let older = Client::Legacy(&replacement);
+    let older = Client::SequentialLegacy(&replacement, &endpoint);
     assert_eq!(
         status(http.legacy_post(
             json!({"jsonrpc":"2.0","id":8,"method":"tools/list"}),
@@ -536,11 +545,17 @@ async fn legacy_ask_cancellation_and_abandonment_preserve_sends_and_recover_capa
             .await;
         let (transport, _) = http.initialize(LEGACY_VERSION).await;
         // Session saturation must not block modern stateless discovery.
-        assert_eq!(
-            status(http.legacy_post(legacy::initialization(LEGACY_VERSION), None)).await,
-            StatusCode::INTERNAL_SERVER_ERROR
-        );
-        assert_eq!(status(http.discover()).await, StatusCode::OK);
+        let rejected = http
+            .legacy_post(legacy::initialization(LEGACY_VERSION), None)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(rejected.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        // Retire the sole HTTP work permit before checking discovery.
+        rejected.bytes().await.unwrap();
+        let discovery = http.discover().send().await.unwrap();
+        assert_eq!(discovery.status(), StatusCode::OK);
+        discovery.bytes().await.unwrap();
         let body = json!({"jsonrpc":"2.0","id":101,"method":"tools/call",
             "params":{"name":"telegram_ask","arguments":{"session_key":session.session_key,"text":"Question"}}});
         let response = if cancel {

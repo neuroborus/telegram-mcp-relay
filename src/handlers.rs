@@ -23,7 +23,7 @@ use tokio_util::{sync::CancellationToken, task::TaskTracker};
 use crate::{
     clients::telegram::TelegramClient,
     config::Config,
-    domain::outbound::validate_body_entities,
+    domain::outbound::prepare_body,
     dto::{
         AckRequest, AckResult, AskResult, AskStatus, GetAttachmentRequest, GetAttachmentResult,
         GuidanceProtocol, GuidanceRequest, GuidanceResult, GuidanceTool, HistoryRequest,
@@ -158,9 +158,10 @@ impl McpHandler {
     }
 
     async fn send(&self, request: SendRequest) -> Result<SendResult, AppError> {
+        let (text, entities) = prepare_body(&request.text, request.format, &request.entities)?;
         let sent = self
             .outbound
-            .send_text_with_entities(&request.session_key, &request.text, &request.entities)
+            .send_text_with_entities(&request.session_key, &text, &entities)
             .await?;
         Ok(SendResult {
             telegram_chat_id: sent.chat.id,
@@ -169,22 +170,14 @@ impl McpHandler {
     }
 
     async fn send_file(&self, request: SendFileRequest) -> Result<SendResult, AppError> {
-        validate_body_entities(&request.caption, &request.caption_entities)?;
-        // Require metadata recovery before opening the supplied path.
-        self.database
-            .lock()
-            .map_err(|_| AppError::StorageFailure)?
-            .session(&request.session_key)?
-            .outbound_directory_label()?;
+        let (caption, entities) =
+            prepare_body(&request.caption, request.format, &request.caption_entities)?;
+        self.outbound
+            .validate_caption(&request.session_key, &caption, &entities)?;
         let file = self.files.open(&request.path)?;
         let sent = self
             .outbound
-            .send_file_with_entities(
-                &request.session_key,
-                file,
-                &request.caption,
-                &request.caption_entities,
-            )
+            .send_file_with_entities(&request.session_key, file, &caption, &entities)
             .await?;
         Ok(SendResult {
             telegram_chat_id: sent.chat.id,
@@ -193,9 +186,10 @@ impl McpHandler {
     }
 
     async fn ask(&self, request: SendRequest) -> Result<AskResult, AppError> {
+        let (text, entities) = prepare_body(&request.text, request.format, &request.entities)?;
         let asked = self
             .asks
-            .ask_with_entities(&request.session_key, &request.text, &request.entities)
+            .ask_with_entities(&request.session_key, &text, &entities)
             .await?;
         let status = if asked.reply.is_some() {
             AskStatus::ReplyReceived
@@ -398,9 +392,9 @@ fn tools() -> Vec<Tool> {
     let mut catalog = vec![
         Tool::new("telegram_register", "Register or resume a stable conversation and save the returned session key. Use the real host conversation title when valid, otherwise a concise task or project label. Blank and generic titles are rejected. For new sessions, supply directory_label as a short project or workspace name. After skipping leading whitespace, opening brackets, quotes and backticks, neither field may start with an absolute or home path, even if prose follows. On resume omission keeps the saved label. To recover SESSION_METADATA_REQUIRED, re-register with the same session_key or external_session_id and supply both a valid title and label. Titles fit 50 graphemes, including … on shortened input.", serde_json::Map::new())
             .with_input_schema::<RegisterRequest>().with_output_schema::<RegisterResult>(),
-        Tool::new("telegram_send", "Send a concise body with a durable reply route; this does not arm waiting. An explicit requested send needs no reapproval. Use telegram_wait with the successful outbound ID without resending. Optional entities request native formatting (at most 100; body-relative UTF-16 offsets/lengths); omitted/empty remains literal, with no Markdown/HTML parsing. The server adds a bold [title], italic project line and one blank line before a nonempty body; do not reproduce them. Complete visible text must fit 1,000 Unicode scalars; prepare long reports as files. Never automatically retry an uncertain send.", serde_json::Map::new())
+        Tool::new("telegram_send", "Send a concise body with a durable reply route; this does not arm waiting. An explicit requested send needs no reapproval. Use telegram_wait with the successful outbound ID without resending. Use strict Markdown by default. Use short paragraphs or `- ` lists for multi-part updates. Bold Outcome, Status or Decision labels. Use italic for emphasis and code for identifiers, commands and paths. Set format to plain for literal output. Nonempty entities require plain or omitted format. The server adds a bold [title], italic project line and one blank line before a nonempty body; do not reproduce them. Complete visible text must fit 1,000 Unicode scalars; prepare long reports as files. Never automatically retry an uncertain send.", serde_json::Map::new())
             .with_input_schema::<SendRequest>().with_output_schema::<SendResult>(),
-        Tool::new("telegram_send_file", "Stream an existing approved local file with a short caption and durable reply route; this does not arm waiting. An explicit requested send needs no reapproval. Use telegram_wait with the successful outbound ID without uploading again. Optional caption_entities request native formatting (at most 100; caption-relative UTF-16 offsets/lengths); omitted/empty remains literal, with no Markdown/HTML parsing. The server adds a bold [title], italic project line and one blank line before a nonempty body; do not reproduce them. Complete captions must fit 1,000 scalars and 1,024 UTF-16 units. Never automatically retry an uncertain send.", serde_json::Map::new())
+        Tool::new("telegram_send_file", "Stream an existing approved local file with a short caption and durable reply route; this does not arm waiting. An explicit requested send needs no reapproval. Use telegram_wait with the successful outbound ID without uploading again. Use strict Markdown by default. Use short paragraphs or `- ` lists for multi-part updates. Bold Outcome, Status or Decision labels. Use italic for emphasis and code for identifiers, commands and paths. Set format to plain for literal output. Nonempty caption_entities require plain or omitted format. The server adds a bold [title], italic project line and one blank line before a nonempty body; do not reproduce them. Complete captions must fit 1,000 scalars and 1,024 UTF-16 units. Never automatically retry an uncertain send.", serde_json::Map::new())
             .with_input_schema::<SendFileRequest>().with_output_schema::<SendResult>(),
         Tool::new("telegram_inbox", "Atomically claim eligible replies on startup, resume or notification; preserve reply IDs and tokens. Never poll periodically. Read resources for snapshots without claiming.", serde_json::Map::new())
             .with_input_schema::<InboxRequest>().with_output_schema::<InboxResult>(),
@@ -408,7 +402,7 @@ fn tools() -> Vec<Tool> {
             .with_input_schema::<ProcessingRequest>().with_output_schema::<ProcessingResult>(),
         Tool::new("telegram_ack", "Acknowledge successful handling with the current session, reply ID and token. Identical valid-token retries are idempotent; stale tokens cannot complete work.", serde_json::Map::new())
             .with_input_schema::<AckRequest>().with_output_schema::<AckResult>(),
-        Tool::new("telegram_ask", "Send a concise question body; the server adds a bold [title], italic project line and one blank line before a nonempty body; never reproduce them. Optional entities request native formatting (at most 100; body-relative UTF-16 offsets/lengths); omitted/empty remains literal, with no Markdown/HTML parsing. Complete visible questions must fit 1,000 Unicode scalars; prepare long reports as files. When enabled, wait for a matching reply up to the server timeout (default 600 seconds); no automatic idle-host wake is promised. Events stay active. Preserve the reply ID and token; confirm processing and acknowledge separately. Timeout grants no permission and later replies remain valid. Never automatically retry an uncertain send.", serde_json::Map::new())
+        Tool::new("telegram_ask", "Send a concise question body; the server adds a bold [title], italic project line and one blank line before a nonempty body; never reproduce them. Use strict Markdown by default. Use short paragraphs or `- ` lists for multi-part updates. Bold Outcome, Status or Decision labels. Use italic for emphasis and code for identifiers, commands and paths. Set format to plain for literal output. Nonempty entities require plain or omitted format. Complete visible questions must fit 1,000 Unicode scalars; prepare long reports as files. When enabled, wait for a matching reply up to the server timeout (default 600 seconds); no automatic idle-host wake is promised. Events stay active. Preserve the reply ID and token; confirm processing and acknowledge separately. Timeout grants no permission and later replies remain valid. Never automatically retry an uncertain send.", serde_json::Map::new())
             .with_input_schema::<SendRequest>().with_output_schema::<AskResult>(),
         Tool::new("telegram_wait", "Wait for one reply to your saved successful text/document send in the configured chat, without resending. Sending alone does not arm waiting. Default enabled wait is 600 seconds; disabled waiting never claims. Events stay active. Preserve the returned reply ID/current token and process/ack separately. Timeout or cancellation grants no permission and preserves later inbox recovery. Use concurrent work only when your host supports it.", serde_json::Map::new())
             .with_input_schema::<WaitRequest>().with_output_schema::<WaitResult>(),
@@ -452,6 +446,7 @@ fn tool_result<T: Serialize>(result: Result<T, AppError>) -> Result<CallToolResu
         Err(error) => {
             let details = match &error {
                 AppError::TextTooLong(details) => json!(details),
+                AppError::InvalidMarkup { position } => json!({"position":position}),
                 AppError::FileTooLarge {
                     limit_bytes,
                     actual_bytes,

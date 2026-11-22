@@ -284,10 +284,9 @@ home path, even if prose follows. Omission on resume keeps the saved label. See 
 [registration workflow](../README.md#synthetic-workflows) to recover older metadata.
 The server adds native bold `[title]`, an italic project label on a separate line and one
 blank line before a nonempty body/caption, without trailing blank lines for an empty caption.
-Supply verbatim bodies/captions without repeating these headers.
-Optional body-relative `entities` on send/ask and `caption_entities` on send_file request native
-formatting; omitted/empty arrays stay literal. No Markdown/HTML is parsed. See the
-[entity examples and limits](../README.md#synthetic-workflows).
+Supply only the body or caption. Strict Markdown is the default. Use `format: "plain"`
+for literal output. Nonempty native entity arrays with omitted format preserve the existing
+literal behavior. See the [formatting reference](../README.md#text-and-caption-formatting).
 Final visible text is limited to 1,000 scalars, captions also
 to 1,024 UTF-16 units. See [formatting](ARCHITECTURE.md#outbound-formatting).
 

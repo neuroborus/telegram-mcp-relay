@@ -62,6 +62,9 @@ pub enum AppError {
     SecretUnavailable(&'static str),
     EmptyText,
     TextTooLong(TextTooLong),
+    InvalidMarkup {
+        position: usize,
+    },
     InvalidRequest(&'static str),
     InvalidTitle,
     InvalidDirectoryLabel,
@@ -117,6 +120,7 @@ impl AppError {
             Self::SecretUnavailable(_) => "SECRET_UNAVAILABLE",
             Self::EmptyText => "TEXT_EMPTY",
             Self::TextTooLong(_) => "TEXT_TOO_LONG",
+            Self::InvalidMarkup { .. } => "MARKUP_INVALID",
             Self::InvalidRequest(_) | Self::InvalidTitle | Self::InvalidDirectoryLabel => {
                 "REQUEST_INVALID"
             }
@@ -171,6 +175,11 @@ impl fmt::Display for AppError {
                 )
             }
             Self::EmptyText => write!(f, "{}: outgoing text must not be empty", self.code()),
+            Self::InvalidMarkup { position } => write!(
+                f,
+                "{} at Unicode scalar position {position} (zero-based). Fix the markup, escape literal punctuation with a backslash, or use format: \"plain\".",
+                self.code()
+            ),
             Self::InvalidRequest(field) => write!(f, "{}: invalid {field}", self.code()),
             Self::InvalidTitle => write!(
                 f,

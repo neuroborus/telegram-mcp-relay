@@ -3,9 +3,9 @@
 use std::path::PathBuf;
 
 use rmcp::schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::domain::outbound::MessageEntity;
+use crate::domain::outbound::{MessageEntity, OutboundFormat};
 
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -126,12 +126,18 @@ pub struct RegisterResult {
 #[schemars(crate = "rmcp::schemars")]
 pub struct SendRequest {
     pub session_key: String,
-    /// Verbatim body; use entities for formatting, never implicit Markdown/HTML parsing.
-    /// The server adds a bold `[title]`, an italic project line and a blank line before nonempty text.
+    /// Use short paragraphs or `- ` lists for multi-part updates. Bold Outcome, Status or
+    /// Decision labels, use italic for emphasis and code for identifiers, commands and paths.
+    /// Supply only the body. The server adds the title, project line and blank line.
     /// Complete visible framing and body must fit 1,000 Unicode scalars.
     pub text: String,
+    /// Use plain for literal output. Omit for strict Markdown unless passing native entities,
+    /// which require plain or an omitted format.
+    #[serde(default, deserialize_with = "deserialize_outbound_format")]
+    #[schemars(with = "OutboundFormat")]
+    pub format: Option<OutboundFormat>,
     /// Optional native entities, at most 100; UTF-16 offsets relative to text only.
-    /// Omitted/empty means literal text. Do not include the server-owned header.
+    /// Leave empty for Markdown. Exclude the server-owned header.
     #[serde(default)]
     #[schemars(length(max = 100))]
     pub entities: Vec<MessageEntity>,
@@ -144,16 +150,29 @@ pub struct SendFileRequest {
     pub session_key: String,
     /// Absolute local path beneath a configured approved root, without symlinks.
     pub path: PathBuf,
-    /// Verbatim description; use caption_entities for formatting, with no implicit markup parsing.
-    /// The server adds a bold `[title]`, an italic project line and a blank line before nonempty text.
+    /// Use short paragraphs or `- ` lists for multi-part captions. Bold Outcome, Status or
+    /// Decision labels, use italic for emphasis and code for identifiers, commands and paths.
+    /// Supply only the caption. The server adds the title, project line and blank line.
     /// The complete caption must fit 1,000 scalars and 1,024 UTF-16 units.
     #[serde(default)]
     pub caption: String,
+    /// Use plain for literal output. Omit for strict Markdown unless passing native
+    /// caption_entities, which require plain or an omitted format.
+    #[serde(default, deserialize_with = "deserialize_outbound_format")]
+    #[schemars(with = "OutboundFormat")]
+    pub format: Option<OutboundFormat>,
     /// Optional native entities, at most 100; UTF-16 offsets relative to caption only.
-    /// Omitted/empty means literal text; no Markdown/HTML parsing or header reproduction.
+    /// Leave empty for Markdown. Exclude the server-owned header.
     #[serde(default)]
     #[schemars(length(max = 100))]
     pub caption_entities: Vec<MessageEntity>,
+}
+
+fn deserialize_outbound_format<'de, D>(deserializer: D) -> Result<Option<OutboundFormat>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    OutboundFormat::deserialize(deserializer).map(Some)
 }
 
 #[derive(Serialize, JsonSchema)]

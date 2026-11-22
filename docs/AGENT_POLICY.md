@@ -25,11 +25,13 @@ repository contributor instructions remain separate. Configure the client using 
 - The server owns the bold `[title]`, italic project label on its own line and
   one blank line before a nonempty body. Empty captions add no trailing blank line.
   Titles fit 50 graphemes; overlong new titles end with `…` inside that limit.
-  Supply verbatim bodies/captions; do not manually repeat headers or add service notices.
-  For native formatting pass optional body-relative `entities` on send/ask or
-  `caption_entities` on send_file; omitted/empty arrays remain literal, with no Markdown/HTML
-  parsing. Each list has at most 100 spans with UTF-16 offsets/positive lengths and valid
-  metadata/nesting; discover the supported kinds and fields through `tools/list`/guidance.
+  Supply only the body or caption. Leave service notices to Relay. Use strict Markdown by
+  default. Use short paragraphs or `- ` lists for multi-part updates. Bold Outcome, Status
+  or Decision labels. Use italic for emphasis and code for identifiers, commands and paths.
+  Set `format` to `plain` when the user requests literal output. For existing callers,
+  a nonempty `entities` or `caption_entities` array with omitted format still uses
+  literal text and body-relative UTF-16 spans. For `MARKUP_INVALID`, use the reported
+  scalar position to fix or escape the markup, or use `plain` for literal text.
   Cues: ❓ question, ⏳ waiting, 🔄 progress, ✅ success, ⚠️ warning, ❌ error, 📎 file.
   Service voice always begins with the server-owned `🔧 ` prefix.
 - Keep final VISIBLE text/questions/captions within 1,000 Unicode scalars, including all
@@ -83,7 +85,7 @@ repository contributor instructions remain separate. Configure the client using 
 
 ## Implementation details for consumers
 
-`telegram_guidance({})` returns version 4 of its self-contained current policy plus `tools`,
+`telegram_guidance({})` returns version 5 of its self-contained current policy plus `tools`,
 `capabilities` and `limits`. It is read-only and available before registration. Descriptions
 request it first per conversation. Title and label validation applies even if clients skip
 that call. It reports server limits, not an assertion that the host
@@ -107,11 +109,11 @@ the automatic headers/separators and must fit 1,000 Unicode **scalars**; caption
 1,024 UTF-16 units. No auto-splitting,
 truncation or automatic report-file creation occurs.
 
-To bold `OK`, send `{"session_key":"SAVED_KEY","text":"OK","entities":[{"type":"bold","offset":0,"length":2}]}`
-to `telegram_send`. Offsets exclude the automatic header. The complete `[title]` is bold on
-the first line, the project label is italic on the second, and a nonempty body follows
-one blank line (two newlines). Brackets count toward outbound limits, outside the label limit.
-See the [public reference](../README.md#synthetic-workflows) for supported styles, metadata and nesting.
+To bold a status label, pass `{"session_key":"SAVED_KEY","text":"**Status**: OK"}` to
+`telegram_send`. For literal asterisks, use
+`{"session_key":"SAVED_KEY","text":"**Status**: OK","format":"plain"}`.
+See the [formatting reference](../README.md#text-and-caption-formatting) for styles,
+native entities and compatibility.
 
 Allow host deadlines above network time, waiting and filesystem/SQLite/scheduling overhead.
 Text sends have a 15-second network budget, document uploads 600 seconds, and an enabled ask

@@ -163,22 +163,25 @@ pub(super) fn failure(result: &Value, code: &str) {
     assert_eq!(rendered, result["structuredContent"]);
 }
 
-async fn protocol_tool(
+pub(super) async fn protocol_tool(
     http: &Http,
+    endpoint: &McpEndpoint,
     transport: Option<&str>,
     name: &str,
     arguments: Value,
 ) -> Value {
     let params = json!({"name":name,"arguments":arguments});
     match transport {
-        Some(transport) => http.legacy_rpc(transport, "tools/call", params).await,
+        Some(transport) => {
+            http.sequential_legacy_rpc(endpoint, transport, "tools/call", params)
+                .await
+        }
         None => http.rpc("tools/call", params).await,
     }
 }
 
 #[tokio::test]
-async fn native_body_entities_and_literal_defaults_reach_json_multipart_and_journal_on_both_protocols()
- {
+async fn markdown_plain_and_legacy_entities_reach_telegram_and_journal_on_both_protocols() {
     for legacy in [false, true] {
         let mut fixture = Fixture::new();
         fixture.config.delivery.wait_fallback_enabled = false;
@@ -196,7 +199,7 @@ async fn native_body_entities_and_literal_defaults_reach_json_multipart_and_jour
         ));
         let handler =
             Arc::new(McpHandler::new(database, telegram.client.clone(), &fixture.config).unwrap());
-        let mut http = fixture.serve(handler, Some(&auth)).await;
+        let (mut http, endpoint) = fixture.serve_endpoint(handler, Some(&auth)).await;
         let mut headers = http::HeaderMap::new();
         headers.insert(
             header::AUTHORIZATION,
@@ -220,70 +223,82 @@ async fn native_body_entities_and_literal_defaults_reach_json_multipart_and_jour
         fs::write(&path, b"synthetic report").unwrap();
         let entities = json!([
             {"type":"bold","offset":2,"length":2},
-            {"type":"text_link","offset":2,"length":2,"url":"https://example.invalid/report"},
+            {"type":"text_link","offset":2,"length":2,"url":"https:///example.invalid/report"},
             {"type":"pre","offset":0,"length":2,"language":"rust"}
         ]);
         let mut bodies = Vec::new();
-        for (index, (tool, args, body, rich)) in [
+        for (index, (tool, args, body, body_entities)) in [
             (
                 "telegram_send",
-                json!({"session_key":key,"text":"😀ok","entities":entities}),
-                "😀ok",
-                true,
+                json!({"session_key":key,"text":"😀ok *raw*","entities":entities}),
+                "😀ok *raw*",
+                entities.clone(),
             ),
             (
                 "telegram_ask",
-                json!({"session_key":key,"text":"😀ok","entities":entities}),
-                "😀ok",
-                true,
+                json!({"session_key":key,"text":"😀ok *raw*","entities":entities}),
+                "😀ok *raw*",
+                entities.clone(),
             ),
             (
                 "telegram_send_file",
-                json!({"session_key":key,"path":path,"caption":"😀ok","caption_entities":entities}),
-                "😀ok",
-                true,
+                json!({"session_key":key,"path":path,"caption":"😀ok *raw*","caption_entities":entities}),
+                "😀ok *raw*",
+                entities.clone(),
             ),
             (
                 "telegram_send",
-                json!({"session_key":key,"text":"*literal*"}),
-                "*literal*",
-                false,
+                json!({"session_key":key,"text":"😀 **Status**: Ready\n\n- Checked `snake_case`\n- *Review pending*"}),
+                "😀 Status: Ready\n\n- Checked snake_case\n- Review pending",
+                json!([
+                    {"type":"bold","offset":3,"length":6},
+                    {"type":"code","offset":28,"length":10},
+                    {"type":"italic","offset":41,"length":14}
+                ]),
+            ),
+            (
+                "telegram_ask",
+                json!({"session_key":key,"text":"**Decision**: Use [*option A*](https://example.invalid/a)?","format":"markdown"}),
+                "Decision: Use option A?",
+                json!([
+                    {"type":"bold","offset":0,"length":8},
+                    {"type":"text_link","offset":14,"length":8,"url":"https://example.invalid/a"},
+                    {"type":"italic","offset":14,"length":8}
+                ]),
+            ),
+            (
+                "telegram_send_file",
+                json!({"session_key":key,"path":path,"caption":"📎 **Outcome**: **Select (**/**😀**","caption_entities":[]}),
+                "📎 Outcome: Select (/😀",
+                json!([
+                    {"type":"bold","offset":3,"length":7},
+                    {"type":"bold","offset":12,"length":8},
+                    {"type":"bold","offset":21,"length":2}
+                ]),
             ),
             (
                 "telegram_send",
-                json!({"session_key":key,"text":"*literal*","entities":[]}),
-                "*literal*",
-                false,
-            ),
-            (
-                "telegram_ask",
-                json!({"session_key":key,"text":"*literal*"}),
-                "*literal*",
-                false,
-            ),
-            (
-                "telegram_ask",
-                json!({"session_key":key,"text":"*literal*","entities":[]}),
-                "*literal*",
-                false,
+                json!({"session_key":key,"text":"*literal* [sample]","format":"plain"}),
+                "*literal* [sample]",
+                json!([]),
             ),
             (
                 "telegram_send_file",
                 json!({"session_key":key,"path":path}),
                 "",
-                false,
+                json!([]),
             ),
             (
-                "telegram_send_file",
-                json!({"session_key":key,"path":path,"caption":"*literal*","caption_entities":[]}),
-                "*literal*",
-                false,
+                "telegram_send",
+                json!({"session_key":key,"text":"😀ok *raw*","entities":entities,"format":"plain"}),
+                "😀ok *raw*",
+                entities.clone(),
             ),
         ]
         .into_iter()
         .enumerate()
         {
-            let response = protocol_tool(&http, transport.as_deref(), tool, args).await;
+            let response = protocol_tool(&http, &endpoint, transport.as_deref(), tool, args).await;
             let mut data = json!({"telegram_chat_id":-101,"outbound_message_id":7+index});
             if tool == "telegram_ask" {
                 data["status"] = json!("sent");
@@ -307,11 +322,9 @@ async fn native_body_entities_and_literal_defaults_reach_json_multipart_and_jour
                 {"type":"bold","offset":0,"length":4},
                 {"type":"italic","offset":5,"length":2}
             ]);
-            if rich {
-                for mut entity in entities.as_array().unwrap().clone() {
-                    entity["offset"] = json!(entity["offset"].as_u64().unwrap() + 9);
-                    expected.as_array_mut().unwrap().push(entity);
-                }
+            for mut entity in body_entities.as_array().unwrap().clone() {
+                entity["offset"] = json!(entity["offset"].as_u64().unwrap() + 9);
+                expected.as_array_mut().unwrap().push(entity);
             }
             let requests = telegram.requests.lock().unwrap();
             let request = &requests[index];
@@ -332,6 +345,10 @@ async fn native_body_entities_and_literal_defaults_reach_json_multipart_and_jour
             }
             bodies.push(text);
         }
+        {
+            let requests = telegram.requests.lock().unwrap();
+            assert_eq!(requests[0].body, requests[8].body);
+        }
         let sql = rusqlite::Connection::open(&fixture.config.storage.path).unwrap();
         let saved: Vec<String> = sql
             .prepare("SELECT body FROM journal_records ORDER BY message_id")
@@ -341,11 +358,12 @@ async fn native_body_entities_and_literal_defaults_reach_json_multipart_and_jour
             .collect::<Result<_, _>>()
             .unwrap();
         assert_eq!(saved, bodies);
+        http.finish().await;
     }
 }
 
 #[tokio::test]
-async fn invalid_body_entities_have_no_send_route_journal_activity_or_wait_admission_effects() {
+async fn invalid_outbound_formatting_has_no_delivery_or_waiter_effects() {
     for legacy in [false, true] {
         let mut fixture = Fixture::new();
         fixture.config.history.enabled = true;
@@ -364,7 +382,7 @@ async fn invalid_body_entities_have_no_send_route_journal_activity_or_wait_admis
         let handler = Arc::new(
             McpHandler::new(database.clone(), telegram.client.clone(), &fixture.config).unwrap(),
         );
-        let mut http = fixture.serve(handler, Some(&auth)).await;
+        let (mut http, endpoint) = fixture.serve_endpoint(handler, Some(&auth)).await;
         let mut headers = http::HeaderMap::new();
         headers.insert(
             header::AUTHORIZATION,
@@ -425,7 +443,8 @@ async fn invalid_body_entities_have_no_send_route_journal_activity_or_wait_admis
                 } else {
                     json!({"session_key":key,"text":"😀ok","entities":entities})
                 };
-                let response = protocol_tool(&http, transport.as_deref(), tool, args).await;
+                let response =
+                    protocol_tool(&http, &endpoint, transport.as_deref(), tool, args).await;
                 if protocol_error {
                     assert_eq!(response["error"]["code"], -32602);
                 } else {
@@ -433,6 +452,102 @@ async fn invalid_body_entities_have_no_send_route_journal_activity_or_wait_admis
                 }
                 assert!(!response.to_string().contains("private"));
             }
+        }
+        for (markup, format, entities, code, position) in [
+            (
+                "😀 **private",
+                json!("markdown"),
+                json!([]),
+                "MARKUP_INVALID",
+                Some(2),
+            ),
+            (
+                "*first**second*",
+                json!("markdown"),
+                json!([]),
+                "MARKUP_INVALID",
+                Some(6),
+            ),
+            (
+                "😀 [label](https:///private.invalid)",
+                json!("markdown"),
+                json!([]),
+                "MARKUP_INVALID",
+                Some(10),
+            ),
+            (
+                "😀ok",
+                json!("markdown"),
+                json!([{"type":"bold","offset":0,"length":2}]),
+                "REQUEST_INVALID",
+                None,
+            ),
+            ("😀ok", json!("html"), json!([]), "INVALID_PARAMS", None),
+            ("😀ok", Value::Null, json!([]), "INVALID_PARAMS", None),
+        ] {
+            for tool in ["telegram_send", "telegram_ask", "telegram_send_file"] {
+                let args = if tool == "telegram_send_file" {
+                    let missing = fixture.directory.join("missing.txt");
+                    json!({"session_key":key,"path":missing,"caption":markup,"format":format,"caption_entities":entities})
+                } else {
+                    json!({"session_key":key,"text":markup,"format":format,"entities":entities})
+                };
+                let response =
+                    protocol_tool(&http, &endpoint, transport.as_deref(), tool, args).await;
+                let result = &response["result"];
+                match code {
+                    "INVALID_PARAMS" => assert_eq!(response["error"]["code"], -32602),
+                    "MARKUP_INVALID" => {
+                        failure(result, code);
+                        assert_eq!(
+                            result["structuredContent"]["details"],
+                            json!({"position":position})
+                        );
+                        assert!(
+                            result["structuredContent"]["message"]
+                                .as_str()
+                                .unwrap()
+                                .contains("format: \"plain\"")
+                        );
+                    }
+                    _ => failure(result, code),
+                }
+                assert!(!response.to_string().contains("private"));
+            }
+        }
+        let long_text = format!("**{}**", "a".repeat(978));
+        let long_native_caption = format!("`{}`", "😀".repeat(501));
+        let missing = fixture.directory.join("missing.txt");
+        for (tool, args, scalars, units, native_limit) in [
+            (
+                "telegram_ask",
+                json!({"session_key":key,"text":long_text}),
+                1_001,
+                1_001,
+                4_096,
+            ),
+            (
+                "telegram_send_file",
+                json!({"session_key":key,"path":missing,"caption":long_text}),
+                1_001,
+                1_001,
+                1_024,
+            ),
+            (
+                "telegram_send_file",
+                json!({"session_key":key,"path":missing,"caption":long_native_caption}),
+                524,
+                1_025,
+                1_024,
+            ),
+        ] {
+            let response = protocol_tool(&http, &endpoint, transport.as_deref(), tool, args).await;
+            let result = &response["result"];
+            failure(result, "TEXT_TOO_LONG");
+            let details = &result["structuredContent"]["details"];
+            assert_eq!(details["actual_characters"], scalars);
+            assert_eq!(details["actual_utf16_units"], units);
+            assert_eq!(details["native_limit_utf16"], native_limit);
         }
         assert_eq!(database.lock().unwrap().session(key).unwrap(), before);
         assert_eq!(telegram.request_count(), 0);
@@ -445,6 +560,7 @@ async fn invalid_body_entities_have_no_send_route_journal_activity_or_wait_admis
                 0
             );
         }
+        http.finish().await;
     }
 }
 
@@ -598,12 +714,13 @@ async fn tools_have_typed_schemas_and_registration_survives_separate_requests_an
 #[tokio::test]
 async fn registration_validates_metadata_and_keeps_the_saved_label_on_both_protocols() {
     let mut fixture = Fixture::new();
-    let mut http = fixture.serve(fixture.state.clone(), None).await;
+    let (mut http, endpoint) = fixture.serve_endpoint(fixture.state.clone(), None).await;
     let (legacy, _) = http.initialize(LEGACY_VERSION).await;
     let sql = rusqlite::Connection::open(&fixture.config.storage.path).unwrap();
     for transport in [None, Some(legacy.as_str())] {
         let missing_title = protocol_tool(
             &http,
+            &endpoint,
             transport,
             "telegram_register",
             json!({"directory_label":"org/repo"}),
@@ -663,7 +780,8 @@ async fn registration_validates_metadata_and_keeps_the_saved_label_on_both_proto
                 "directory_label",
             ),
         ] {
-            let response = protocol_tool(&http, transport, "telegram_register", arguments).await;
+            let response =
+                protocol_tool(&http, &endpoint, transport, "telegram_register", arguments).await;
             let result = &response["result"];
             failure(result, "REQUEST_INVALID");
             assert!(
@@ -685,6 +803,7 @@ async fn registration_validates_metadata_and_keeps_the_saved_label_on_both_proto
         let title = "[Review] /example/project";
         let registered = protocol_tool(
             &http,
+            &endpoint,
             transport,
             "telegram_register",
             json!({"title":title,"directory_label":"org/repo"}),
@@ -695,6 +814,7 @@ async fn registration_validates_metadata_and_keeps_the_saved_label_on_both_proto
         let key = &registered["result"]["structuredContent"]["session_key"];
         let resumed = protocol_tool(
             &http,
+            &endpoint,
             transport,
             "telegram_register",
             json!({"session_key":key,"title":"Resume guide"}),
@@ -715,6 +835,7 @@ async fn registration_validates_metadata_and_keeps_the_saved_label_on_both_proto
         .unwrap();
         let resumed = protocol_tool(
             &http,
+            &endpoint,
             transport,
             "telegram_register",
             json!({"session_key":key,"title":"Resume guide"}),
@@ -748,7 +869,7 @@ async fn legacy_session_metadata_gates_outbound_and_processing_until_recovery_on
         let handler = Arc::new(
             McpHandler::new(shared.clone(), telegram.client.clone(), &fixture.config).unwrap(),
         );
-        let mut http = fixture.serve(handler, None).await;
+        let (mut http, endpoint) = fixture.serve_endpoint(handler, None).await;
         let transport = if legacy {
             Some(http.initialize(LEGACY_VERSION).await.0)
         } else {
@@ -757,6 +878,7 @@ async fn legacy_session_metadata_gates_outbound_and_processing_until_recovery_on
         let transport = transport.as_deref();
         let response = protocol_tool(
             &http,
+            &endpoint,
             transport,
             "telegram_register",
             json!({"external_session_id":"thread","title":"Upgrade guide","directory_label":"org/repo"}),
@@ -768,6 +890,7 @@ async fn legacy_session_metadata_gates_outbound_and_processing_until_recovery_on
         inbox::seed(&fixture, session, 5, &[11, 12]);
         let response = protocol_tool(
             &http,
+            &endpoint,
             transport,
             "telegram_inbox",
             json!({"session_key":key,"limit":1}),
@@ -818,7 +941,7 @@ async fn legacy_session_metadata_gates_outbound_and_processing_until_recovery_on
                 ),
                 ("telegram_processing", identifier.clone()),
             ] {
-                let response = protocol_tool(&http, transport, tool, arguments).await;
+                let response = protocol_tool(&http, &endpoint, transport, tool, arguments).await;
                 let result = &response["result"];
                 failure(result, "SESSION_METADATA_REQUIRED");
                 let message = result["structuredContent"]["message"].as_str().unwrap();
@@ -840,6 +963,7 @@ async fn legacy_session_metadata_gates_outbound_and_processing_until_recovery_on
         }
         let recovered = protocol_tool(
             &http,
+            &endpoint,
             transport,
             "telegram_register",
             if legacy {
@@ -865,11 +989,19 @@ async fn legacy_session_metadata_gates_outbound_and_processing_until_recovery_on
                 .replies,
             before_inbox
         );
-        let processing = protocol_tool(&http, transport, "telegram_processing", identifier).await;
+        let processing = protocol_tool(
+            &http,
+            &endpoint,
+            transport,
+            "telegram_processing",
+            identifier,
+        )
+        .await;
         assert_eq!(processing["result"]["isError"], false);
         assert!(processing["result"]["structuredContent"]["processing_started_at"].is_i64());
         let saturated = protocol_tool(
             &http,
+            &endpoint,
             transport,
             "telegram_ask",
             json!({"session_key":key,"text":"Question?"}),
@@ -885,7 +1017,7 @@ async fn legacy_session_metadata_gates_outbound_and_processing_until_recovery_on
                 json!({"session_key":key,"path":path,"caption":"Report"}),
             ),
         ] {
-            let response = protocol_tool(&http, transport, tool, arguments).await;
+            let response = protocol_tool(&http, &endpoint, transport, tool, arguments).await;
             assert_eq!(response["result"]["isError"], false);
         }
         let changes = shared.lock().unwrap().route_changes();
@@ -902,6 +1034,7 @@ async fn legacy_session_metadata_gates_outbound_and_processing_until_recovery_on
         };
         let ask = protocol_tool(
             &http,
+            &endpoint,
             transport,
             "telegram_ask",
             json!({"session_key":key,"text":"Question?"}),
@@ -940,12 +1073,12 @@ async fn text_and_documents_return_committed_composite_routes_for_same_title_ses
     for (tool, args, id) in [
         (
             "telegram_send",
-            json!({"session_key":first["session_key"],"text":text}),
+            json!({"session_key":first["session_key"],"text":format!("**{text}**")}),
             7,
         ),
         (
             "telegram_send_file",
-            json!({"session_key":second["session_key"],"path":path,"caption":caption}),
+            json!({"session_key":second["session_key"],"path":path,"caption":format!("`{caption}`")}),
             8,
         ),
         (
@@ -972,7 +1105,7 @@ async fn text_and_documents_return_committed_composite_routes_for_same_title_ses
         let body: Value = serde_json::from_slice(&requests[0].body).unwrap();
         assert_eq!(
             body,
-            json!({"chat_id":-101,"text":format!("[界]\np\n\n{text}"),"entities":[{"type":"bold","offset":0,"length":3},{"type":"italic","offset":4,"length":1}]})
+            json!({"chat_id":-101,"text":format!("[界]\np\n\n{text}"),"entities":[{"type":"bold","offset":0,"length":3},{"type":"italic","offset":4,"length":1},{"type":"bold","offset":7,"length":993}]})
         );
         for (index, (request, caption)) in requests[1..]
             .iter()
@@ -996,7 +1129,7 @@ async fn text_and_documents_return_committed_composite_routes_for_same_title_ses
             assert_eq!(
                 serde_json::from_slice::<Value>(request.part("caption_entities")).unwrap(),
                 if index == 0 {
-                    json!([{"type":"bold","offset":0,"length":3}, {"type":"italic","offset":4,"length":2}])
+                    json!([{"type":"bold","offset":0,"length":3}, {"type":"italic","offset":4,"length":2},{"type":"code","offset":8,"length":1016}])
                 } else {
                     json!([{"type":"bold","offset":0,"length":9},{"type":"italic","offset":10,"length":1}])
                 }
@@ -1069,7 +1202,7 @@ async fn validation_and_protocol_failures_have_no_telegram_route_or_activity_eff
         ),
         (
             "telegram_send",
-            json!({"session_key":key,"text":"a".repeat(994)}),
+            json!({"session_key":key,"text":format!("**{}**","a".repeat(994))}),
             "TEXT_TOO_LONG",
         ),
         (
@@ -1079,7 +1212,7 @@ async fn validation_and_protocol_failures_have_no_telegram_route_or_activity_eff
         ),
         (
             "telegram_send_file",
-            json!({"session_key":key,"path":path,"caption":"😀".repeat(508)+"aa"}),
+            json!({"session_key":key,"path":path,"caption":format!("`{}aa`","😀".repeat(508))}),
             "TEXT_TOO_LONG",
         ),
         (
@@ -1100,7 +1233,7 @@ async fn validation_and_protocol_failures_have_no_telegram_route_or_activity_eff
     ] {
         let native_caption = args["caption"]
             .as_str()
-            .is_some_and(|caption| caption.starts_with('😀'));
+            .is_some_and(|caption| caption.trim_start_matches('`').starts_with('😀'));
         let result = http.tool(name, args).await;
         failure(&result, code);
         assert!(!result.to_string().contains("private"));

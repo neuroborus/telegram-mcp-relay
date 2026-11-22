@@ -18,14 +18,14 @@ from the historical `968802` benchmark or require a fresh benchmark.
 | R1 `cargo build --locked --release --bin telegram-mcp-relay` | Native locked daemon release build, exit 0 |
 | R2 `cargo build --locked --release --example resource_probe` | Native locked library-linked probe release build, exit 0 |
 
-Both advertised protocols exercised the independently maintained eleven-tool inventory/full
-DTO schemas, original security/lifecycle assertions, exact modern `resultType:"complete"`
+At that baseline both advertised protocols exercised the eleven-tool inventory and DTO schemas
+then in use, original security/lifecycle assertions, exact modern `resultType:"complete"`
 versus legacy omission, native framing, wait/event/inbox/ask claims, recovery/fences and
-authorized shared/own downloads. See [extended composition](../src/app/tests/extended.rs)
-and the feature-local coverage records below. Synthetic peers and controlled scheduling
-establish source behavior; no named-client/live Telegram, deployed-filesystem, idle-wake or
-fresh resource-use result follows. The later documentation steps in that continuation have
-their own recorded check outcomes below.
+authorized shared/own downloads. The [extended composition fixture](../src/app/tests/extended.rs)
+describes the test structure. The recorded synthetic results apply to the baseline cases.
+Named-client, live Telegram, deployed-filesystem, idle-wake and fresh resource-use evidence
+have separate owners. The later documentation steps in that continuation have their own
+recorded check outcomes below.
 
 ## Agent-experience continuation status
 
@@ -138,9 +138,10 @@ under either stable identity keeps routes and pending replies and preserves the 
 Domain cases cover invisible formatting, supported Unicode wrappers, relative labels and
 bracketed placeholders, including legacy cutoffs and placeholders exposed by title truncation.
 The notice fixture checks safe framing, native spans, journal admission and authorized reads of
-new incoming and service snapshots on synthetic routes. Current results
-await C1–C3 and C7–C8 (P1/P2) through Native FINALIZE and the existing Runner-trusted C4–C6 vectors
-through Runner FINALIZE. The locked releases belong to final integration.
+new incoming and service snapshots on synthetic routes. The earlier native-framing scope
+assigned P1/P2 to Native FINALIZE for its Python measurement fixture changes. The updated
+RELAY-005 framing fixtures require the C1–C6 FINALIZE receipts described under
+[Strict Markdown regressions](#strict-markdown-regressions).
 
 ## Server instructions and restored framing regressions
 
@@ -153,19 +154,43 @@ round trips. `tests/registry.rs` reopens new ellipsis and old already-truncated 
 inventing lost input. Notice cases retain old plain/bracketed/native shapes and route precedence.
 Actual text/question JSON and document multipart fixtures include bracketed astral headers,
 shifted body entities, exact 1,000/1,001-scalar and 1,024/1,025-UTF-16 boundaries, final-text
-journaling and mixed-protocol document/wait composition. These source-defined changes require
-C1–C6 plus final-composition C11/R1 and C12/R2 in FINALIZE; no new HOST measurement is claimed.
+journaling and mixed-protocol document/wait composition. The recorded mixed-protocol
+composition baseline included the C11/R1 and C12/R2 locked release builds. The changed
+server-instruction and framing fixtures require current C1–C6 FINALIZE receipts.
+Both locked release builds belong to Native FINALIZE in the later integration step.
 
 ## Explicit native body-entity regressions
 
 Domain cases cover supported kinds, metadata bounds, surrogate/range/overflow failures,
-containment/overlap and code/pre/quote restrictions. Actual MCP calls on both revisions cover
+containment/overlap and code/pre/quote restrictions. MCP fixtures on both revisions define
 rich send/ask JSON and document multipart entities, body-relative UTF-16 shifts with astral
-headers/directories, exact protocol envelopes, omitted/empty-array literal compatibility and
-actual visible-text journaling. Invalid schemas, metadata, ranges and nesting leave HTTP sends,
+headers/directories, exact protocol envelopes, nonempty legacy-array compatibility and
+visible-text journaling. Invalid schemas, metadata, ranges and nesting leave HTTP sends,
 routes, journal and activity unchanged; saturated waiter capacity cannot mask invalid questions.
 The existing cancellation/rename/restart journal fixture also sends explicit entities.
 These are source-defined regressions; their required C1–C6 FINALIZE results remain pending.
+
+## Strict Markdown regressions
+
+The [parser tests](../src/domain/outbound/markup.rs) define escapes, exact star-run matching,
+whitespace and delimiter rejections, emphasis in link labels, UTF-16 spans with astral
+characters and literal list markers. Link cases cover mixed-case schemes, escaped
+parentheses and rejection of missing authorities or extra slashes immediately after `://`.
+The [MCP fixtures](../src/routes/tools.rs) use clients that skip guidance and an isolated
+synthetic Telegram peer on both revisions. They inspect rendered status text, questions and
+file captions, including bold spans separated by punctuation and rejection of shared
+delimiters. They cover explicit plain text and byte-identical legacy entity sends, including
+the prior behavior for native link URLs. Invalid Markdown returns a redacted scalar offset
+before file opening, waiter admission, Telegram, route, journal or activity effects. The
+missing-path and saturated-waiter cases require `TEXT_TOO_LONG` for overlong rendered
+captions and questions, including the native caption limit. The modern boundary fixtures
+check the maximum accepted lengths.
+
+Current results require C1–C6 FINALIZE receipts. C1–C3 are Native and C4–C6 are the selected
+Runner-trusted vectors. The composition baseline covers its original fixtures.
+After DONE and workspace release, the supervising operator owns pending HOST acceptance of
+formatted output in a real agent workflow. The resource probe driver caption
+`Synthetic near-limit upload.` is unchanged by default Markdown.
 
 ## After-send wait regressions
 
@@ -310,7 +335,7 @@ can still register without a handshake; later guidance discloses no new private 
 `services::guidance` tests nondefault lower limits, disabled features, database history opt-in
 and exclusion of synthetic private settings/paths/allowlist identities. Self-contained policy
 content is reviewed against specification §§5.4/14; the earlier version-1 cases passed in
-accepted complete C6. Current version-4 metadata and framing results require their own
+accepted complete C6. Current version-5 metadata and framing results require their own
 Runner FINALIZE receipts.
 Source inspection does not establish named-client, live Telegram, host concurrency or idle wake.
 

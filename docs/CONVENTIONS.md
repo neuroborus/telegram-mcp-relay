@@ -18,7 +18,7 @@ and lockfile. Root workspace checks do not cover it; see [testing](TESTING.md).
 | `src/config.rs`, `src/config/`, `src/error.rs` | Validated configuration, protected secrets and typed application errors |
 | `src/dto.rs` | Typed tool requests/results, inbox resource snapshots and SDK-generated schemas |
 | `src/handlers.rs`, `src/handlers/`, `src/routes.rs`, `src/routes/` | Shared SDK handler state, thin typed tools/read-only inbox resources, bounded modern subscriptions, protected HTTP transport and its tests |
-| `src/domain.rs`, `src/domain/` | Pure title normalization, final outbound Unicode rules and their tests |
+| `src/domain.rs`, `src/domain/` | Pure title normalization, strict outbound Markdown, native entities, final Unicode rules and their tests |
 | `src/services.rs`, `src/services/` | Text/document delivery, bounded question waits, confined outbound files and authorized downloads, read-only current agent guidance, authorized reply ingestion, one restart-safe poller, bounded inbox claims, durable processing/completion, shared confirmed-processing typing, factual notice dispatch and bounded retention scheduling |
 | `src/services/history.rs`, `src/services/attachments.rs`, `src/services/guidance.rs` | Authorized shared reads, retained own/shared attachment authorization and nonsecret policy projection |
 | `src/services/downloads.rs`, `src/services/downloads/` | Private pinned-root file storage, reservations, cancellation and owned restart cleanup |
@@ -52,11 +52,12 @@ SDK owns route wiring; do not duplicate an HTTP server to imitate this tree.
 - Prefer a Tokio current-thread runtime, one reusable HTTP client and bounded tasks/buffers.
   Do not hold synchronous database locks across `.await`; measure SQLite impact before adding
   a dedicated bounded worker. Avoid loading whole files or histories into RAM.
-- Preserve verbatim Telegram bodies with explicit optional body-relative native entities,
-  isolated from server-owned bold `[title]` and italic project label entities. Separate
-  the header from a nonempty body with one blank line; service messages begin `🔧 `. Do not introduce implicit Markdown/HTML parsing. Default to
-  loopback binding and explicit allowlists. Configuration is TOML plus protected secret sources,
-  validated once at startup. Never commit actual bot tokens.
+- Convert outbound MCP bodies and captions from strict Markdown into literal text and native
+  entities. Keep plain mode and the legacy explicit-entity path verbatim. Keep body-relative
+  entities isolated from server-owned bold `[title]` and italic project label entities.
+  Separate the header from a nonempty body with one blank line. Service messages begin `🔧 `.
+  Default to loopback binding and explicit allowlists. Configuration is TOML plus protected
+  secret sources, validated once at startup. Never commit actual bot tokens.
 
 Verify changed versions/features against official upstream sources. Prefer `rmcp`, Tokio,
 the existing Hyper/Tower transport integration, reqwest with

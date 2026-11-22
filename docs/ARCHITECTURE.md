@@ -258,11 +258,13 @@ same identity. The existing transaction keeps routes, inbox replies and processi
 with that identity.
 
 `telegram_send` accepts `session_key`/`text`; `telegram_send_file` accepts `session_key`, an
-absolute approved local `path` and an optional `caption` (empty by default). The handlers
-delegate to confined opening and existing delivery services without retries or body/file
-persistence. Success returns `telegram_chat_id` and `outbound_message_id` only after the
-composite reply route commits. Empty captions retain the session header. Formatting, native
-caption bounds, send admission and cancellation-safe bookkeeping remain service-owned.
+absolute approved local `path` and an optional `caption` (empty by default). Send, ask and
+send_file use the shared domain formatter to resolve the optional `format` and native entity
+list. The services validate the rendered question or caption with its session framing before
+waiter admission or file opening. Delivery validates the final framing and limits against
+current metadata before send admission. Success returns `telegram_chat_id` and
+`outbound_message_id` only after the composite reply route commits. Empty captions retain the
+session header.
 
 The locked rmcp 3.8.0 `Tool` input/output schema builders use typed Serde DTOs and the SDK's
 already-enabled schemars support; no new crate/features are needed. `tools/list` is stable,
@@ -505,18 +507,21 @@ label limit. `format_notice` retains the exact `🔧 ` prefix and adds the known
 when available. Notice recognition accepts the headers issued for older sessions.
 Entity offsets and lengths use UTF-16 code units, including the service prefix. Text uses
 `entities` and multipart documents use `caption_entities`.
-No `parse_mode`, Markdown/HTML parser, body splitting or truncation is introduced. Callers
-supply the body and never reproduce server-owned headers. Optional `entities` on send/ask and
-`caption_entities` on send_file add explicit native formatting; omitted/empty arrays stay literal.
+`domain::outbound::markup` parses strict Markdown in send, ask and send_file by default
+and produces literal text and body-relative UTF-16 entities. An invalid span, delimiter or
+metadata returns `MARKUP_INVALID` with a zero-based Unicode scalar position in the input.
+Markdown links require an explicit HTTP(S) authority immediately after `://`.
+Explicit `plain` or omitted format with a nonempty native entity array preserves verbatim text
+and caller-provided spans. Telegram receives literal text and entities without a `parse_mode`.
 `domain::outbound::entities` owns the shared typed entity schema and deterministic validator:
 at most 100 spans, positive lengths, checked UTF-16 ranges on scalar boundaries, kind-specific
 bounded metadata and official containment rules. It supports bold/italic/underline/strikethrough/
 spoiler, code/pre, text_link and both quote kinds. Code/pre never overlap; overlaps otherwise
 require containment and a styling span. Other non-style entities cannot contain each other.
 The existing reqwest URL parser validates absolute allowed-scheme links without effects.
-No crate, persistence schema or markup parser is added. Validated body offsets shift by the actual
-framing length; caller spans cannot reach header entities. Shape/type failures remain safe MCP
-invalid-params errors, while range/metadata/nesting failures return structured `REQUEST_INVALID`.
+Both paths use the entity validator. Validated offsets shift by the UTF-16 framing length.
+Invalid argument types return MCP invalid-params errors. Invalid explicit native ranges,
+metadata or nesting and explicit Markdown with nonempty native entities return `REQUEST_INVALID`.
 
 Before allocating final output or admitting a send, these functions count every visible
 scalar and UTF-16 unit: prefix, brackets, title/ellipsis, directory, separators and full body.
@@ -526,9 +531,10 @@ empty body. Native entity metadata adds no visible characters. These contracts f
 [Telegram entity](https://core.telegram.org/bots/api#messageentity),
 [text](https://core.telegram.org/bots/api#sendmessage) and
 [document](https://core.telegram.org/bots/api#senddocument) interfaces. Earlier header-only
-formatting proofs passed with complete composition C6. Explicit body-entity validation results
-remain pending. The dated HOST trial accepted native-framed text
-and a document; independent visual rendering and live Unicode-boundary experiments were not performed.
+formatting proofs passed with C6 at the recorded composition baseline. Current format
+coverage is defined in [testing](TESTING.md#strict-markdown-regressions) and awaits FINALIZE
+receipts. The dated HOST trial accepted native-framed text and a document at its original baseline.
+Real-agent Markdown rendering remains pending HOST evidence.
 
 `TEXT_TOO_LONG` carries serializable details: `limit=1000`, `actual_characters`,
 `native_limit_utf16`, `actual_utf16_units` and file-delivery `guidance`. Native caption
@@ -755,9 +761,8 @@ is claimed. Decimal MB is the conservative interpretation used by configuration 
 ## Document delivery
 
 `OutboundService::send_file` consumes a `ValidatedFile` from the confined opener and formats
-the complete verbatim caption with isolated native title/directory and optional body entities
-before admission. Both the
-final 1,000-scalar and 1,024-UTF-16-unit limits apply; an empty description leaves only the headers.
+the prepared caption with isolated native title and project entities before admission.
+Both the final 1,000-scalar and 1,024-UTF-16-unit limits apply; an empty description leaves only the headers.
 Text and documents share send admission, metadata reservations, detached task ownership and
 the successful-send transaction. A confirmed document commits a composite `Document` route
 and activity atomically, plus its caption/presentation and any returned document metadata
@@ -967,9 +972,9 @@ authorized same-host 44-byte cloud round trip under the original deployment cond
 ## Current agent guidance
 
 `telegram_guidance({})` is a typed, read-only tool available without an application session.
-Version 4 adds the meaningful title and project label requirements and their recovery path.
-Native headers, blank-line separation, the title cutoff and explicit body/caption entities
-with literal defaults remain part of the contract. The HOST observations below cover version 1.
+Version 4 added meaningful title and project label requirements and their recovery path.
+Version 5 describes strict Markdown, explicit plain mode and the compatible native entity
+path. The HOST observations below cover version 1.
 Standard rmcp 3.8.0 `ServerConfig` instructions expose a compact policy before tools through
 legacy initialization and modern discovery.
 They fit 500 Unicode scalars and keep essential recommendations within the first 512 characters.

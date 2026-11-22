@@ -8,7 +8,9 @@ use tokio_util::task::TaskTracker;
 use crate::{
     clients::telegram::{SentMessage, TelegramClient},
     config::Config,
-    domain::outbound::{FormattedMessage, MessageEntity, format_caption, format_text},
+    domain::outbound::{
+        FormattedMessage, MessageEntity, format_caption, format_text, validate_body_entities,
+    },
     error::{AppError, TelegramError},
     repositories::{
         AttachmentInput, AttachmentKind, ConfirmedMessage, Database, MessageSource,
@@ -115,6 +117,28 @@ impl OutboundService {
         entities: &[MessageEntity],
     ) -> Result<SentMessage, AppError> {
         self.send(session_key, body, entities, None).await
+    }
+
+    /// Check the complete caption before opening a caller-supplied path.
+    /// Delivery validates again against the current session metadata.
+    pub(crate) fn validate_caption(
+        &self,
+        session_key: &str,
+        caption: &str,
+        entities: &[MessageEntity],
+    ) -> Result<(), AppError> {
+        validate_body_entities(caption, entities)?;
+        let session = self
+            .database
+            .lock()
+            .map_err(|_| AppError::StorageFailure)?
+            .session(session_key)?;
+        format_caption(
+            &session.title,
+            Some(session.outbound_directory_label()?),
+            caption,
+        )?;
+        Ok(())
     }
 
     /// Consume the original confined handle; no caller path is reopened or persisted.

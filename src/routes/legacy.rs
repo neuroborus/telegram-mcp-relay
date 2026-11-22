@@ -106,6 +106,23 @@ impl Http {
         assert_eq!(result["id"], id);
         result
     }
+
+    pub(super) async fn sequential_legacy_rpc(
+        &self,
+        endpoint: &McpEndpoint,
+        session: &str,
+        method: &str,
+        params: Value,
+    ) -> Value {
+        let result = self.legacy_rpc(session, method, params).await;
+        // SSE EOF can precede SDK channel retirement and release of the work permit.
+        endpoint
+            .inner
+            .sessions
+            .wait_work_released(endpoint.inner.concurrency as u32)
+            .await;
+        result
+    }
 }
 
 #[tokio::test]
@@ -158,10 +175,11 @@ async fn initialization_negotiates_supported_handshake_and_fallback_without_regi
 #[tokio::test]
 async fn session_calls_and_read_only_resources_share_explicit_application_identity() {
     let mut fixture = Fixture::new();
-    let mut http = fixture.serve(fixture.state.clone(), None).await;
+    let (mut http, endpoint) = fixture.serve_endpoint(fixture.state.clone(), None).await;
     let (transport, _) = http.initialize(LEGACY_VERSION).await;
     let registered = http
-        .legacy_rpc(
+        .sequential_legacy_rpc(
+            &endpoint,
             &transport,
             "tools/call",
             json!({"name":"telegram_register",
@@ -183,7 +201,9 @@ async fn session_calls_and_read_only_resources_share_explicit_application_identi
         ("resources/templates/list", json!({})),
         ("resources/read", json!({"uri":application["inbox_uri"]})),
     ] {
-        let legacy = http.legacy_rpc(&transport, method, params.clone()).await;
+        let legacy = http
+            .sequential_legacy_rpc(&endpoint, &transport, method, params.clone())
+            .await;
         let modern = http.rpc(method, params).await;
         assert!(legacy.get("error").is_none(), "{legacy}");
         // Read responses have a legacy wire shape without the modern resultType tag.
@@ -193,7 +213,12 @@ async fn session_calls_and_read_only_resources_share_explicit_application_identi
     }
     for method in ["resources/subscribe", "resources/unsubscribe"] {
         let result = http
-            .legacy_rpc(&transport, method, json!({"uri":application["inbox_uri"]}))
+            .sequential_legacy_rpc(
+                &endpoint,
+                &transport,
+                method,
+                json!({"uri":application["inbox_uri"]}),
+            )
             .await;
         assert_eq!(result["error"]["code"], -32601);
     }

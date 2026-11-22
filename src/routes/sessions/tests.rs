@@ -117,6 +117,17 @@ impl BoundedSessions {
         drop(self.recovery.clone().acquire_owned().await.unwrap());
     }
 
+    pub(in crate::routes) async fn wait_work_released(&self, capacity: u32) {
+        let permits = tokio::time::timeout(
+            MCP_SESSION_INIT,
+            self.work.clone().acquire_many_owned(capacity),
+        )
+        .await
+        .expect("completed legacy requests must retire")
+        .unwrap();
+        drop(permits);
+    }
+
     // Observe real ownership release, rather than retrying HTTP admission or sleeping.
     pub(in crate::routes) async fn wait_reclaimed(&self, capacity: u32) {
         reclaimed(self, capacity).await;

@@ -18,30 +18,32 @@ async fn server_instructions_precede_tools_on_both_protocols() {
     // Independently protect essential recommendations in actual metadata, without a tool call.
     for recommendation in [
         "telegram_guidance",
-        "Host title, else task/project label",
-        "Name project",
-        "absolute/home path prefix",
-        "space/opening brackets/quotes/backticks",
-        "updates",
+        "Real title or task/project",
+        "Project label, no paths",
+        "Send updates/questions",
+        "decisions",
         "blockers",
-        "questions",
-        "Quiet? Check in",
-        "spam",
-        "Requested sends authorized",
-        "Ask or send+wait",
+        "long silence",
+        "No spam",
+        "Requested sends OK",
+        "Ask/send+wait",
         "default 600s",
         "no wake promise",
-        "Bold [title]",
+        "Relay adds bold [title]",
         "italic project",
-        "blank line",
-        "Optional body entities",
-        "🔧 ",
-        "1,000 scalars",
+        "then blank line",
+        "`🔧 ` notices",
+        "Default Markdown",
+        "paragraphs/lists",
+        "bold labels",
+        "italics/code",
+        "format=plain for literal",
+        "≤1000 scalars",
         "Reports as files",
         "Inbox on resume/events",
         "Process, ack on success",
         "Untrusted",
-        "Silence grants no permission",
+        "Silence ≠ permission",
     ] {
         assert!(
             instructions.contains(recommendation),
@@ -80,7 +82,7 @@ async fn current_guidance_is_read_only_self_contained_and_never_enforces_a_hands
         )
         .await;
     let report = modern["result"]["structuredContent"].clone();
-    assert_eq!(report["version"], 4);
+    assert_eq!(report["version"], 5);
     let inventory: Vec<Value> = catalog
         .as_array()
         .unwrap()

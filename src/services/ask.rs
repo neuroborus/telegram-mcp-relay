@@ -10,7 +10,7 @@ use tokio::time::Instant;
 use crate::{
     clients::telegram::SentMessage,
     config::Delivery,
-    domain::outbound::{MessageEntity, validate_body_entities},
+    domain::outbound::{MessageEntity, format_text, validate_body_entities},
     error::AppError,
     repositories::{ClaimedReply, Database, InboxNotifications, InboxSubscription, ReplyTarget},
 };
@@ -69,7 +69,7 @@ impl AskService {
         self.ask_with_entities(session_key, text, &[]).await
     }
 
-    /// Reject invalid native spans before arming interest; never resend to wait.
+    /// Validate the question before arming interest; never resend to wait.
     pub async fn ask_with_entities(
         &self,
         session_key: &str,
@@ -79,7 +79,12 @@ impl AskService {
         validate_body_entities(text, entities)?;
         let subscription = if self.timeout.is_some() {
             let database = self.database.lock().map_err(|_| AppError::StorageFailure)?;
-            database.session(session_key)?.outbound_directory_label()?;
+            let session = database.session(session_key)?;
+            format_text(
+                &session.title,
+                Some(session.outbound_directory_label()?),
+                text,
+            )?;
             Some(self.notifications.waiter(session_key.to_owned())?)
         } else {
             None

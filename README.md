@@ -67,9 +67,9 @@ argument; it is not part of the field name. Examples below show tool arguments, 
 | --- | --- | --- |
 | `telegram_guidance` | `{}` | `GuidanceResult`: current policy, inventory, capabilities and effective limits |
 | `telegram_register` | `title`, `external_session_id?`, `session_key?`, `directory_label?` (required for new sessions) | `{session_key, title, directory_label, inbox_uri}`; resume returns a null label when the saved label is missing or invalid |
-| `telegram_send` | `session_key`, `text`, `entities?` | `SendResult`: `{telegram_chat_id, outbound_message_id}` after acceptance **and** route commit |
-| `telegram_send_file` | `session_key`, `path`, `caption?` (default empty), `caption_entities?` | `SendResult`; absolute daemon-local path beneath an approved outbound root |
-| `telegram_ask` | `session_key`, `text`, `entities?` | `{telegram_chat_id, outbound_message_id, status, reply}`; `status` is `sent` when waiting is disabled, otherwise `reply_received` or `wait_timeout`; `reply` is a nullable `ClaimedReplyResult` |
+| `telegram_send` | `session_key`, `text`, `format?`, `entities?` | `SendResult`: `{telegram_chat_id, outbound_message_id}` after acceptance **and** route commit |
+| `telegram_send_file` | `session_key`, `path`, `caption?` (default empty), `format?`, `caption_entities?` | `SendResult`; absolute daemon-local path beneath an approved outbound root |
+| `telegram_ask` | `session_key`, `text`, `format?`, `entities?` | `{telegram_chat_id, outbound_message_id, status, reply}`; `status` is `sent` when waiting is disabled, otherwise `reply_received` or `wait_timeout`; `reply` is a nullable `ClaimedReplyResult` |
 | `telegram_wait` | `session_key`, `outbound_message_id` | Same fields as ask; `status` is `disabled`, `reply_received` or `wait_timeout`; validates the caller's retained configured-chat route even when disabled |
 | `telegram_inbox` | `session_key`, `limit?` (default 100, 1–100 within payload budget) | `{replies: [ClaimedReplyResult]}`; claims eligible pending or lease-expired unstarted replies |
 | `telegram_processing` | `session_key`, `reply_id`, `claim_token`, exactly one of `active` or `reconcile_request_id` | `{reply_id, claim_token, processing_started_at}`; start time is nullable; preserve the returned current token |
@@ -95,7 +95,7 @@ session keys, fences, raw Telegram file IDs and file bytes. Own-reply `attachmen
 remains legacy-compatible JSON; use the additive safe `attachments` handles for downloads,
 never adapter identifiers from that metadata.
 
-`GuidanceResult` contains `version` (currently 4), `tools: [{name, description}]`,
+`GuidanceResult` contains `version` (currently 5), `tools: [{name, description}]`,
 `capabilities`, `limits` and `instructions: [string]`. The tools match actual registration;
 full schemas come from `tools/list`. Capabilities include `protocols: [{version,
 resource_subscriptions}]`, `wait_enabled`, `history_enabled`, `attachment_downloads_enabled`,
@@ -215,12 +215,47 @@ background calls. Allow client deadlines above 15 seconds of text-send network t
 ask's wait, or 600 seconds for an upload followed by the separate wait, with filesystem/SQLite/
 scheduling margin. Server admission budgets do not establish host support or automatic idle wake.
 
-Supply verbatim bodies/captions: the server adds a native bold `[title]` and an italic
-project label on its own line, then one blank line (two newlines) before a nonempty body. An empty
-caption has only the header, without trailing blank lines. Brackets frame the label outside its
-50-grapheme limit and count toward outbound bounds. No Markdown/HTML is parsed. Request rich
-formatting using optional `entities` on send/ask or `caption_entities` on send_file; omitted or
-empty arrays preserve literal behavior on both protocols. For example:
+### Text and caption formatting
+
+Supply only the body or caption. Relay adds a native bold `[title]`, an italic project
+label on its own line, and one blank line (two newlines) before a nonempty body. An empty
+caption has only the header. Brackets frame the title outside its 50-grapheme limit and
+count toward outbound bounds.
+
+Use short paragraphs or `- ` lists for multi-part updates. Bold Outcome, Status or Decision
+labels. Use italic for emphasis and code for identifiers, commands and paths.
+
+```json
+{"session_key":"SAVED_KEY","text":"**Status**: Ready\n\n- Checked `release.toml`\n- *Review pending*"}
+```
+
+| Strict Markdown syntax | Telegram output |
+| --- | --- |
+| `**bold**`, `*italic*` | Bold and italic spans |
+| `` `snake_case` `` | Inline code |
+| Triple-backtick fences on separate lines, with an optional language after the opening fence | Preformatted code. The code inside the fences is literal. |
+| `[label](https://example.invalid)` | Native HTTP or HTTPS text link. Put the authority directly after `://`. Labels can contain bold and italic spans. |
+| Line breaks, paragraphs, `- ` and `1. ` list markers, underscores and HTML | Literal text |
+
+Escape `\`, `*`, backticks, `[`, `]`, `(` or `)` with a backslash. In inline code, escape
+backticks and backslashes. Leave fenced code unchanged. Inline spans and link labels
+fit on one line and cannot be empty. Emphasis opens with exactly one or two unescaped stars.
+The first unescaped star run inside must match the opener's length and closes the span.
+Runs of three or more stars and whitespace immediately inside either delimiter are invalid.
+Use a literal separator between spans, as in `*first* *second*`. Shared delimiters such as
+`*first**second*` are invalid. Punctuation has no effect on matching, so
+`**Select (**/**😀**` renders two bold spans separated by a slash and `**Done!**Next`
+renders `Done!Next`. Markdown generates at most 100 body entities. Unbalanced or invalid
+markup returns `MARKUP_INVALID` before sending.
+
+**Compatibility on both MCP revisions.** Omitted format now selects strict Markdown when
+the entity list is absent or empty. Set `"format":"plain"` to preserve the exact characters
+of literal text, for example `{"session_key":"SAVED_KEY","text":"**as typed**","format":"plain"}`.
+A nonempty `entities` list on send/ask or `caption_entities` on send_file keeps existing
+literal rendering when format is omitted. Explicit `plain` also accepts these arrays.
+Explicit `markdown` with a nonempty native entity list returns `REQUEST_INVALID`.
+
+Existing callers can pass native spans directly.
 
 ```json
 {"session_key":"SAVED_KEY","text":"😀 Ready","entities":[{"type":"bold","offset":3,"length":5}]}
@@ -318,6 +353,7 @@ dispatch; an expired legacy transport needs fresh initialization. See [transport
 | Stable error codes | Meaning and safe next action |
 | --- | --- |
 | `TEXT_EMPTY`, `TEXT_TOO_LONG` | Supply text or move a long report to an explicitly prepared file. Length details include `limit`, `actual_characters` (scalars), `native_limit_utf16`, `actual_utf16_units`, `guidance`. |
+| `MARKUP_INVALID` | Fix or escape the markup at the zero-based Unicode scalar `position` in `details`, or use `"format":"plain"` for literal text. |
 | `REQUEST_INVALID` | Correct the named argument. For registration, use a valid host title or a task/project label and supply a short workspace name for a new session. Neither field may begin with an absolute or home path after leading whitespace, opening brackets, quotes or backticks. |
 | `FILE_UNAVAILABLE`, `FILE_TOO_LARGE` | Check approved local root, regular file, confinement and size. Size details contain `limit_bytes`, `actual_bytes`. |
 | `ATTACHMENT_UNAVAILABLE`, `DOWNLOAD_UNAVAILABLE` | Missing/expired/foreign provenance or unavailable upstream file; no arbitrary-ID/URL fallback. Refresh an authorized source if it still exists. |
