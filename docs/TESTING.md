@@ -355,8 +355,8 @@ content follows specification §§5.4/14. The earlier version-1 cases passed in 
 complete C6 at the [composition baseline](#agent-experience-composition-validation).
 Version 6 adds assertions for compact instructions, tool and field descriptions, and full
 policy examples. The [interaction acceptance record](#interaction-rules-acceptance) records their
-execution at `e3c7fab`. Version 7 adds source-defined assertions that guidance names the
-configured start acknowledgment in each mode; they await their Runner FINALIZE receipts.
+execution at `e3c7fab`. Version 7 adds assertions that guidance names the configured start
+acknowledgment in each mode; the same record covers their execution at `51231f9`.
 Source inspection does not establish named-client, live Telegram, host concurrency or idle wake.
 
 ## Interaction rules acceptance
@@ -366,7 +366,9 @@ Source inspection does not establish named-client, live Telegram, host concurren
 | Executed synthetic composition baseline | The [accepted baseline](#agent-experience-composition-validation) ran the original daemon cases with ordinary MCP HTTP clients, an isolated synthetic Telegram peer and both protocol revisions. Its C6 and locked release results cover those baseline cases. |
 | Executed locked release builds | On the Rust source at `e3c7fab523fd2c485cb842e16ecec388438698f4`, the operator ran the two locked release builds after the integration commit. `cargo build --locked --release --bin telegram-mcp-relay` and `cargo build --locked --release --example resource_probe` both exited 0 outside Runner. They are not Runner C11/C12 receipts. |
 | Executed RELAY-001–007 integration | Run `1e2601a4-8210-41b3-a961-ab53a6d08e6e` reached DONE at revision 229 for `e3c7fab523fd2c485cb842e16ecec388438698f4`, with accepted FINALIZE at revision 201 and reviewer confirmation at revision 210 bound to finalized/reviewed fingerprint `d0232e890221`. The accepted FINALIZE covers C1–C3 for repository, whitespace and formatting and C4–C6 for Clippy, rustdoc and the full locked workspace suite through the Runner-trusted aliases. The suite exercises both MCP protocol revisions against the synthetic peer. The release commands have separate operator results above. |
-| Current synthetic coverage | The [daemon composition test](../src/app/tests/extended.rs) uses both protocol revisions without fetching guidance. It exercises display repair under the same identity, effect-free Markdown rejection and explicit plain recovery, formatted file approval, timeout and late inbox recovery, known-ID catch-up, stale-token rejection, one start acknowledgment per reply, token-free resource reads of started replies and explicit completion. [After-send wait cases](#after-send-wait-regressions) cover on-time file approval and recovery after post-send wait admission failure. The [ext4 accounting regression](#relay-001-download-reservation-accounting) models the extra allocation block deterministically. The C6 result above covers these cases with the threaded default at `e3c7fab`; the revised 👀 reaction expectations for the omitted-message start are source-defined until their FINALIZE receipts. |
+| Executed processing-start reaction revision | Run `f9f4a219-84e5-44d4-9abe-e042b3454d4e` reached DONE at public revision 383 with one implementation commit, `51231f929c4d5575b748470fe592dcf5fabb12a8`. Its successful FINALIZE at revision 339 and independent reviewer confirmation at revision 348 accepted the synthetic reaction-default, threaded-text and version 7 guidance cases. This is synthetic Runner evidence; no live Telegram trial belongs to this revision. |
+| Executed locked release builds at `51231f9` | After that commit, `cargo build --locked --release --bin telegram-mcp-relay` and `cargo build --locked --release --example resource_probe` both passed in the supervising shell. These separate shell builds are not Runner receipts or C11/C12 results. |
+| Current synthetic coverage | The [daemon composition test](../src/app/tests/extended.rs) uses both protocol revisions without fetching guidance. It exercises display repair under the same identity, effect-free Markdown rejection and explicit plain recovery, formatted file approval, timeout and late inbox recovery, known-ID catch-up, stale-token rejection, one start acknowledgment per reply, token-free resource reads of started replies and explicit completion. [After-send wait cases](#after-send-wait-regressions) cover on-time file approval and recovery after post-send wait admission failure. The [ext4 accounting regression](#relay-001-download-reservation-accounting) models the extra allocation block deterministically. The RELAY-001–007 C6 result covers these cases with the threaded default at `e3c7fab`. The processing-start reaction row covers the 👀 default and explicit or configured threaded text at `51231f9`. |
 | Pending operator HOST acceptance | Download through MCP on ext4 under conditions that reproduced the old allocation rejection. Transfer an incoming gigabyte-scale file through MCP with an authorized live local Bot API and record bytes and memory use. Use a real agent to verify formatting, an on-time reply, late recovery, file approval, and the start acknowledgment (reaction by default) before longer work finishes. This trial is not required for the processing-start reaction revision. The supervising operator owns these trials after DONE and workspace release. |
 
 The integration plan assigned C1–C3 and C11/C12 to Worker FINALIZE and C4–C6 to the
@@ -727,8 +729,9 @@ from confirmed delivery with a failed route transaction. The
 [interaction acceptance record](#interaction-rules-acceptance) records its execution. That case
 now selects `processing_start_ack = "message"` and reopens under the reaction default to
 prove schema-12 attempted and sent rows survive unchanged without redispatch.
-`processing_reacts_once_by_default_on_both_protocols` is source-defined until FINALIZE. It
-checks the exact `setMessageReaction` payload in a second allowlisted chat with history
+`processing_reacts_once_by_default_on_both_protocols` passed at `51231f9`, as the
+[interaction acceptance record](#interaction-rules-acceptance) records. It checks the exact
+`setMessageReaction` payload in a second allowlisted chat with history
 enabled, no added route or journal row, rejected and uncertain reactions without text fallback,
 a failed attempt confirmation, explicit threaded text in reaction mode, an in-flight competing
 start, redelivery, repeated, inactive and reconciled calls, restart and a removed chat
