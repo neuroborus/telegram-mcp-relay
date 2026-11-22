@@ -1015,10 +1015,11 @@ authorized same-host 44-byte cloud round trip under the original deployment cond
 `telegram_guidance({})` is a typed, read-only tool available without an application session.
 Version 4 added meaningful title and project label requirements and their recovery path.
 Version 5 describes strict Markdown, explicit plain mode and the compatible native entity
-path. The HOST observations below cover version 1.
+path. Version 6 integrates those rules with examples for reply intent, file approval,
+first-start acknowledgment and recovery. The HOST observations below cover version 1.
 Standard rmcp 3.8.0 `ServerConfig` instructions expose a compact policy before tools through
 legacy initialization and modern discovery.
-They fit 500 Unicode scalars and keep essential recommendations within the first 512 characters.
+They fit 500 Unicode scalars and 512 UTF-16 units.
 No enforced handshake, adapter, secret or local path is added.
 `services::guidance` projects only nonsecret effective capabilities, finite limits and a
 versioned self-contained policy. The handler adds its actual production tool names/descriptions
@@ -1039,16 +1040,17 @@ version-1 guidance source/HTTP proofs passed with complete C6. The separate
 [HOST trial](MEASUREMENTS.md#agent-experience-host-acceptance) read guidance version 1 through
 both protocols; a fresh Codex metadata probe listed eleven tools without a model turn.
 
-The extended composition fixture in `app::tests::extended` uses synthetic authenticated clients
-on both protocols against the actual daemon. It combines native document/wait delivery,
+The original composition fixture in `app::tests::extended` uses synthetic authenticated
+clients on both protocols against the actual daemon. It combines native document/wait delivery,
 ask/inbox/event contention, observational shared history, authorized own/shared downloads,
 shutdown cleanup and saved-fence recovery under changed history policy after restart. It reuses
 the complete independent expected catalog and preserves exact protocol envelope differences.
 Feature-local saturation, active-call and confinement proofs remain in the complete suite.
 Complete C6 and both locked release builds apply to the recorded baseline.
 See the [accepted validation record](TESTING.md#agent-experience-composition-validation).
-The current metadata cases await their Runner FINALIZE receipts. HOST, live-client,
-filesystem and performance outcomes have separate evidence.
+The current guidance-free interaction fixture requires its own Runner FINALIZE receipts.
+HOST, live-client, filesystem and performance outcomes have separate evidence. See the
+[interaction rules acceptance record](TESTING.md#interaction-rules-acceptance).
 
 ## Reply ingestion
 

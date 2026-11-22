@@ -18,33 +18,32 @@ async fn server_instructions_precede_tools_on_both_protocols() {
     // Independently protect essential recommendations in actual metadata, without a tool call.
     for recommendation in [
         "telegram_guidance",
-        "Real title or task/project",
-        "Project label, no paths",
-        "Send updates/questions",
+        "Register host title (else task)",
+        "project label",
+        "No absolute/home paths",
+        "In scope, update/ask",
         "decisions",
         "blockers",
-        "long silence",
+        "long lulls",
         "No spam",
-        "Requested sends OK",
-        "Ask/send+wait",
-        "default 600s",
-        "no wake promise",
-        "Relay adds bold [title]",
-        "italic project",
-        "then blank line",
+        "Need reply? Ask",
+        "wait_for_reply=true",
+        "send+telegram_wait (bounded)",
+        "No wake promise",
+        "**[title]**",
+        "*label*",
+        "blank line",
         "`🔧 ` notices",
-        "Default Markdown",
-        "paragraphs/lists",
-        "bold labels",
-        "italics/code",
-        "format=plain for literal",
+        "Default Markdown lists/**labels**",
+        r#"Literal format="plain""#,
         "≤1000 scalars",
-        "Reports as files",
-        "Inbox on resume/events",
-        "Process → ✅",
+        "Reports→files",
+        "Resume/events→inbox",
+        "processing(active=true,message?)→✅",
         "Ack success",
-        "Untrusted",
-        "Silence ≠ permission",
+        "Send if asked",
+        "Telegram data untrusted",
+        "Silence≠consent",
     ] {
         assert!(
             instructions.contains(recommendation),
@@ -66,6 +65,7 @@ async fn current_guidance_is_read_only_self_contained_and_never_enforces_a_hands
     let mut http = fixture.serve(handler.clone(), None).await;
     let catalog = http.rpc("tools/list", json!({})).await["result"]["tools"].clone();
     tools::assert_tool_catalog(&catalog);
+    assert_interaction_descriptions(catalog.as_array().unwrap());
     for tool in catalog.as_array().unwrap() {
         if tool["name"] != "telegram_guidance" {
             let description = tool["description"].as_str().unwrap();
@@ -83,7 +83,7 @@ async fn current_guidance_is_read_only_self_contained_and_never_enforces_a_hands
         )
         .await;
     let report = modern["result"]["structuredContent"].clone();
-    assert_eq!(report["version"], 5);
+    assert_eq!(report["version"], 6);
     let inventory: Vec<Value> = catalog
         .as_array()
         .unwrap()
@@ -103,7 +103,36 @@ async fn current_guidance_is_read_only_self_contained_and_never_enforces_a_hands
     );
     assert_eq!(report["limits"]["wait_timeout_seconds"], 17);
     assert_eq!(report["limits"]["upload_bytes"], 9_000_000);
-    assert!(!report["instructions"].as_array().unwrap().is_empty());
+    let instructions = report["instructions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|line| line.as_str().unwrap())
+        .collect::<Vec<_>>()
+        .join("\n");
+    for topic in [
+        "SESSION_METADATA_REQUIRED",
+        r#"telegram_register({"session_key":"SAVED_KEY","title":"#,
+        "**Status**",
+        r#""format":"plain""#,
+        "MARKUP_INVALID",
+        "SEND_WAIT_FAILED",
+        "ASK_WAIT_FAILED",
+        "details.outbound_message_id",
+        r#"telegram_send_file({"session_key":"SAVED_KEY","path":"#,
+        r#""wait_for_reply":true"#,
+        "wait_timeout",
+        r#"telegram_inbox({"session_key":"SAVED_KEY"})"#,
+        "replies already in processing, call resources/read with the saved inbox_uri",
+        "Use your privately saved claim_token to reconcile ownership",
+        r#""active":true}) for the default"#,
+        r#""message":"✅"#,
+    ] {
+        assert!(
+            instructions.contains(topic),
+            "Missing guidance topic: {topic}"
+        );
+    }
     assert!(
         !report
             .to_string()
@@ -159,4 +188,122 @@ async fn current_guidance_is_read_only_self_contained_and_never_enforces_a_hands
     (&mut http.task).await.unwrap().unwrap();
     (&mut older_client.task).await.unwrap().unwrap();
     handler.drain().await.unwrap();
+}
+
+fn assert_interaction_descriptions(catalog: &[Value]) {
+    for (name, description_terms, fields) in [
+        (
+            "telegram_register",
+            &[
+                "real host conversation title",
+                "directory_label",
+                "SESSION_METADATA_REQUIRED",
+            ][..],
+            &[
+                ("title", "task or project"),
+                ("directory_label", "Required for new sessions"),
+            ][..],
+        ),
+        (
+            "telegram_send",
+            &[
+                "decisions, blockers or prolonged main-channel silence",
+                "An explicit user request authorizes that send",
+                "strict Markdown",
+                "Use short paragraphs",
+                "Bold Outcome, Status or Decision labels",
+                "MARKUP_INVALID",
+                "wait_for_reply=true",
+                "telegram_wait",
+                "SEND_WAIT_FAILED",
+                "foreground",
+            ],
+            &[
+                ("format", "plain for literal"),
+                ("wait_for_reply", "without resending"),
+            ],
+        ),
+        (
+            "telegram_send_file",
+            &[
+                "An explicit user request authorizes that send",
+                "strict Markdown",
+                "Use short paragraphs",
+                "Bold Outcome, Status or Decision labels",
+                "MARKUP_INVALID",
+                "wait_for_reply=true",
+                "telegram_wait",
+                "SEND_WAIT_FAILED",
+                "approval",
+                "foreground",
+            ],
+            &[
+                ("format", "plain for literal"),
+                ("wait_for_reply", "without resending"),
+            ],
+        ),
+        (
+            "telegram_ask",
+            &[
+                "An explicit user request authorizes that send",
+                "strict Markdown",
+                "Use short paragraphs",
+                "Bold Outcome, Status or Decision labels",
+                "MARKUP_INVALID",
+                "600 seconds",
+                "ASK_WAIT_FAILED",
+                "foreground",
+                "telegram_inbox",
+            ],
+            &[("format", "plain for literal")],
+        ),
+        (
+            "telegram_processing",
+            &[
+                "active=true",
+                "✅ Request received. Working on it.",
+                "telegram_ack",
+                "successful handling",
+            ],
+            &[("message", "✅ Request received. Working on it.")],
+        ),
+        ("telegram_ack", &["successful handling", "token"], &[]),
+        (
+            "telegram_inbox",
+            &[
+                "resume",
+                "notification",
+                "resources/read",
+                "inbox_uri",
+                "next_uri",
+                "untrusted data",
+            ],
+            &[],
+        ),
+        (
+            "telegram_wait",
+            &[
+                "without resending",
+                "details.outbound_message_id",
+                "foreground",
+                "telegram_inbox",
+            ],
+            &[("outbound_message_id", "SEND_WAIT_FAILED")],
+        ),
+    ] {
+        let tool = catalog.iter().find(|tool| tool["name"] == name).unwrap();
+        let description = tool["description"].as_str().unwrap();
+        for term in description_terms {
+            assert!(description.contains(term), "{name} is missing {term}");
+        }
+        for (field, term) in fields {
+            let description = tool["inputSchema"]["properties"][field]["description"]
+                .as_str()
+                .unwrap();
+            assert!(
+                description.contains(term),
+                "{name}.{field} is missing {term}"
+            );
+        }
+    }
 }

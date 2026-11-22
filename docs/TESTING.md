@@ -147,7 +147,7 @@ RELAY-005 framing fixtures require the C1–C6 FINALIZE receipts described under
 
 `src/routes/guidance.rs` checks standard server instructions in actual legacy initialization
 and modern discovery before any guidance/tool call: matching policy, 500-scalar bound, essential
-recommendations within 512 characters, unchanged SQLite and zero Telegram requests.
+recommendations within 512 UTF-16 units, unchanged SQLite and zero Telegram requests.
 Domain cases protect bold brackets, separate italic directory, exactly one blank line before
 nonempty bodies, empty captions, cutoff ellipsis inside 50 whole graphemes and fitting-title
 round trips. `tests/registry.rs` reopens new ellipsis and old already-truncated labels without
@@ -304,9 +304,10 @@ metadata-inclusive reservation. The storage tests cover an allocation above the 
 exact logical quota with `max_total_bytes == max_file_bytes`, completed payload accounting,
 disk headroom including pending reservations, inode and file-count limits, and concurrency.
 Pure sizing cases cover gigabyte-scale values and overflow without creating large files.
-The new regression results are pending FINALIZE. After DONE and workspace release, the
-supervising operator owns pending HOST acceptance through an MCP attachment download on ext4
-under conditions that reproduce the old accounting failure.
+The [interaction acceptance record](#interaction-rules-acceptance) records the operator's
+synthetic diagnostics. The current C6 FINALIZE receipt remains pending. After DONE and
+workspace release, the supervising operator owns the MCP attachment download on ext4 under
+conditions that reproduced the old accounting failure.
 
 ### RELAY-002 local Bot API downloads
 
@@ -347,15 +348,33 @@ exact modern/legacy envelopes, unchanged SQLite bytes and zero Telegram effects.
 can still register without a handshake; later guidance discloses no new private session data.
 `services::guidance` tests nondefault lower limits, disabled features, database history opt-in
 and exclusion of synthetic private settings/paths/allowlist identities. Self-contained policy
-content is reviewed against specification §§5.4/14; the earlier version-1 cases passed in
-accepted complete C6. Current version-5 metadata and framing results require their own
-Runner FINALIZE receipts.
+content follows specification §§5.4/14. The earlier version-1 cases passed in accepted
+complete C6 at the [composition baseline](#agent-experience-composition-validation).
+Version 6 adds assertions for compact instructions, tool and field descriptions, and full
+policy examples. Current execution requires the current Runner FINALIZE receipts.
 Source inspection does not establish named-client, live Telegram, host concurrency or idle wake.
+
+## Interaction rules acceptance
+
+| Evidence | Status and scope |
+| --- | --- |
+| Executed synthetic composition baseline | The [accepted baseline](#agent-experience-composition-validation) ran the original daemon cases with ordinary MCP HTTP clients, an isolated synthetic Telegram peer and both protocol revisions. Its C6 and locked release results cover those baseline cases. |
+| Executed operator diagnostics | After the previous polishing run released the workspace, the operator reported passing repository, whitespace and formatting checks, Clippy, rustdoc, the full locked offline workspace suite and both locked release builds on the candidate as released at F1, based on `43078be`. Clippy, rustdoc and tests used the same isolated trusted profiles, with the full suite repeated. The suite includes both MCP revisions against the synthetic peer and the [ext4 accounting regression](#relay-001-download-reservation-accounting). Current FINALIZE receipts remain pending. |
+| Current synthetic coverage | The [daemon composition test](../src/app/tests/extended.rs) uses both protocol revisions without fetching guidance. It exercises display repair under the same identity, effect-free Markdown rejection and explicit plain recovery, formatted file approval, timeout and late inbox recovery, known-ID catch-up, stale-token rejection, one threaded start per reply, token-free resource reads of started replies and explicit completion. [After-send wait cases](#after-send-wait-regressions) cover on-time file approval and recovery after post-send wait admission failure. The [ext4 accounting regression](#relay-001-download-reservation-accounting) models the extra allocation block deterministically. Use current C6 FINALIZE receipts for execution of these source-defined cases and current C11/C12 receipts for the locked daemon and unchanged probe builds. |
+| Pending operator HOST acceptance | Download through MCP on ext4 under conditions that reproduced the old allocation rejection. Transfer an incoming gigabyte-scale file through MCP with an authorized live local Bot API and record bytes and memory use. Use a real agent to verify formatting, an on-time reply, late recovery, file approval, and visible acknowledgment before longer work finishes. The supervising operator owns these trials after DONE and workspace release. |
+
+The previous polishing run passed independent review before finalization stopped at F1.
+The public report identified no failing command or test.
+The current interaction integration uses C1–C3 and C11–C12 in Worker FINALIZE and
+C4–C6 through the selected Runner-trusted commands after Worker FINALIZE. The synthetic
+accounting case and the HOST ext4 download exercise different evidence boundaries. Whether an
+agent can wait in the background or wake on a notification depends on its host.
 
 ## Final mixed-protocol composition regressions
 
-`app::tests::extended` composes authenticated 2025-06-18 and 2026-07-28 clients with the real
-daemon, one poller, SQLite, outbound files, history, guidance and private downloads. Both clients
+The original `app::tests::extended` case composes authenticated 2025-06-18 and 2026-07-28
+clients with the real daemon, one poller, SQLite, outbound files, history, guidance and private
+downloads at the recorded cloud baseline. Both clients
 reuse the separately maintained complete expected catalog and full DTO assertions from
 `routes::tests::tools`; production registration is never used as its own expected inventory.
 Every tool result retains exact JSON-RPC/payload/content/error assertions, modern
@@ -374,9 +393,11 @@ Feature-local suites remain the owners of text/file-then-wait catch-up and no re
 saturated-wait control capacity and forged-header rejection (`routes::tests::wait`), active-call
 and idle/abandonment lifetimes (`routes::sessions::tests`), mixed question cancellation and
 single-claim recovery (`routes::tests::mixed`), and path/size/expiry boundaries in the attachment
-and storage suites. The new scenario combines these components without duplicating those
-boundary proofs. Complete unfiltered C6 and both locked daemon/resource-probe release builds
-(R1/C11 and R2/C12 in the global inventory) passed for the recorded composition baseline.
+and storage suites. The original composition scenario combines these components. Complete
+unfiltered C6 and both locked daemon/resource-probe release builds
+(R1/C11 and R2/C12 in the global inventory) passed for the original composition cases.
+Current interaction-rule cases and builds have their own
+[acceptance record](#interaction-rules-acceptance).
 Named-client/HOST, live API and wake outcomes remain separate; source inspection or no-run
 compilation alone would not establish execution. Historical benchmark evidence stays separate.
 
@@ -964,6 +985,7 @@ mark the unchanged product specification accepted or establish named-client/live
 | --- | --- |
 | Three concurrent sessions; same-title identity; normalized rename; old text/document Replies; multiple distinct ordered Replies (§§4.1–4.3, 16, 19) | [Daemon conversation](../src/app/tests/conversations.rs), `three_sessions_route_interleaved_old_text_and_document_replies_after_rename`; [registry tests](../tests/registry.rs) retain cross-chat message-ID collision and identity/restart proofs |
 | Meaningful titles, mandatory project labels and effect-free legacy recovery (§§4.1–4.2, 5, 16) | [MCP tools](../src/routes/tools.rs) define registration and recovery cases on both protocols without a guidance call. [Outbound domain tests](../src/domain/outbound/tests.rs) cover display-label normalization and valid framing |
+| Enforced interaction rules without a guidance handshake (§§5.4, 14–16) | The [interaction rules acceptance record](#interaction-rules-acceptance) identifies the guidance, mixed-protocol recovery cases, current execution receipts and separate operator trials |
 | Attachment-only document and photo-caption metadata; resource reads and inbox claims preserve original-session routing (§§6, 9, 16, 19) | The daemon conversation above; [ingress](../tests/ingress.rs) and [MCP inbox](../src/routes/inbox.rs) retain authorization, rollback, pagination and fencing boundaries |
 | Title graphemes, final scalar/native caption limits, structured rejection without splitting/truncation or effects (§§4.2, 9, 16, 19) | [Outbound domain tests](../src/domain/outbound/tests.rs), [MCP tools](../src/routes/tools.rs) and [ask tests](../src/routes/ask.rs) |
 | Streamed, confined, Reply-routable files without source copies/default outbound history (§§9, 12, 16, 19) | Daemon conversation checks actual multipart contents, routes and persisted files; [file tests](../src/services/files/tests.rs), [document tests](../src/services/outbound/documents.rs) and [upload tests](../src/clients/telegram/upload.rs) retain path-race, mutation and bounded-read proofs |

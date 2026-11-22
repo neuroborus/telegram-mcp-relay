@@ -206,6 +206,245 @@ async fn begin(
     (running, mock.next("getUpdates").await)
 }
 
+#[tokio::test]
+async fn clients_skip_guidance_and_recover_metadata_markup_and_late_approval() {
+    let mut fixture = Fixture::new().await;
+    let auth = configure(&mut fixture);
+    fixture.config.delivery.wait_timeout_seconds = 1;
+    let path = fixture.directory.join("exports/release.txt");
+    fs::write(&path, b"Synthetic release notes").unwrap();
+
+    let now = unix_millis().unwrap();
+    let saved = {
+        let mut db = fixture.database();
+        let session = db
+            .register_session(Some("release-review"), None, "Review", Some("relay"), now)
+            .unwrap();
+        let route = db.reserve_route(&session.session_key).unwrap();
+        db.persist_route(route, -101, 5, RouteKind::Text, now, now)
+            .unwrap();
+        session
+    };
+    // Model an older registration that has no project label.
+    rusqlite::Connection::open(&fixture.config.storage.path)
+        .unwrap()
+        .execute(
+            "UPDATE sessions SET directory_label = NULL WHERE session_key = ?1",
+            [&saved.session_key],
+        )
+        .unwrap();
+    let key = &saved.session_key;
+    let mut mock = Mock::new(&fixture.config).await;
+    let address = fixture.config.server.listen;
+    let (mut running, poll) = begin(&mut fixture, &mut mock, &auth).await;
+    let legacy = Client::legacy(address).await;
+    let modern = Client::modern(address);
+
+    for args in [
+        json!({"title":"Agent Session","directory_label":"relay"}),
+        json!({"title":"Review"}),
+    ] {
+        modern
+            .failure("telegram_register", args, "REQUEST_INVALID")
+            .await;
+    }
+    legacy
+        .failure(
+            "telegram_send",
+            json!({"session_key":key,"text":"Ready for review"}),
+            "SESSION_METADATA_REQUIRED",
+        )
+        .await;
+    let repaired = modern
+        .tool(
+            "telegram_register",
+            json!({"external_session_id":"release-review","title":"Release review","directory_label":"relay"}),
+        )
+        .await;
+    assert_eq!(
+        repaired,
+        json!({"session_key":key,"inbox_uri":saved.inbox_uri(),
+               "title":"Release review","directory_label":"relay"})
+    );
+    let resumed = legacy
+        .tool(
+            "telegram_register",
+            json!({"session_key":key,"title":"Release review"}),
+        )
+        .await;
+    assert_eq!(resumed, repaired);
+
+    let broken = "Check *";
+    legacy
+        .failure(
+            "telegram_send",
+            json!({"session_key":key,"text":broken}),
+            "MARKUP_INVALID",
+        )
+        .await;
+    assert_eq!(fixture.count("sessions"), 1);
+    assert_eq!(fixture.count("message_routes"), 1);
+    assert!(mock.requests.try_recv().is_err());
+
+    let (plain, ()) = tokio::join!(
+        legacy.tool(
+            "telegram_send",
+            json!({"session_key":key,"text":broken,"format":"plain"}),
+        ),
+        async {
+            let send = mock.next("sendMessage").await;
+            assert_eq!(
+                send.payload,
+                json!({"chat_id":-101,"text":"[Release review]\nrelay\n\nCheck *",
+                    "entities":[{"type":"bold","offset":0,"length":16},
+                                {"type":"italic","offset":17,"length":5}]})
+            );
+            send.respond(accepted(6));
+        },
+    );
+    assert_eq!(
+        plain,
+        json!({"telegram_chat_id":-101,"outbound_message_id":6})
+    );
+
+    let (approval, ()) = tokio::join!(
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            modern.tool(
+                "telegram_send_file",
+                json!({"session_key":key,"path":path,"caption":"**Decision**: Approve?",
+                       "wait_for_reply":true}),
+            ),
+        ),
+        async {
+            let upload = mock.next("sendDocument").await;
+            assert_eq!(
+                upload.part("caption"),
+                b"[Release review]\nrelay\n\nDecision: Approve?"
+            );
+            assert_eq!(upload.part("document"), b"Synthetic release notes");
+            assert_eq!(
+                serde_json::from_slice::<Value>(upload.part("caption_entities")).unwrap(),
+                json!([{"type":"bold","offset":0,"length":16},
+                       {"type":"italic","offset":17,"length":5},
+                       {"type":"bold","offset":24,"length":8}])
+            );
+            upload.respond(accepted(7));
+        },
+    );
+    let approval = approval.expect("File approval must return after the configured wait");
+    assert_eq!(
+        approval,
+        json!({"telegram_chat_id":-101,"outbound_message_id":7,"status":"wait_timeout"})
+    );
+    // Deliver approval only after the wait returns. The old route must still work too.
+    poll.respond(json!({"ok":true,"result":[
+        incoming(10, 7, Some("Approved")),
+        incoming(11, 5, Some("Reply to earlier send"))
+    ]}));
+    let poll = mock.next("getUpdates").await;
+    assert_eq!(poll.payload["offset"], 12);
+    let waited = modern
+        .tool(
+            "telegram_wait",
+            json!({"session_key":key,"outbound_message_id":5}),
+        )
+        .await;
+    assert_eq!(waited["status"], "reply_received");
+    assert_eq!(waited["reply"]["reply_to_bot_message_id"], 5);
+    let inbox = legacy
+        .tool("telegram_inbox", json!({"session_key":key}))
+        .await;
+    let [approval_reply] = inbox["replies"].as_array().unwrap().as_slice() else {
+        panic!("Expected the late approval to be the only eligible inbox claim");
+    };
+    assert_eq!(
+        approval_reply["reply_to_bot_message_id"],
+        approval["outbound_message_id"]
+    );
+    assert_eq!(approval_reply["text_or_caption"], "Approved");
+    legacy
+        .failure(
+            "telegram_processing",
+            json!({"session_key":key,"reply_id":approval_reply["reply_id"],
+                   "claim_token":approval_reply["claim_token"],"active":false,"message":"Invalid"}),
+            "REQUEST_INVALID",
+        )
+        .await;
+
+    for (client, reply, message, id) in [
+        (&modern, approval_reply, None, 8),
+        (&legacy, &waited["reply"], Some("Checking *literally*."), 9),
+    ] {
+        let token = &reply["claim_token"];
+        let handle = json!({"session_key":key,"reply_id":reply["reply_id"],"claim_token":token});
+        let mut start = handle.clone();
+        start["active"] = true.into();
+        if let Some(message) = message {
+            start["message"] = message.into();
+        }
+        let mut stale = start.clone();
+        stale["claim_token"] = "wrong-claim".into();
+        client
+            .failure("telegram_processing", stale, "CLAIM_INVALID")
+            .await;
+        assert!(mock.requests.try_recv().is_err());
+        let (started, ()) =
+            tokio::join!(client.tool("telegram_processing", start.clone()), async {
+                let send = mock.next("sendMessage").await;
+                let body = message.unwrap_or("✅ Request received. Working on it.");
+                assert_eq!(
+                    send.payload,
+                    json!({"chat_id":-101,
+                    "text":format!("[Release review]\nrelay\n\n{body}"),
+                    "entities":[{"type":"bold","offset":0,"length":16},
+                                {"type":"italic","offset":17,"length":5}],
+                    "reply_parameters":{"message_id":reply["telegram_message_id"],
+                                        "allow_sending_without_reply":true}})
+                );
+                send.respond(accepted(id));
+            },);
+        assert_eq!(started["start_acknowledgment"], "sent");
+        assert_eq!(started["outbound_message_id"], id);
+        assert_eq!(started["claim_token"], *token);
+        let claims = client
+            .tool("telegram_inbox", json!({"session_key":key}))
+            .await;
+        assert_eq!(claims, json!({"replies":[]}));
+        let snapshot = client.snapshot(&repaired).await;
+        let stored = snapshot["replies"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|stored| stored["reply_id"] == reply["reply_id"])
+            .expect("The inbox resource must show already-started replies");
+        assert_eq!(stored["state"], "processing");
+        assert!(stored.get("claim_token").is_none());
+        assert_eq!(
+            client.tool("telegram_processing", start).await["start_acknowledgment"],
+            "already_started",
+        );
+        let mut inactive = handle.clone();
+        inactive["active"] = false.into();
+        client.tool("telegram_processing", inactive).await;
+        assert_eq!(
+            client.tool("telegram_ack", handle).await["acknowledged"],
+            true
+        );
+    }
+    assert!(
+        modern.snapshot(&repaired).await["replies"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(fixture.count("acknowledgment_receipts"), 2);
+    assert!(mock.requests.try_recv().is_err());
+    running.stop.cancel();
+    (&mut running.task).await.unwrap().unwrap();
+    drop(poll);
+}
+
 fn recovery_state(fixture: &Fixture) -> Vec<String> {
     let sql = rusqlite::Connection::open(&fixture.config.storage.path).unwrap();
     let mut query = sql.prepare("SELECT json_array(reply_id, session_key, state, claim_token, claimed_at,

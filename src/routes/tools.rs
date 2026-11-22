@@ -685,7 +685,7 @@ pub(crate) fn assert_tool_catalog(catalog: &Value) {
         match tool["name"].as_str().unwrap() {
             "telegram_send" | "telegram_send_file" => {
                 assert_eq!(wait_flag["type"], "boolean");
-                assert_eq!(wait_flag["default"], false);
+                assert!(wait_flag.get("default").is_none());
                 assert_eq!(
                     tool["outputSchema"]["required"],
                     json!(["telegram_chat_id", "outbound_message_id"])
