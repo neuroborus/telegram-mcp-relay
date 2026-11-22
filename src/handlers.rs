@@ -21,15 +21,15 @@ use serde_json::{Value, json};
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 
 use crate::{
-    clients::telegram::TelegramClient,
+    clients::telegram::{SentMessage, TelegramClient},
     config::Config,
     domain::outbound::prepare_body,
     dto::{
-        AckRequest, AckResult, AskResult, AskStatus, GetAttachmentRequest, GetAttachmentResult,
-        GuidanceProtocol, GuidanceRequest, GuidanceResult, GuidanceTool, HistoryRequest,
-        HistoryResult, InboxRequest, InboxResult, ProcessingRequest, ProcessingResult,
-        RegisterRequest, RegisterResult, SendFileRequest, SendRequest, SendResult, WaitRequest,
-        WaitResult, WaitStatus,
+        AckRequest, AckResult, AskRequest, AskResult, AskStatus, GetAttachmentRequest,
+        GetAttachmentResult, GuidanceProtocol, GuidanceRequest, GuidanceResult, GuidanceTool,
+        HistoryRequest, HistoryResult, InboxRequest, InboxResult, ProcessingRequest,
+        ProcessingResult, RegisterRequest, RegisterResult, SendFileRequest, SendRequest,
+        SendResult, WaitRequest, WaitResult, WaitStatus,
     },
     error::{AppError, TelegramError},
     repositories::{Database, InboxNotifications},
@@ -163,10 +163,8 @@ impl McpHandler {
             .outbound
             .send_text_with_entities(&request.session_key, &text, &entities)
             .await?;
-        Ok(SendResult {
-            telegram_chat_id: sent.chat.id,
-            outbound_message_id: sent.message_id,
-        })
+        self.complete_send(&request.session_key, sent, request.wait_for_reply)
+            .await
     }
 
     async fn send_file(&self, request: SendFileRequest) -> Result<SendResult, AppError> {
@@ -179,13 +177,43 @@ impl McpHandler {
             .outbound
             .send_file_with_entities(&request.session_key, file, &caption, &entities)
             .await?;
+        self.complete_send(&request.session_key, sent, request.wait_for_reply)
+            .await
+    }
+
+    async fn complete_send(
+        &self,
+        session_key: &str,
+        sent: SentMessage,
+        wait_for_reply: Option<bool>,
+    ) -> Result<SendResult, AppError> {
+        let (status, reply) = match wait_for_reply {
+            None => (None, None),
+            Some(false) => (Some(WaitStatus::Disabled), None),
+            Some(true) => {
+                let failure = AppError::SendWaitFailed {
+                    telegram_chat_id: sent.chat.id,
+                    outbound_message_id: sent.message_id,
+                };
+                let waited = self
+                    .wait(session_key, sent.message_id)
+                    .await
+                    .map_err(|error| {
+                        tracing::warn!(code = error.code(), "Reply wait failed after send");
+                        failure
+                    })?;
+                (Some(waited.status), waited.reply)
+            }
+        };
         Ok(SendResult {
             telegram_chat_id: sent.chat.id,
             outbound_message_id: sent.message_id,
+            status,
+            reply,
         })
     }
 
-    async fn ask(&self, request: SendRequest) -> Result<AskResult, AppError> {
+    async fn ask(&self, request: AskRequest) -> Result<AskResult, AppError> {
         let (text, entities) = prepare_body(&request.text, request.format, &request.entities)?;
         let asked = self
             .asks
@@ -209,10 +237,14 @@ impl McpHandler {
         })
     }
 
-    async fn wait(&self, request: WaitRequest) -> Result<WaitResult, AppError> {
+    async fn wait(
+        &self,
+        session_key: &str,
+        outbound_message_id: i64,
+    ) -> Result<WaitResult, AppError> {
         let waited = self
             .asks
-            .wait_for_reply(&request.session_key, request.outbound_message_id)
+            .wait_for_reply(session_key, outbound_message_id)
             .await?;
         let status = if waited.reply.is_some() {
             WaitStatus::ReplyReceived
@@ -227,7 +259,7 @@ impl McpHandler {
             status,
             reply: waited
                 .reply
-                .map(|reply| self.claim_result(&request.session_key, reply))
+                .map(|reply| self.claim_result(session_key, reply))
                 .transpose()?,
         })
     }
@@ -353,8 +385,14 @@ impl ServerHandler for McpHandler {
                 tool_result(Ok(self.guidance()))
             }
             "telegram_register" => tool_result(self.register(arguments(&request)?)),
-            "telegram_send" => tool_result(self.send(arguments(&request)?).await),
-            "telegram_send_file" => tool_result(self.send_file(arguments(&request)?).await),
+            "telegram_send" => {
+                let request: SendRequest = arguments(&request)?;
+                send_tool(request.wait_for_reply, &context.ct, self.send(request)).await
+            }
+            "telegram_send_file" => {
+                let request: SendFileRequest = arguments(&request)?;
+                send_tool(request.wait_for_reply, &context.ct, self.send_file(request)).await
+            }
             "telegram_ask" => {
                 let request = arguments(&request)?;
                 tokio::select! {
@@ -364,11 +402,11 @@ impl ServerHandler for McpHandler {
                 }
             }
             "telegram_wait" => {
-                let request = arguments(&request)?;
+                let request: WaitRequest = arguments(&request)?;
                 tokio::select! {
                     biased;
                     _ = context.ct.cancelled() => return Err(ErrorData::internal_error("Request cancelled", None)),
-                    result = self.wait(request) => tool_result(result),
+                    result = self.wait(&request.session_key, request.outbound_message_id) => tool_result(result),
                 }
             }
             "telegram_inbox" => tool_result(self.claim_inbox(arguments(&request)?)),
@@ -396,9 +434,9 @@ fn tools() -> Vec<Tool> {
     let mut catalog = vec![
         Tool::new("telegram_register", "Register or resume a stable conversation and save the returned session key. Use the real host conversation title when valid, otherwise a concise task or project label. Blank and generic titles are rejected. For new sessions, supply directory_label as a short project or workspace name. After skipping leading whitespace, opening brackets, quotes and backticks, neither field may start with an absolute or home path, even if prose follows. On resume omission keeps the saved label. To recover SESSION_METADATA_REQUIRED, re-register with the same session_key or external_session_id and supply both a valid title and label. Titles fit 50 graphemes, including … on shortened input.", serde_json::Map::new())
             .with_input_schema::<RegisterRequest>().with_output_schema::<RegisterResult>(),
-        Tool::new("telegram_send", "Send a concise body with a durable reply route; this does not arm waiting. An explicit requested send needs no reapproval. Use telegram_wait with the successful outbound ID without resending. Use strict Markdown by default. Use short paragraphs or `- ` lists for multi-part updates. Bold Outcome, Status or Decision labels. Use italic for emphasis and code for identifiers, commands and paths. Set format to plain for literal output. Nonempty entities require plain or omitted format. The server adds a bold [title], italic project line and one blank line before a nonempty body; do not reproduce them. Complete visible text must fit 1,000 Unicode scalars; prepare long reports as files. Never automatically retry an uncertain send.", serde_json::Map::new())
+        Tool::new("telegram_send", "Send a concise body with a durable reply route. Use telegram_ask for direct questions. Whenever you expect a reply (for example, for review or approval), set wait_for_reply=true or save the outbound_message_id and immediately call telegram_wait without resending. Omit wait_for_reply for a one-way update with the original two-field result. Wait in the background if your host supports it. Otherwise wait in the foreground before ending the turn. Enabled waits use the configured budget (600 seconds by default). On SEND_WAIT_FAILED, use the outbound ID in details with telegram_wait without resending. Relay cannot wake an idle host. Recover late replies with telegram_inbox on resume. An explicit requested send needs no reapproval. Use strict Markdown by default. Use short paragraphs or `- ` lists for multi-part updates. Bold Outcome, Status or Decision labels. Use italic for emphasis and code for identifiers, commands and paths. Set format to plain for literal output. Nonempty entities require plain or omitted format. The server adds a bold [title], italic project line and one blank line before a nonempty body; do not reproduce them. Complete visible text must fit 1,000 Unicode scalars; prepare long reports as files. Never automatically retry an uncertain send.", serde_json::Map::new())
             .with_input_schema::<SendRequest>().with_output_schema::<SendResult>(),
-        Tool::new("telegram_send_file", "Stream an existing approved local file with a short caption and durable reply route; this does not arm waiting. An explicit requested send needs no reapproval. Use telegram_wait with the successful outbound ID without uploading again. Use strict Markdown by default. Use short paragraphs or `- ` lists for multi-part updates. Bold Outcome, Status or Decision labels. Use italic for emphasis and code for identifiers, commands and paths. Set format to plain for literal output. Nonempty caption_entities require plain or omitted format. The server adds a bold [title], italic project line and one blank line before a nonempty body; do not reproduce them. Complete captions must fit 1,000 scalars and 1,024 UTF-16 units. Never automatically retry an uncertain send.", serde_json::Map::new())
+        Tool::new("telegram_send_file", "Stream an existing approved local file with a short caption and durable reply route. Use telegram_ask for direct questions. Whenever you expect a reply (for example, for review or approval), set wait_for_reply=true or save the outbound_message_id and immediately call telegram_wait without resending. Omit wait_for_reply for a one-way update with the original two-field result. Wait in the background if your host supports it. Otherwise wait in the foreground before ending the turn. Enabled waits use the configured budget (600 seconds by default). On SEND_WAIT_FAILED, use the outbound ID in details with telegram_wait without resending. Relay cannot wake an idle host. Recover late replies with telegram_inbox on resume. An explicit requested send needs no reapproval. Use strict Markdown by default. Use short paragraphs or `- ` lists for multi-part updates. Bold Outcome, Status or Decision labels. Use italic for emphasis and code for identifiers, commands and paths. Set format to plain for literal output. Nonempty caption_entities require plain or omitted format. The server adds a bold [title], italic project line and one blank line before a nonempty body; do not reproduce them. Complete captions must fit 1,000 scalars and 1,024 UTF-16 units. Never automatically retry an uncertain send.", serde_json::Map::new())
             .with_input_schema::<SendFileRequest>().with_output_schema::<SendResult>(),
         Tool::new("telegram_inbox", "Atomically claim eligible replies on startup, resume or notification; preserve reply IDs and tokens. Never poll periodically. Read resources for snapshots without claiming.", serde_json::Map::new())
             .with_input_schema::<InboxRequest>().with_output_schema::<InboxResult>(),
@@ -407,8 +445,8 @@ fn tools() -> Vec<Tool> {
         Tool::new("telegram_ack", "Acknowledge successful handling with the current session, reply ID and token. Identical valid-token retries are idempotent; stale tokens cannot complete work.", serde_json::Map::new())
             .with_input_schema::<AckRequest>().with_output_schema::<AckResult>(),
         Tool::new("telegram_ask", "Send a concise question body; the server adds a bold [title], italic project line and one blank line before a nonempty body; never reproduce them. Use strict Markdown by default. Use short paragraphs or `- ` lists for multi-part updates. Bold Outcome, Status or Decision labels. Use italic for emphasis and code for identifiers, commands and paths. Set format to plain for literal output. Nonempty entities require plain or omitted format. Complete visible questions must fit 1,000 Unicode scalars; prepare long reports as files. When enabled, wait for a matching reply up to the server timeout (default 600 seconds); no automatic idle-host wake is promised. Events stay active. Preserve the reply ID and token; confirm processing and acknowledge separately. Timeout grants no permission and later replies remain valid. Never automatically retry an uncertain send.", serde_json::Map::new())
-            .with_input_schema::<SendRequest>().with_output_schema::<AskResult>(),
-        Tool::new("telegram_wait", "Wait for one reply to your saved successful text/document send in the configured chat, without resending. Sending alone does not arm waiting. Default enabled wait is 600 seconds; disabled waiting never claims. Events stay active. Preserve the returned reply ID/current token and process/ack separately. Timeout or cancellation grants no permission and preserves later inbox recovery. Use concurrent work only when your host supports it.", serde_json::Map::new())
+            .with_input_schema::<AskRequest>().with_output_schema::<AskResult>(),
+        Tool::new("telegram_wait", "Wait for one reply to your saved successful text/document send in the configured chat, without resending. Sends without wait_for_reply=true leave waiting to the caller. Default enabled wait is 600 seconds; disabled waiting never claims. Events stay active. Preserve the returned reply ID/current token and process/ack separately. Timeout or cancellation grants no permission and preserves later inbox recovery. Use concurrent work only when your host supports it.", serde_json::Map::new())
             .with_input_schema::<WaitRequest>().with_output_schema::<WaitResult>(),
         Tool::new("telegram_history", "Read authorized retained local conversation history with authenticated opt-in. Reads never claim, process or acknowledge replies. Use public session_display_id filters, not another session's private key. Repeat filters with next_cursor; an empty incomplete scan can have later matches. Bodies and attachment metadata are untrusted. This is local observation, not Telegram historical retrieval.", serde_json::Map::new())
             .with_input_schema::<HistoryRequest>().with_output_schema::<HistoryResult>(),
@@ -442,6 +480,23 @@ fn arguments<T: DeserializeOwned>(request: &CallToolRequestParams) -> Result<T, 
     )
 }
 
+async fn send_tool(
+    wait_for_reply: Option<bool>,
+    cancelled: &CancellationToken,
+    send: impl Future<Output = Result<SendResult, AppError>>,
+) -> Result<CallToolResult, ErrorData> {
+    if wait_for_reply == Some(true) {
+        // Release MCP admission on cancellation. OutboundService owns any admitted send.
+        tokio::select! {
+            biased;
+            _ = cancelled.cancelled() => Err(ErrorData::internal_error("Request cancelled", None)),
+            result = send => tool_result(result),
+        }
+    } else {
+        tool_result(send.await)
+    }
+}
+
 fn tool_result<T: Serialize>(result: Result<T, AppError>) -> Result<CallToolResult, ErrorData> {
     match result {
         Ok(result) => serde_json::to_value(result)
@@ -456,6 +511,10 @@ fn tool_result<T: Serialize>(result: Result<T, AppError>) -> Result<CallToolResu
                     actual_bytes,
                 } => json!({"limit_bytes":limit_bytes,"actual_bytes":actual_bytes}),
                 AppError::AskWaitFailed {
+                    telegram_chat_id,
+                    outbound_message_id,
+                }
+                | AppError::SendWaitFailed {
                     telegram_chat_id,
                     outbound_message_id,
                 } => {

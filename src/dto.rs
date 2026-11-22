@@ -124,6 +124,28 @@ pub struct RegisterResult {
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[schemars(crate = "rmcp::schemars")]
+pub struct AskRequest {
+    pub session_key: String,
+    /// Use short paragraphs or `- ` lists for multi-part updates. Bold Outcome, Status or
+    /// Decision labels, use italic for emphasis and code for identifiers, commands and paths.
+    /// Supply only the body. The server adds the title, project line and blank line.
+    /// Complete visible framing and body must fit 1,000 Unicode scalars.
+    pub text: String,
+    /// Use plain for literal output. Omit for strict Markdown unless passing native entities,
+    /// which require plain or an omitted format.
+    #[serde(default, deserialize_with = "deserialize_outbound_format")]
+    #[schemars(with = "OutboundFormat")]
+    pub format: Option<OutboundFormat>,
+    /// Optional native entities, at most 100; UTF-16 offsets relative to text only.
+    /// Leave empty for Markdown. Exclude the server-owned header.
+    #[serde(default)]
+    #[schemars(length(max = 100))]
+    pub entities: Vec<MessageEntity>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(crate = "rmcp::schemars")]
 pub struct SendRequest {
     pub session_key: String,
     /// Use short paragraphs or `- ` lists for multi-part updates. Bold Outcome, Status or
@@ -141,6 +163,15 @@ pub struct SendRequest {
     #[serde(default)]
     #[schemars(length(max = 100))]
     pub entities: Vec<MessageEntity>,
+    /// Whenever you expect a reply (for example, for review or approval), set this to true
+    /// or save outbound_message_id and immediately call telegram_wait without resending.
+    /// Use telegram_ask for direct questions. Omit for the original one-way result.
+    /// Explicit false adds status: disabled. Enabled waits default to 600 seconds.
+    /// Use a background wait if supported. Otherwise wait in the foreground before ending the turn.
+    /// Relay cannot wake an idle host. Use telegram_inbox on resume to recover late replies.
+    #[serde(default, deserialize_with = "deserialize_wait_for_reply")]
+    #[schemars(with = "bool", extend("default" = false))]
+    pub wait_for_reply: Option<bool>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -166,6 +197,15 @@ pub struct SendFileRequest {
     #[serde(default)]
     #[schemars(length(max = 100))]
     pub caption_entities: Vec<MessageEntity>,
+    /// Whenever you expect a reply (for example, for review or approval), set this to true
+    /// or save outbound_message_id and immediately call telegram_wait without resending.
+    /// Use telegram_ask for direct questions. Omit for the original one-way result.
+    /// Explicit false adds status: disabled. Enabled waits default to 600 seconds.
+    /// Use a background wait if supported. Otherwise wait in the foreground before ending the turn.
+    /// Relay cannot wake an idle host. Use telegram_inbox on resume to recover late replies.
+    #[serde(default, deserialize_with = "deserialize_wait_for_reply")]
+    #[schemars(with = "bool", extend("default" = false))]
+    pub wait_for_reply: Option<bool>,
 }
 
 fn deserialize_outbound_format<'de, D>(deserializer: D) -> Result<Option<OutboundFormat>, D::Error>
@@ -175,12 +215,26 @@ where
     OutboundFormat::deserialize(deserializer).map(Some)
 }
 
+/// Distinguish omission from explicit false for the legacy response shape. Reject null.
+fn deserialize_wait_for_reply<'de, D>(deserializer: D) -> Result<Option<bool>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    bool::deserialize(deserializer).map(Some)
+}
+
 #[derive(Serialize, JsonSchema)]
 #[schemars(crate = "rmcp::schemars")]
 pub struct SendResult {
     pub telegram_chat_id: i64,
     /// Success confirms both Telegram acceptance and a committed reply route.
     pub outbound_message_id: i64,
+    /// Omitted when wait_for_reply is absent. Disabled means no claim was attempted.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<WaitStatus>,
+    /// Included only when a reply was claimed. Preserve its reply ID and token.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply: Option<ClaimedReplyResult>,
 }
 
 #[derive(Serialize, JsonSchema)]

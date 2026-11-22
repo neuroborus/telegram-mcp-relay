@@ -261,14 +261,15 @@ Sending text, questions or files and starting processing require valid stored me
 same identity. The existing transaction keeps routes, inbox replies and processing ownership
 with that identity.
 
-`telegram_send` accepts `session_key`/`text`; `telegram_send_file` accepts `session_key`, an
-absolute approved local `path` and an optional `caption` (empty by default). Send, ask and
-send_file use the shared domain formatter to resolve the optional `format` and native entity
-list. The services validate the rendered question or caption with its session framing before
-waiter admission or file opening. Delivery validates the final framing and limits against
-current metadata before send admission. Success returns `telegram_chat_id` and
-`outbound_message_id` only after the composite reply route commits. Empty captions retain the
-session header.
+`telegram_send` accepts `session_key` and `text`. `telegram_send_file` accepts `session_key`,
+an absolute approved local `path` and an optional `caption` (empty by default). Both accept
+an optional boolean `wait_for_reply`. `telegram_ask` has a separate request schema with the
+same text and formatting fields as `telegram_send` and no wait flag. All three use the shared
+domain formatter to resolve the optional `format` and native entity list. The services validate
+the rendered question or caption with its session framing before ask waiter admission or file
+opening. Delivery validates the final framing and limits against current metadata before send
+admission. Success includes `telegram_chat_id` and `outbound_message_id` after the composite
+reply route commits. Empty captions retain the session header.
 
 The locked rmcp 3.8.0 `Tool` input/output schema builders use typed Serde DTOs and the SDK's
 already-enabled schemars support; no new crate/features are needed. `tools/list` is stable,
@@ -458,9 +459,9 @@ and Telegram's separate at-most-24-hour update window remain limitations, not a 
 
 ## Bounded asks
 
-`telegram_ask` shares `telegram_send`'s `session_key`/`text` schema,
-validation and cancellation-safe bookkeeping. Server-configured waiting defaults to 600 seconds
-(1–86,400). Results include the committed `telegram_chat_id`/`outbound_message_id`, `status`
+`telegram_ask` shares outbound text validation and cancellation-safe bookkeeping with
+`telegram_send`. Server-configured waiting defaults to 600 seconds (1–86,400). Results
+include the committed `telegram_chat_id`/`outbound_message_id`, `status`
 and nullable `reply`: `sent` means waiting is disabled, `reply_received` includes one fenced
 claim, and `wait_timeout` means no claim was acquired before the deadline. An inbox consumer
 winning a claim leaves the ask waiting for another eligible reply to that question.
@@ -498,6 +499,18 @@ normal inbox leases. Both protocols expose the tool; modern events remain indepe
 accepted complete C6 covers the original synthetic wait cases. The separate
 [HOST trial](MEASUREMENTS.md#agent-experience-host-acceptance) completed a post-file wait with
 `wait_timeout` after 600.003 seconds, without resend; it establishes no automatic idle-host wake.
+
+With `wait_for_reply: true`, `telegram_send` and `telegram_send_file` use the same
+route-authorized wait after committing the send's reply route. With daemon waiting enabled,
+combined calls acquire waiter admission at that point, so saturation can fail the wait after
+confirmed delivery. MCP cancellation releases the combined call during delivery or waiting.
+The outbound service keeps ownership of admitted delivery and route bookkeeping. On
+`SEND_WAIT_FAILED`, use the saved `outbound_message_id` from `details` with `telegram_wait`
+without resending. The combined result includes the wait status and any claimed `reply`.
+Omission preserves the original two-field result. An explicit flag returns `disabled` if it
+is `false` or daemon waiting is disabled. In either case no waiter slot is acquired.
+The [synthetic cases](TESTING.md#after-send-wait-regressions) exercise both protocol paths in
+source. Current execution evidence comes from Runner FINALIZE receipts.
 
 ## Outbound formatting
 
@@ -1017,11 +1030,10 @@ Every interaction description requests guidance first per client conversation, i
 registration. Title and label validation applies whether the client reads guidance or skips it.
 The response distinguishes modern resource subscriptions from legacy tool/resource reads and
 server budgets from unknown client concurrency, deadlines and idle-wake behavior. It explains
-identity/native headers,
-complete scalar/caption limits, explicit prepared-file reports, ask/send-file-then-wait without
-resend, startup/notification inbox recovery, current fences and saved-pair reconciliation,
-scoped sends, proactive focused communication, shared observation and daemon-local files.
-The [consumer policy](AGENT_POLICY.md) matches accepted specification section 14. Run-frozen
+identity and native headers, complete scalar/caption limits, prepared-file reports, bounded
+asks and both waiting paths for sends, inbox recovery, current fences and saved-pair
+reconciliation, scoped sends, proactive communication, shared observation and daemon-local
+files. The [consumer policy](AGENT_POLICY.md) includes the current waiting contract in §6.2. Run-frozen
 contributor guidance stays unchanged until the authorized post-release follow-up. Earlier
 version-1 guidance source/HTTP proofs passed with complete C6. The separate
 [HOST trial](MEASUREMENTS.md#agent-experience-host-acceptance) read guidance version 1 through

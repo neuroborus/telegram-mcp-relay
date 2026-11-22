@@ -14,6 +14,8 @@ pub(crate) struct InboxNotifications {
     queue: usize,
     waiter_limit: usize,
     closed: CancellationToken,
+    #[cfg(test)]
+    pub(crate) waiter_admitted: Arc<tokio::sync::Notify>,
 }
 
 struct Interest {
@@ -48,6 +50,8 @@ impl InboxNotifications {
             queue: limits.subscription_queue as usize,
             waiter_limit: limits.waiters as usize,
             closed: CancellationToken::new(),
+            #[cfg(test)]
+            waiter_admitted: Arc::default(),
         })
     }
 
@@ -59,7 +63,7 @@ impl InboxNotifications {
         self.interest(keys, false)
     }
 
-    /// Reserve before sending. Waiters cannot consume resource-listener admission.
+    /// Reserve a waiter slot independently of resource-listener admission.
     pub(crate) fn waiter(&self, key: String) -> Result<InboxSubscription, AppError> {
         self.interest(vec![key], true)
     }
@@ -93,6 +97,10 @@ impl InboxNotifications {
             sender: sender.clone(),
             stopped: stopped.clone(),
         });
+        #[cfg(test)]
+        if waiter {
+            self.waiter_admitted.notify_one();
+        }
         Ok(InboxSubscription {
             changes,
             stopped,

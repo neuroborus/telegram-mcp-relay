@@ -101,6 +101,10 @@ pub enum AppError {
         telegram_chat_id: i64,
         outbound_message_id: i64,
     },
+    SendWaitFailed {
+        telegram_chat_id: i64,
+        outbound_message_id: i64,
+    },
     SendBookkeepingFailed,
     RandomUnavailable,
     StorageUnavailable,
@@ -151,6 +155,7 @@ impl AppError {
             Self::InvalidHistoryCursor => "HISTORY_CURSOR_INVALID",
             Self::HistoryResponseTooLarge => "HISTORY_RESPONSE_TOO_LARGE",
             Self::AskWaitFailed { .. } => "ASK_WAIT_FAILED",
+            Self::SendWaitFailed { .. } => "SEND_WAIT_FAILED",
             Self::SendBookkeepingFailed => "SEND_BOOKKEEPING_FAILED",
             Self::RandomUnavailable => "RANDOM_UNAVAILABLE",
             Self::StorageUnavailable => "STORAGE_UNAVAILABLE",
@@ -289,6 +294,11 @@ impl fmt::Display for AppError {
             Self::AskWaitFailed { .. } => write!(
                 f,
                 "{}: question sent and routed, but waiting failed; recover through the inbox and do not resend automatically",
+                self.code()
+            ),
+            Self::SendWaitFailed { .. } => write!(
+                f,
+                "{}: message sent and routed, but waiting failed. Call telegram_wait with the saved outbound_message_id. Do not resend. Use telegram_inbox on resume.",
                 self.code()
             ),
             Self::SendBookkeepingFailed => write!(

@@ -1,4 +1,4 @@
-//! After-send waits reuse claims, deadlines and cancellation without Telegram effects.
+//! After-send waits reuse claims, deadlines and cancellation without resending.
 
 use super::*;
 use crate::{
@@ -6,8 +6,10 @@ use crate::{
     services::{inbox::InboxService, ingress::IngressService, unix_millis},
 };
 use ask::Mock;
+use futures_util::FutureExt;
 use std::sync::Mutex;
 use subscriptions::{ingest, route};
+use tokio::sync::oneshot;
 use tools::{Telegram, protocol_tool, sent};
 
 async fn call(http: &Http, transport: Option<&str>, name: &str, args: Value) -> Value {
@@ -24,6 +26,20 @@ fn tool_data(response: Value) -> Value {
     assert!(response.get("error").is_none(), "{response}");
     assert_eq!(response["result"]["isError"], false, "{response}");
     response["result"]["structuredContent"].clone()
+}
+
+fn assert_tool_result(response: &Value, legacy: bool, data: &Value, is_error: bool) {
+    let mut expected = json!({
+        "structuredContent":data,"isError":is_error,
+        "content":[{"type":"text","text":data.to_string()}]
+    });
+    if !legacy {
+        expected["resultType"] = json!("complete");
+    }
+    assert_eq!(
+        response,
+        &json!({"jsonrpc":"2.0","id":response["id"],"result":expected})
+    );
 }
 
 fn session(database: &Arc<Mutex<Database>>) -> String {
@@ -51,7 +67,7 @@ async fn text_and_file_then_wait_catch_up_without_signals_or_resending_on_both_p
     let (http, endpoint) = fixture.serve_endpoint(state, None).await;
     let (transport, _) = http.initialize(LEGACY_VERSION).await;
     let call = async |transport: Option<&str>, name: &str, args: Value| {
-        tool_data(protocol_tool(&http, &endpoint, transport, name, args).await)
+        protocol_tool(&http, &endpoint, transport, name, args).await
     };
     let database = Arc::new(Mutex::new(
         Database::open(&fixture.config.storage, &fixture.config.limits).unwrap(),
@@ -59,31 +75,43 @@ async fn text_and_file_then_wait_catch_up_without_signals_or_resending_on_both_p
     let ingress = IngressService::new(&fixture.config).unwrap();
     let path = fixture.directory.join("report.txt");
     fs::write(&path, b"synthetic file").unwrap();
-    for transport in [None, Some(transport.as_str())] {
+    for (transport, first_id) in [(None, 7), (Some(transport.as_str()), 9)] {
         let registered = call(
             transport,
             "telegram_register",
             json!({"title":"Synthetic","directory_label":"p"}),
         )
         .await;
-        let key = &registered["session_key"];
-        for (name, args) in [
-            ("telegram_send", json!({"session_key":key,"text":"Status"})),
+        let key = &tool_data(registered)["session_key"];
+        for (name, args, parent) in [
+            (
+                "telegram_send",
+                json!({"session_key":key,"text":"Status"}),
+                first_id,
+            ),
             (
                 "telegram_send_file",
                 json!({"session_key":key,"path":path,"caption":"Report"}),
+                first_id + 1,
             ),
         ] {
-            let sent = call(transport, name, args).await;
-            let parent = sent["outbound_message_id"].as_i64().unwrap();
+            let response = call(transport, name, args).await;
+            assert_tool_result(
+                &response,
+                transport.is_some(),
+                &json!({"telegram_chat_id":-101,"outbound_message_id":parent}),
+                false,
+            );
             // This independent connection cannot signal the handler's RAM interests.
             ingest(&ingress, &database, parent + 100, parent).unwrap();
-            let reply = call(
-                transport,
-                "telegram_wait",
-                json!({"session_key":key,"outbound_message_id":parent}),
-            )
-            .await;
+            let reply = tool_data(
+                call(
+                    transport,
+                    "telegram_wait",
+                    json!({"session_key":key,"outbound_message_id":parent}),
+                )
+                .await,
+            );
             assert_eq!(reply["status"], "reply_received");
             assert_eq!(reply["reply"]["reply_to_bot_message_id"], parent);
             assert_eq!(reply["reply"]["state"], "claimed");
@@ -92,6 +120,202 @@ async fn text_and_file_then_wait_catch_up_without_signals_or_resending_on_both_p
         }
     }
     assert_eq!(telegram.request_count(), 4);
+}
+
+#[tokio::test]
+async fn opted_in_sends_claim_file_approval_and_leave_late_replies_for_resume() {
+    for legacy in [false, true] {
+        let mut fixture = Fixture::new();
+        let wait_budget = Duration::from_secs(fixture.config.delivery.wait_timeout_seconds);
+        let telegram = Telegram::new(&fixture.config, (7..9).map(sent).collect()).await;
+        let (database, handler) = telegram.shared(&fixture);
+        let key = session(&database);
+        let hub = database.lock().unwrap().inbox_notifications.clone();
+        let ingress = IngressService::new(&fixture.config).unwrap();
+        let path = fixture.directory.join("approval.txt");
+        let document = b"synthetic report";
+        fs::write(&path, document).unwrap();
+        let (mut http, endpoint) = fixture.serve_endpoint(handler, None).await;
+        let transport = if legacy {
+            Some(http.initialize(LEGACY_VERSION).await.0)
+        } else {
+            None
+        };
+        let call = async |name: &str, args: Value| {
+            protocol_tool(&http, &endpoint, transport.as_deref(), name, args).await
+        };
+
+        let request = |id: i64, name: &str, arguments: Value| {
+            let mut body = message("tools/call");
+            body["id"] = id.into();
+            body["params"]["name"] = name.into();
+            body["params"]["arguments"] = arguments;
+            if let Some(transport) = &transport {
+                body["params"].as_object_mut().unwrap().remove("_meta");
+                http.legacy_post(body, Some(transport))
+            } else {
+                http.post(body)
+            }
+        };
+        let read_response = async |pending: JoinHandle<reqwest::Result<reqwest::Response>>,
+                                   id: i64| {
+            // Start response deadlines after the reply or clock advance releases the waiter.
+            let response = tokio::time::timeout(Duration::from_secs(2), pending)
+                .await
+                .expect("Combined call must return after the wait")
+                .unwrap()
+                .unwrap();
+            let body = if legacy {
+                let body = legacy::sse_message(response).await;
+                endpoint
+                    .inner
+                    .sessions
+                    .wait_work_released(endpoint.inner.concurrency as u32)
+                    .await;
+                body
+            } else {
+                response.json::<Value>().await.unwrap()
+            };
+            assert_eq!(body["id"], id);
+            body
+        };
+        let wait_for_admission = async || {
+            tokio::time::timeout(Duration::from_secs(2), hub.waiter_admitted.notified())
+                .await
+                .expect("Combined call must arm its reply waiter");
+        };
+        let pending = tokio::spawn(
+            request(
+                200,
+                "telegram_send_file",
+                json!({"session_key":key,"path":path,"caption":"Please approve","wait_for_reply":true}),
+            )
+            .send(),
+        );
+        wait_for_admission().await;
+        telegram.assert_document_upload(0, document);
+        ingest(&ingress, &database, 10, 7).unwrap();
+        let approved = read_response(pending, 200).await;
+        let reply = &approved["result"]["structuredContent"]["reply"];
+        assert_tool_result(
+            &approved,
+            legacy,
+            &json!({
+                "telegram_chat_id":-101,"outbound_message_id":7,"status":"reply_received",
+                "reply":reply
+            }),
+            false,
+        );
+        assert_eq!(reply["reply_to_bot_message_id"], 7);
+        assert_eq!(reply["state"], "claimed");
+        assert_eq!(reply["processing_started_at"], Value::Null);
+        assert_eq!(reply["claim_token"].as_str().unwrap().len(), 64);
+
+        let pending = tokio::spawn(
+            request(
+                201,
+                "telegram_send",
+                json!({"session_key":key,"text":"Ready for review","wait_for_reply":true}),
+            )
+            .send(),
+        );
+        wait_for_admission().await;
+        tokio::time::pause();
+        tokio::time::advance(wait_budget).await;
+        tokio::time::resume();
+        let timed_out = read_response(pending, 201).await;
+        assert_tool_result(
+            &timed_out,
+            legacy,
+            &json!({"telegram_chat_id":-101,"outbound_message_id":8,"status":"wait_timeout"}),
+            false,
+        );
+        ingest(&ingress, &database, 11, 8).unwrap();
+        let resumed = tool_data(call("telegram_inbox", json!({"session_key":key})).await);
+        let late = resumed["replies"].as_array().unwrap();
+        assert_eq!(late.len(), 1);
+        assert_eq!(late[0]["reply_to_bot_message_id"], 8);
+        assert_eq!(late[0]["state"], "claimed");
+        assert_eq!(late[0]["claim_token"].as_str().unwrap().len(), 64);
+        assert_eq!(telegram.request_count(), 2);
+        http.finish().await;
+    }
+}
+
+#[tokio::test]
+async fn opted_in_sends_report_disabled_waits_and_recover_post_send_admission_failure() {
+    for enabled in [false, true] {
+        for legacy in [false, true] {
+            let mut fixture = Fixture::new();
+            fixture.config.delivery.wait_fallback_enabled = enabled;
+            fixture.config.limits.waiters = 1;
+            let telegram = Telegram::new(&fixture.config, (7..9).map(sent).collect()).await;
+            let (database, handler) = telegram.shared(&fixture);
+            let key = session(&database);
+            let hub = database.lock().unwrap().inbox_notifications.clone();
+            let occupied = hub.waiter(key.clone()).unwrap();
+            let (mut http, endpoint) = fixture.serve_endpoint(handler, None).await;
+            let transport = if legacy {
+                Some(http.initialize(LEGACY_VERSION).await.0)
+            } else {
+                None
+            };
+            let call = async |name: &str, args: Value| {
+                protocol_tool(&http, &endpoint, transport.as_deref(), name, args).await
+            };
+            let one_way = call(
+                "telegram_send",
+                json!({"session_key":key,"text":"One-way status","wait_for_reply":false}),
+            )
+            .await;
+            assert_tool_result(
+                &one_way,
+                legacy,
+                &json!({"telegram_chat_id":-101,"outbound_message_id":7,"status":"disabled"}),
+                false,
+            );
+            let response = call(
+                "telegram_send",
+                json!({"session_key":key,"text":"Please review","wait_for_reply":true}),
+            )
+            .await;
+            drop(occupied);
+            if enabled {
+                let error = &response["result"]["structuredContent"];
+                assert_tool_result(&response, legacy, error, true);
+                assert_eq!(error["code"], "SEND_WAIT_FAILED");
+                assert_eq!(
+                    error["details"],
+                    json!({"telegram_chat_id":-101,"outbound_message_id":8})
+                );
+                ingest(
+                    &IngressService::new(&fixture.config).unwrap(),
+                    &database,
+                    10,
+                    8,
+                )
+                .unwrap();
+                let recovered = tool_data(
+                    call(
+                        "telegram_wait",
+                        json!({"session_key":key,"outbound_message_id":error["details"]["outbound_message_id"]}),
+                    )
+                    .await,
+                );
+                assert_eq!(recovered["status"], "reply_received");
+                assert_eq!(recovered["reply"]["reply_to_bot_message_id"], 8);
+            } else {
+                assert_tool_result(
+                    &response,
+                    legacy,
+                    &json!({"telegram_chat_id":-101,"outbound_message_id":8,"status":"disabled"}),
+                    false,
+                );
+            }
+            assert_eq!(telegram.request_count(), 2);
+            http.finish().await;
+        }
+    }
 }
 
 #[tokio::test]
@@ -360,7 +584,7 @@ impl ServerHandler for Observed {
         request: rmcp::model::CallToolRequestParams,
         context: RequestContext<RoleServer>,
     ) -> Result<rmcp::model::CallToolResponse, ErrorData> {
-        let _ended = if request.name == "telegram_wait" {
+        let _ended = if matches!(request.name.as_ref(), "telegram_wait" | "telegram_send") {
             self.started.notify_one();
             Some(Ended(&self.ended))
         } else {
@@ -509,55 +733,146 @@ async fn saturated_waits_leave_processing_ack_and_inbox_capacity_on_both_protoco
 }
 
 #[tokio::test]
-async fn disconnected_wait_retires_its_interest_and_keeps_events_and_late_reply() {
+async fn legacy_cancelled_combined_upload_releases_work_before_delivery() {
     let mut fixture = Fixture::new();
-    fixture.config.limits.concurrent_requests = 4;
-    fixture.config.limits.waiters = 1;
-    let mut mock = Mock::new(&fixture.config).await;
-    let (database, state) = mock.shared(&fixture);
-    let key = session(&database);
-    route(&database, &key, 7);
-    let observed = Arc::new(Observed {
-        state,
-        started: tokio::sync::Notify::new(),
-        ended: tokio::sync::Notify::new(),
-    });
-    let http = fixture.serve(observed.clone(), None).await;
-    // The real resource stream uses the same shared handler alongside the wait.
-    let uri = format!("telegram-bridge://sessions/{key}/inbox");
-    let filter = json!({"resourceSubscriptions":[uri]});
-    let mut events = http.listen(filter.clone(), filter).await;
-    events.updated(&uri).await;
-    let mut body = message("tools/call");
-    body["params"]["name"] = "telegram_wait".into();
-    body["params"]["arguments"] = json!({"session_key":key,"outbound_message_id":7});
-    let payload = body.to_string();
-    let mut socket = TcpStream::connect(http.address).await.unwrap();
-    socket.write_all(format!("POST /mcp HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\nAccept: application/json, text/event-stream\r\nMcp-Method: tools/call\r\nMcp-Name: telegram_wait\r\nMCP-Protocol-Version: {VERSION}\r\nContent-Length: {}\r\n\r\n{payload}", http.address, payload.len()).as_bytes()).await.unwrap();
-    observed.started.notified().await;
-    drop(socket);
-    tokio::time::timeout(Duration::from_secs(2), observed.ended.notified())
-        .await
-        .unwrap();
-    drop(
-        database
-            .lock()
-            .unwrap()
-            .inbox_notifications
-            .waiter(key.clone())
-            .unwrap(),
-    );
-    ingest(
-        &IngressService::new(&fixture.config).unwrap(),
-        &database,
-        11,
-        7,
+    fixture.config.limits.concurrent_requests = 1;
+    let (upload_arrived, uploaded) = oneshot::channel();
+    let (release_upload, held) = oneshot::channel();
+    let telegram = Telegram::with_responses(
+        &fixture.config,
+        [async move {
+            upload_arrived.send(()).unwrap();
+            held.await.unwrap();
+            sent(7)
+        }],
     )
-    .unwrap();
-    events.updated(&uri).await;
-    assert_eq!(
-        snapshot(&database, &key).replies[0].state,
-        ReplyState::Pending
+    .await;
+    let (database, handler) = telegram.shared(&fixture);
+    let key = session(&database);
+    let hub = database.lock().unwrap().inbox_notifications.clone();
+    let path = fixture.directory.join("approval.txt");
+    let document = b"synthetic report";
+    fs::write(&path, document).unwrap();
+    let (mut http, endpoint) = fixture.serve_endpoint(handler, None).await;
+    let (transport, _) = http.initialize(LEGACY_VERSION).await;
+    let upload = http.legacy_post(
+        json!({"jsonrpc":"2.0","id":101,"method":"tools/call","params":{
+            "name":"telegram_send_file","arguments":{
+                "session_key":key,"path":path,"caption":"Please approve","wait_for_reply":true
+            }
+        }}),
+        Some(&transport),
     );
-    mock.assert_idle();
+    let response = tokio::time::timeout(Duration::from_secs(2), upload.send())
+        .await
+        .expect("Legacy request must open its SSE response during delivery")
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    tokio::time::timeout(Duration::from_secs(2), uploaded)
+        .await
+        .expect("Telegram must receive the document before cancellation")
+        .unwrap();
+    telegram.assert_document_upload(0, document);
+    assert_eq!(endpoint.inner.admission.available_permits(), 0);
+    assert_eq!(
+        status(http.legacy_post(
+            json!({"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":101}}),
+            Some(&transport),
+        ))
+        .await,
+        StatusCode::ACCEPTED
+    );
+    drop(response);
+    endpoint.inner.sessions.wait_work_released(1).await;
+
+    let changed = database.lock().unwrap().route_changes();
+    let committed = changed.notified();
+    tokio::pin!(committed);
+    committed.as_mut().enable();
+    release_upload.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(2), committed)
+        .await
+        .expect("Admitted upload must finish bookkeeping after cancellation");
+    let route = database
+        .lock()
+        .unwrap()
+        .route(-101, 7, unix_millis().unwrap())
+        .unwrap()
+        .unwrap();
+    assert_eq!(route.session_key, key);
+    assert_eq!(route.kind, RouteKind::Document);
+    assert!(hub.waiter_admitted.notified().now_or_never().is_none());
+    assert_eq!(telegram.request_count(), 1);
+    http.finish().await;
+}
+
+#[tokio::test]
+async fn disconnected_waits_retire_interest_and_keep_events_and_late_replies() {
+    for combined in [false, true] {
+        let mut fixture = Fixture::new();
+        fixture.config.limits.concurrent_requests = 4;
+        fixture.config.limits.waiters = 1;
+        let mut mock = Mock::new(&fixture.config).await;
+        let (database, state) = mock.shared(&fixture);
+        let key = session(&database);
+        let hub = database.lock().unwrap().inbox_notifications.clone();
+        let (name, args) = if combined {
+            (
+                "telegram_send",
+                json!({"session_key":key,"text":"Please review","wait_for_reply":true}),
+            )
+        } else {
+            route(&database, &key, 7);
+            (
+                "telegram_wait",
+                json!({"session_key":key,"outbound_message_id":7}),
+            )
+        };
+        let observed = Arc::new(Observed {
+            state,
+            started: tokio::sync::Notify::new(),
+            ended: tokio::sync::Notify::new(),
+        });
+        let http = fixture.serve(observed.clone(), None).await;
+        // The real resource stream uses the same shared handler alongside the wait.
+        let uri = format!("telegram-bridge://sessions/{key}/inbox");
+        let filter = json!({"resourceSubscriptions":[uri]});
+        let mut events = http.listen(filter.clone(), filter).await;
+        events.updated(&uri).await;
+        let mut body = message("tools/call");
+        body["params"]["name"] = name.into();
+        body["params"]["arguments"] = args;
+        let payload = body.to_string();
+        let mut socket = TcpStream::connect(http.address).await.unwrap();
+        socket.write_all(format!("POST /mcp HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\nAccept: application/json, text/event-stream\r\nMcp-Method: tools/call\r\nMcp-Name: {name}\r\nMCP-Protocol-Version: {VERSION}\r\nContent-Length: {}\r\n\r\n{payload}", http.address, payload.len()).as_bytes()).await.unwrap();
+        if combined {
+            tokio::time::timeout(Duration::from_secs(2), mock.accept(&database, 7))
+                .await
+                .unwrap();
+        }
+        tokio::time::timeout(Duration::from_secs(2), hub.waiter_admitted.notified())
+            .await
+            .expect("Waiter must hold admission before disconnect");
+        assert!(matches!(
+            hub.waiter(key.clone()),
+            Err(AppError::WaitCapacity)
+        ));
+        drop(socket);
+        tokio::time::timeout(Duration::from_secs(2), observed.ended.notified())
+            .await
+            .unwrap();
+        drop(hub.waiter(key.clone()).unwrap());
+        ingest(
+            &IngressService::new(&fixture.config).unwrap(),
+            &database,
+            11,
+            7,
+        )
+        .unwrap();
+        events.updated(&uri).await;
+        let page = snapshot(&database, &key);
+        assert_eq!(page.replies[0].state, ReplyState::Pending);
+        assert_eq!(page.replies[0].reply_to_bot_message_id, 7);
+        mock.assert_idle();
+    }
 }

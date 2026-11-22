@@ -529,7 +529,7 @@ Defaults:
 - `wait_timeout_seconds = 600` (validated configuration range **1–86,400 seconds**).
 - One shared bounded waiter admission budget for ask and after-send waits, separate from typing limits and subscriptions. Saturated waits must leave processing/ack and other control requests usable.
 
-When an agent needs an immediate answer, it may call `telegram_ask`:
+Use `telegram_ask` for a direct question.
 
 1. Reserve waiter admission before sending when waiting is enabled; send/persist outbound question route.
 2. If waiting is enabled, suspend **only this tool call** asynchronously until a matching Reply arrives or the wait deadline passes.
@@ -538,31 +538,48 @@ When an agent needs an immediate answer, it may call `telegram_ask`:
 5. A timeout returns `wait_timeout` **without terminating the agent, expiring the route, deleting a reply, or sending a Telegram timeout warning**.
 6. A later Reply remains routable until the underlying route's 30-day TTL expires.
 
-For ordinary reply-possible text/status/question or document workflows, the caller may instead:
+Follow this section's waiting policy for text and document sends. If you expect a reply,
+such as for review or approval, choose a combined call or a separate wait. The send-then-wait
+instructions in §14 describe the separate-wait option.
 
-1. Call immediate `telegram_send` or `telegram_send_file` once and privately retain the successful outbound identity. Sending alone **does not arm a wait**.
-2. Call `telegram_wait(session_key, outbound_message_id)` without resending. Resolve the stored route in the configured chat and verify current session ownership/authorization and retention before waiting. Guessing another agent's message ID must not grant access; reject unknown, foreign or expired targets with a safe structured error.
-3. Share ask's waiter admission, notifications and targeted durable claim/query machinery, rather than duplicating delivery. Register interest **before querying**, then recheck persisted replies so replies arriving before or during arming cannot be lost. Never consume an unrelated target's reply.
-4. Return a typed reply-received claim, timeout or disabled outcome. Disabled waiting returns immediately without sending or claiming; preserve the existing ask `sent` outcome when disabled. Events and inbox recovery remain available.
+- **Combined call.** Set `wait_for_reply: true` on `telegram_send` or `telegram_send_file`.
+  Relay sends once and saves the route after Telegram confirms delivery. If the daemon has
+  enabled waiting, Relay then arms the wait. A result of `reply_received` or `wait_timeout`
+  requires no separate wait. If setting up or running the wait fails after the route commits,
+  Relay returns `SEND_WAIT_FAILED` with the saved `telegram_chat_id` and
+  `outbound_message_id`. The caller uses that ID with `telegram_wait` without resending.
+- **Separate wait.** Send once, save the successful outbound ID and immediately call
+  `telegram_wait(session_key, outbound_message_id)` without resending. One-way status updates
+  need no wait. Omission of `wait_for_reply` defaults to one-way behavior and preserves the
+  original two-field send result. Explicit `false` returns `status: "disabled"`.
 
-Timeout/client cancellation retires only the in-memory wait interest/admission. It grants no
-permission, sends no timeout notice, never resends, and deletes neither durable route nor reply.
+Both paths resolve the retained route in the configured chat and verify its ownership and
+authorization before waiting. Unknown, foreign or expired targets fail safely. Both share ask's
+bounded waiter admission, notifications and targeted durable claim/query loop. Register
+interest **before querying** persisted replies so a reply arriving before or during arming
+remains eligible. Claims must match the target. The wait returns `reply_received`, with a
+fenced claim, `wait_timeout` or `disabled`. A send result with an explicit wait flag includes
+the status and includes `reply` only for a claim. Disabled waiting acquires no claim and
+leaves events and inbox recovery available. Ask keeps its existing `sent` disabled status.
+
+Timeout or client cancellation releases wait interest and admission. If a combined call is
+canceled during delivery, Relay releases the MCP request and lets any admitted send finish
+delivery and route bookkeeping. Timeout and cancellation grant no permission. They send no
+notice, trigger no resend and preserve durable routes and replies.
 A returned claim still needs current-token processing and explicit acknowledgment. Preserve
 modern subscriptions alongside inbox/ask/wait, bounded transport sessions, active long-call
 lifetimes, reconnect/restart recovery and graceful shutdown. Waiting is not a typing lease.
 
 This is not an **event OR wait** switch. Both run in parallel.
 
-**Host execution:** A foreground wait suspends the calling tool workflow. Only hosts actually
-supporting concurrent/background tool calls allow the caller to arm waiting and continue other
-authorized work concurrently. Document those workflows conditionally, not as universal host
-capabilities. The bridge cannot detect that an idle model ignored an event and then make it
-call a tool. A paused/unloaded host cannot be forced to run an LLM by a deadline or notification.
-Arm the bounded wait while the caller is executing; never prescribe periodic agent inbox polling.
+**Host execution:** Use a background wait when the host supports it. Otherwise wait in the
+foreground before ending the turn. The bridge cannot wake a paused, unloaded or idle host.
+Arm the bounded wait while the caller is executing. Use `telegram_inbox` on resume to recover
+late replies, without periodic polling.
 
 **Client timeout caveat:** Document client tool deadlines greater than the relevant send/upload
-budget **plus** the configured wait budget for asks or composed send/file-then-wait workflows;
-the standalone wait call needs its wait budget plus transport overhead. Many hosts default to
+budget **plus** the configured wait budget for asks or sends that include waiting.
+The standalone wait call needs its wait budget plus transport overhead. Many hosts default to
 less than 600 seconds. Explain increasing deadlines where supported; otherwise use immediate
 send/file, supported events and eventual inbox recovery. Do not use runtime adapters to evade
 host limitations or imply that cancellation means a send failed.

@@ -52,7 +52,22 @@ impl Telegram {
         serde_json::from_slice(&request.body).unwrap()
     }
 
+    pub(super) fn assert_document_upload(&self, index: usize, expected: &[u8]) {
+        let requests = self.requests.lock().unwrap();
+        let request = &requests[index];
+        assert_eq!(request.method, "/botSynthetic/sendDocument");
+        assert_eq!(request.part("document"), expected);
+    }
+
     pub(super) async fn new(config: &Config, responses: Vec<(u16, Value)>) -> Self {
+        Self::with_responses(config, responses.into_iter().map(std::future::ready)).await
+    }
+
+    pub(super) async fn with_responses(
+        config: &Config,
+        responses: impl IntoIterator<Item = impl Future<Output = (u16, Value)> + Send + 'static>,
+    ) -> Self {
+        let responses = Arc::new(Mutex::new(responses.into_iter().collect::<VecDeque<_>>()));
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let client = TelegramClient::for_test(
             config,
@@ -61,7 +76,6 @@ impl Telegram {
         .unwrap();
         let requests = Arc::new(Mutex::new(Vec::new()));
         let recorded = requests.clone();
-        let responses = Arc::new(Mutex::new(VecDeque::from(responses)));
         let task = tokio::spawn(async move {
             let mut connections = JoinSet::new();
             loop {
@@ -77,18 +91,21 @@ impl Telegram {
                                 async move {
                                     let (parts, body) = request.into_parts();
                                     let body = Limited::new(body, 32_768).collect().await.unwrap().to_bytes();
-                                    let mut requests = recorded.lock().unwrap();
-                                    assert!(requests.len() < 16);
-                                    requests.push(Recorded {
-                                        method: parts.uri.path().to_owned(),
-                                        content_type: if parts.method == http::Method::GET {
-                                            parts.headers.get(header::CONTENT_TYPE).map(|v| v.to_str().unwrap().to_owned()).unwrap_or_default()
-                                        } else {
-                                            parts.headers[header::CONTENT_TYPE].to_str().unwrap().to_owned()
-                                        },
-                                        body: body.to_vec(),
-                                    });
-                                    let (status, body) = responses.lock().unwrap().pop_front().unwrap();
+                                    let response = {
+                                        let mut requests = recorded.lock().unwrap();
+                                        assert!(requests.len() < 16);
+                                        requests.push(Recorded {
+                                            method: parts.uri.path().to_owned(),
+                                            content_type: if parts.method == http::Method::GET {
+                                                parts.headers.get(header::CONTENT_TYPE).map(|v| v.to_str().unwrap().to_owned()).unwrap_or_default()
+                                            } else {
+                                                parts.headers[header::CONTENT_TYPE].to_str().unwrap().to_owned()
+                                            },
+                                            body: body.to_vec(),
+                                        });
+                                        responses.lock().unwrap().pop_front().unwrap()
+                                    };
+                                    let (status, body) = response.await;
                                     Ok::<_, Infallible>(Response::builder().status(status)
                                         .body(Full::new(Bytes::from(body.to_string()))).unwrap())
                                 }
@@ -108,16 +125,17 @@ impl Telegram {
     }
 
     pub(super) fn handler(&self, fixture: &Fixture) -> Arc<McpHandler> {
-        Arc::new(
-            McpHandler::new(
-                Arc::new(Mutex::new(
-                    Database::open(&fixture.config.storage, &fixture.config.limits).unwrap(),
-                )),
-                self.client.clone(),
-                &fixture.config,
-            )
-            .unwrap(),
-        )
+        self.shared(fixture).1
+    }
+
+    pub(super) fn shared(&self, fixture: &Fixture) -> (Arc<Mutex<Database>>, Arc<McpHandler>) {
+        let database = Arc::new(Mutex::new(
+            Database::open(&fixture.config.storage, &fixture.config.limits).unwrap(),
+        ));
+        let handler = Arc::new(
+            McpHandler::new(database.clone(), self.client.clone(), &fixture.config).unwrap(),
+        );
+        (database, handler)
     }
 }
 
@@ -573,7 +591,7 @@ async fn invalid_outbound_formatting_has_no_delivery_or_waiter_effects() {
 
 pub(crate) fn assert_tool_catalog(catalog: &Value) {
     use crate::dto::{
-        AckRequest, AckResult, AskResult, GetAttachmentRequest, GetAttachmentResult,
+        AckRequest, AckResult, AskRequest, AskResult, GetAttachmentRequest, GetAttachmentResult,
         GuidanceRequest, GuidanceResult, HistoryRequest, HistoryResult, InboxRequest, InboxResult,
         ProcessingRequest, ProcessingResult, RegisterRequest, RegisterResult, SendFileRequest,
         SendRequest, SendResult, WaitRequest, WaitResult,
@@ -614,7 +632,7 @@ pub(crate) fn assert_tool_catalog(catalog: &Value) {
             json!(["session_key", "reply_id", "claim_token"]),
         ),
         (
-            schema::<SendRequest, AskResult>("telegram_ask"),
+            schema::<AskRequest, AskResult>("telegram_ask"),
             json!(["session_key", "text"]),
         ),
         (
@@ -663,6 +681,19 @@ pub(crate) fn assert_tool_catalog(catalog: &Value) {
             tool["outputSchema"],
             serde_json::to_value(expected.output_schema).unwrap()
         );
+        let wait_flag = &tool["inputSchema"]["properties"]["wait_for_reply"];
+        match tool["name"].as_str().unwrap() {
+            "telegram_send" | "telegram_send_file" => {
+                assert_eq!(wait_flag["type"], "boolean");
+                assert_eq!(wait_flag["default"], false);
+                assert_eq!(
+                    tool["outputSchema"]["required"],
+                    json!(["telegram_chat_id", "outbound_message_id"])
+                );
+            }
+            "telegram_ask" => assert!(wait_flag.is_null()),
+            _ => (),
+        }
     }
 }
 
@@ -1297,6 +1328,18 @@ async fn validation_and_protocol_failures_have_no_telegram_route_or_activity_eff
         (
             "telegram_send",
             json!({"session_key":key,"text":"private text","private-unknown":true}),
+        ),
+        (
+            "telegram_send",
+            json!({"session_key":key,"text":"private text","wait_for_reply":null}),
+        ),
+        (
+            "telegram_send_file",
+            json!({"session_key":key,"path":oversized,"wait_for_reply":"true"}),
+        ),
+        (
+            "telegram_ask",
+            json!({"session_key":key,"text":"private text","wait_for_reply":false}),
         ),
         ("telegram_register", json!({})),
         ("telegram_send_file", json!({"session_key":key,"path":42})),

@@ -201,8 +201,19 @@ late-reply restart recovery. The saturation fixture holds the Telegram response 
 processing start while independent processing inactivity and acknowledgment calls complete.
 Forged headers cannot route an ordinary send through reserved capacity. Existing ask/event
 arming-race cases exercise the shared wait loop. The accepted composition C6 covers the
-original cases. The current assertions require their Runner FINALIZE receipts.
-Live acceptance remains separate.
+original cases.
+
+The combined send-and-wait fixtures define both protocols' file approval, late inbox recovery,
+disabled waiting, post-send admission failure with recovery using the saved outbound ID, and
+the original one-way result when the flag is omitted. After waiter admission, the file approval
+fixture checks the `sendDocument` request and multipart document bytes, then injects the reply.
+The timeout fixture advances Tokio's clock after admission.
+The modern disconnect regression waits for admission before closing the socket, then checks
+that the slot is available and the late reply stays pending. The legacy cancellation regression
+holds Telegram's document response until MCP work admission is released, then checks that the
+route commits without arming a waiter or resending. Current execution evidence comes from the
+applicable Runner FINALIZE receipts. Real-agent acceptance remains operator-owned after DONE
+and workspace release.
 
 ## History storage regressions
 

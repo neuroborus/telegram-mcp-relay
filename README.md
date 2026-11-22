@@ -3,8 +3,9 @@
 One lightweight Rust daemon connects several agent conversations to one Telegram bot through
 a protected local MCP endpoint. Telegram Replies to text or documents return to the originating
 session. SQLite retains replies across disconnects. Notifications signal inbox changes without
-claiming replies; `telegram_inbox`, `telegram_ask` and `telegram_wait` share the fenced claim
-path. Opt-in shared history and lazy attachment downloads preserve private inbox ownership.
+claiming replies. `telegram_inbox`, `telegram_ask`, `telegram_wait` and sends with
+`wait_for_reply: true` share the fenced claim path. Opt-in shared history and lazy
+attachment downloads preserve private inbox ownership.
 
 Telegram is also a convenient way to exchange files with an agent while working through a
 remote bridge, an SSH connection or a tmux session. Send attachments to the agent and receive
@@ -67,8 +68,8 @@ argument; it is not part of the field name. Examples below show tool arguments, 
 | --- | --- | --- |
 | `telegram_guidance` | `{}` | `GuidanceResult`: current policy, inventory, capabilities and effective limits |
 | `telegram_register` | `title`, `external_session_id?`, `session_key?`, `directory_label?` (required for new sessions) | `{session_key, title, directory_label, inbox_uri}`; resume returns a null label when the saved label is missing or invalid |
-| `telegram_send` | `session_key`, `text`, `format?`, `entities?` | `SendResult`: `{telegram_chat_id, outbound_message_id}` after acceptance **and** route commit |
-| `telegram_send_file` | `session_key`, `path`, `caption?` (default empty), `format?`, `caption_entities?` | `SendResult`; absolute daemon-local path beneath an approved outbound root |
+| `telegram_send` | `session_key`, `text`, `format?`, `entities?`, `wait_for_reply?` | `SendResult` after acceptance **and** route commit |
+| `telegram_send_file` | `session_key`, `path`, `caption?` (default empty), `format?`, `caption_entities?`, `wait_for_reply?` | `SendResult`. Use an absolute daemon-local path beneath an approved outbound root. |
 | `telegram_ask` | `session_key`, `text`, `format?`, `entities?` | `{telegram_chat_id, outbound_message_id, status, reply}`; `status` is `sent` when waiting is disabled, otherwise `reply_received` or `wait_timeout`; `reply` is a nullable `ClaimedReplyResult` |
 | `telegram_wait` | `session_key`, `outbound_message_id` | Same fields as ask; `status` is `disabled`, `reply_received` or `wait_timeout`; validates the caller's retained configured-chat route even when disabled |
 | `telegram_inbox` | `session_key`, `limit?` (default 100, 1–100 within payload budget) | `{replies: [ClaimedReplyResult]}`; claims eligible pending or lease-expired unstarted replies |
@@ -77,9 +78,15 @@ argument; it is not part of the field name. Examples below show tool arguments, 
 | `telegram_history` | `session_key`, `chat_id?`, `session_display_id?`, `query?`, `cursor?`, `limit?` | `{messages: [HistoryMessage], next_cursor, scan_incomplete, coverage: HistoryCoverage}`; cursor is nullable; observational, authenticated opt-in |
 | `telegram_get_attachment` | `session_key`, `attachment_handle` | `{attachment: HistoryAttachment, download_id, path, file_identity: {device, inode}, size_bytes, expires_at}`; checked private download, with actual bytes and daemon-local identity |
 
-`ClaimedReplyResult` flattens all `Reply` fields alongside `claim_token`; it has no nested
-`reply` wrapper. `AskResult.reply` and `WaitResult.reply` contain that flattened object when
-a reply is claimed. Resource snapshots use `Reply` without tokens.
+`SendResult` always includes `telegram_chat_id` and `outbound_message_id`. Omit
+`wait_for_reply` for the original two-field response. Explicit `false` returns
+`status: "disabled"`. With `true`, Relay waits after saving the route and returns
+`status: "reply_received"` with `reply`, or `status: "wait_timeout"`. If the daemon
+has disabled waiting, `true` also returns `status: "disabled"` and no claim.
+
+`ClaimedReplyResult` flattens all `Reply` fields alongside `claim_token`. The `reply`
+field of `SendResult`, `AskResult` or `WaitResult` contains that flattened object
+when a reply is claimed. Resource snapshots use `Reply` without tokens.
 
 | Nested DTO | Complete fields and meaning |
 | --- | --- |
@@ -182,38 +189,41 @@ If send, ask, send_file or processing start returns `SESSION_METADATA_REQUIRED`,
 with the same `session_key` or `external_session_id` and supply both a valid title and project
 label. Re-registration updates future framing and preserves existing routes and inbox replies.
 
-For a focused question, `telegram_ask` sends once and waits after route commit:
+Use `telegram_ask` for a focused question. When waiting is enabled, it waits after
+saving the route.
 
 ```json
 {"session_key":"SESSION","text":"❓ Which release should I document?"}
 ```
 
-For status, use `telegram_send`; for a long report, explicitly prepare a file beneath an
-approved outbound root, then use `telegram_send_file`:
+Use `telegram_send` for one-way status updates. For a report, explicitly prepare a
+file beneath an approved outbound root and use `telegram_send_file`. Whenever you
+expect a reply to a text or file send, such as for review or approval, set
+`wait_for_reply: true` or arm a separate wait immediately after the send.
 
 ```json
-{"session_key":"SESSION","path":"/srv/agent-exports/report.md","caption":"📎 Prepared report"}
+{"session_key":"SESSION","path":"/srv/agent-exports/report.md","caption":"📎 Please approve this report","wait_for_reply":true}
 ```
 
-Configure that synthetic root explicitly before using it. Sending text/files alone does not
-arm waiting. For example, a successful send returns:
+Configure that synthetic root explicitly before using it. For a separate wait,
+send once with the flag omitted and save the successful result.
 
 ```json
 {"telegram_chat_id":101,"outbound_message_id":17}
 ```
 
-Save that outbound identity, then call `telegram_wait` without resending:
+Immediately call `telegram_wait` with that outbound ID.
 
 ```json
 {"session_key":"SESSION","outbound_message_id":17}
 ```
 
-Enabled waiting defaults to 600 seconds. `wait_timeout` grants no permission and does not
-acknowledge or remove later replies. Recover through the inbox. A foreground wait suspends its
-caller; other authorized work can proceed only where the host actually supports concurrent or
-background calls. Allow client deadlines above 15 seconds of text-send network time plus an
-ask's wait, or 600 seconds for an upload followed by the separate wait, with filesystem/SQLite/
-scheduling margin. Server admission budgets do not establish host support or automatic idle wake.
+Enabled waiting defaults to 600 seconds. Use a background wait if the host supports it.
+Otherwise wait in the foreground before ending the turn. Relay cannot wake an idle host.
+Run `telegram_inbox` on resume to recover late replies. `wait_timeout` grants no permission.
+For a combined call, allow client deadlines above the text-send (15 seconds) or upload
+(600 seconds) network budget plus the wait budget, with filesystem, SQLite and scheduling
+margin. For a separate `telegram_wait`, allow its wait budget plus transport overhead.
 
 ### Text and caption formatting
 
@@ -288,8 +298,8 @@ unroutable Reply from a saved Reply not confirmed as started within the default 
 They do not claim an agent is offline. Attempts are bounded, persisted and not replayed after
 uncertain delivery. No lifecycle heartbeat is required.
 
-When `telegram_inbox`, `telegram_ask` or `telegram_wait` returns a claim, save its stable reply ID
-and current token.
+Save the stable reply ID and current token from `telegram_inbox`, `telegram_ask`,
+`telegram_wait` or a send that returns a claim.
 Reconcile known effects before repeating work after a crash. Call `telegram_processing`
 with `active: true` when work begins. Relay attempts one threaded reply to the user's Telegram
 message. With `message` omitted, it sends “✅ Request received. Working on it.”
@@ -389,6 +399,7 @@ dispatch; an expired legacy transport needs fresh initialization. See [transport
 | `HISTORY_DISABLED`, `HISTORY_FORBIDDEN`, `HISTORY_CURSOR_INVALID`, `HISTORY_RESPONSE_TOO_LARGE` | Respect opt-in/current authorization; restart a query after cursor failure; operator review is needed if a record cannot fit the response budget. |
 | `TELEGRAM_UNAVAILABLE`, `TELEGRAM_TIMEOUT`, `TELEGRAM_RESPONSE_TOO_LARGE`, `TELEGRAM_RESPONSE_INVALID`, `TELEGRAM_REJECTED` | Safe transport/deadline/response/rejection categories; no upstream descriptions or token-bearing URLs. Rejection details contain `telegram_code`, nullable `retry_after_seconds`. A definitive rejection differs from uncertain delivery. |
 | `TELEGRAM_DELIVERY_UNCERTAIN`, `SEND_BOOKKEEPING_FAILED`, `ASK_WAIT_FAILED` | Delivery may have happened, acceptance lost route bookkeeping, or a committed ask failed while waiting. **Never automatically resend.** `ASK_WAIT_FAILED` details preserve `telegram_chat_id`, `outbound_message_id` for inbox/wait recovery. Lost responses/cancellation can also hide success. |
+| `SEND_WAIT_FAILED` | Telegram accepted the text or file and Relay saved the route. Call `telegram_wait` with the saved `outbound_message_id` in `details` using the same session. Do not resend. Use `telegram_inbox` on resume. |
 | `STORAGE_UNAVAILABLE`, `STORAGE_FAILED`, `STORAGE_CAPACITY`, `STORAGE_SCHEMA_UNSUPPORTED` | Operator checks protected storage, free space and compatible schema; preserve SQLite and recovery data. Capacity never authorizes eviction of valid replies. |
 | `CONFIG_READ_FAILED`, `CONFIG_INVALID`, `SECRET_UNAVAILABLE`, `RANDOM_UNAVAILABLE` | Operator corrects bounded configuration, protected secret sources or OS randomness; never publish private inputs. |
 | `TELEGRAM_POLL_ACTIVE`, `TELEGRAM_NOTICE_ACTIVE`, `STORAGE_CLEANUP_ACTIVE`, `MCP_UNAVAILABLE`, `SERVICE_STOPPED` | Service ownership/listener/supervision failure; operate one shared daemon and investigate safe diagnostics. Binary startup can also report `SHUTDOWN_SIGNAL_UNAVAILABLE`. |

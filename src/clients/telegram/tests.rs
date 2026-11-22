@@ -20,6 +20,7 @@ use tokio::{
     sync::mpsc,
     task::JoinHandle,
 };
+use tracing::{Dispatch, instrument::WithSubscriber, level_filters::LevelFilter};
 
 const SENT: &str = r#"{"ok":true,"result":{"message_id":7,"date":100,"chat":{"id":101}}}"#;
 
@@ -199,18 +200,30 @@ async fn production_bot_api_uses_only_its_configured_origin_and_redacts_the_toke
     config.telegram.local_bot_api_url = Some(origin.clone());
     config.telegram.local_bot_api_files_root = Some(upstream_root);
     let log_path = directory.0.join("diagnostics");
+    // With just one registered dispatcher, the first thread to hit a callsite can
+    // cache its own default's interest for every thread. Register an OFF dispatcher
+    // before enabling DEBUG so parallel tests use the combined interest instead.
+    let _off = Dispatch::new(
+        tracing_subscriber::fmt()
+            .with_max_level(LevelFilter::OFF)
+            .finish(),
+    );
     let subscriber = tracing_subscriber::fmt()
         .with_max_level(tracing::Level::DEBUG)
         .with_writer(Arc::new(File::create(&log_path).unwrap()))
         .finish();
-    let _guard = tracing::subscriber::set_default(subscriber);
-    let mut local = TelegramClient::new(&config, &token).unwrap();
-    assert_eq!(
-        local.file_endpoint.as_str(),
-        format!("{origin}/file/bot{TOKEN}/")
-    );
-    local.retry_delays = Some(Arc::default());
-    assert!(local.get_webhook_info().await.unwrap().url.is_empty());
+    let local = async {
+        let mut local = TelegramClient::new(&config, &token).unwrap();
+        assert_eq!(
+            local.file_endpoint.as_str(),
+            format!("{origin}/file/bot{TOKEN}/")
+        );
+        local.retry_delays = Some(Arc::default());
+        assert!(local.get_webhook_info().await.unwrap().url.is_empty());
+        local
+    }
+    .with_subscriber(subscriber)
+    .await;
     let expected = format!("/bot{TOKEN}/getWebhookInfo");
     let requests = mock.requests.lock().unwrap();
     assert_eq!(requests.len(), 2);

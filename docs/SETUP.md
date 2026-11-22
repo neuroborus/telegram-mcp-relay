@@ -296,21 +296,22 @@ filter. Read/claim on start, resume and notifications, without periodic agent po
 are read-only and never claim. Events are invalidations, not durable payload delivery: after a
 disconnect, restart or slow-listener closure, reconnect and read SQLite-backed state.
 
-`telegram_ask` waits by default up to 600 seconds **after send bookkeeping**. Configure the
-client's tool-call timeout above that wait plus send/network/bookkeeping time; file calls can
-take up to 600 seconds of network time. The server cannot set a host's timeout. Subscriptions
-must permit long-lived streams. Waits and events work together; disabling waits does not disable
+`telegram_ask` and text or file sends with `wait_for_reply: true` wait by default up to
+600 seconds **after send bookkeeping**. Configure the client's tool-call timeout above
+that wait plus send and bookkeeping time. File uploads have a 600-second network budget.
+The server cannot set a host's timeout. Subscriptions must permit long-lived streams.
+Waits and events work together; disabling waits does not disable
 events. Timeout, disconnect or cancellation grants no permission and never acknowledges a
 reply. Late Replies remain recoverable within retention. Notifications cannot promise to start
 an idle LLM turn; use bounded asks while running or recover at the next resume.
 
-For an already-successful text or file send, save its `outbound_message_id` and call
-`telegram_wait({session_key, outbound_message_id})` once to arm the default 600-second wait.
-Never send the text/file again to start waiting: immediate sends do not arm it. A standalone
-wait needs a client deadline above its configured wait plus transport overhead. The complete
-ask or send/file-then-wait workflow needs the send/upload budget plus wait and bookkeeping time.
-The wait result's `status` is `disabled`, `reply_received` or `wait_timeout`, with nullable
-`reply`; disabled waiting acquires no claim. Returned claims use normal processing and ack.
+For a separate wait after a successful text or file send, save its `outbound_message_id`
+and immediately call `telegram_wait({session_key, outbound_message_id})` without resending.
+On `SEND_WAIT_FAILED`, take the saved ID from the error's `details` and use the same recovery
+path. A standalone wait needs a client deadline above its configured budget plus transport
+overhead. The standalone result's `status` is `disabled`, `reply_received` or `wait_timeout`,
+with nullable `reply`. Combined sends include `reply` only when they return a claim. Disabled
+waiting acquires no claim. Returned claims use normal processing and ack.
 `WAIT_TARGET_INVALID` means the configured-chat route is absent, expired or belongs to another
 session; do not resend automatically. On a lost wait response, recover through the inbox and
 current-token/lease rules. A foreground wait suspends that call; only hosts supporting actual
