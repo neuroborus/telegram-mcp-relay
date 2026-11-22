@@ -332,7 +332,9 @@ async fn subscribed_ask_and_inbox_claims_reconcile_and_recover_missed_acknowledg
     let mut start = original.clone();
     start["active"] = true.into();
     let (started, ()) = tokio::join!(tool(address, "telegram_processing", start), async {
-        mock.next("sendMessage").await.respond(accepted(8));
+        mock.next("setMessageReaction")
+            .await
+            .respond(json!({"ok":true,"result":true}));
     });
     assert!(started["processing_started_at"].is_i64());
     let mut resume = original.clone();

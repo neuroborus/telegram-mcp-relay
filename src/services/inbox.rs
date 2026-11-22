@@ -5,17 +5,18 @@ use std::sync::Mutex;
 use super::{outbound::OutboundService, typing::TypingService, unix_millis};
 
 use crate::{
-    config::Delivery,
-    dto::{ProcessingRequest, ProcessingResult, StartAcknowledgment},
+    config::{Delivery, ProcessingStartAck},
+    dto::{ProcessingRequest, ProcessingResult, StartAcknowledgment, StartAcknowledgmentKind},
     error::{AppError, TelegramError},
     repositories::{
         ClaimedReply, Database, ProcessingAction, ProcessingStatus, ProcessingTransition,
-        ReconciledProcessing, ReplyTarget,
+        ReconciledProcessing, ReplyTarget, StartAckEffect,
     },
 };
 
 pub struct InboxService {
     claim_lease_ms: i64,
+    start_ack: ProcessingStartAck,
     typing: Option<TypingService>,
 }
 
@@ -26,6 +27,7 @@ impl InboxService {
         }
         Ok(Self {
             claim_lease_ms: settings.claim_lease_seconds as i64 * 1_000,
+            start_ack: settings.processing_start_ack,
             typing: None,
         })
     }
@@ -62,7 +64,10 @@ impl InboxService {
         now: i64,
     ) -> Result<ProcessingStatus, AppError> {
         let action = if active {
-            ProcessingAction::Start { message: None }
+            ProcessingAction::Start {
+                message: None,
+                default: self.start_ack,
+            }
         } else {
             ProcessingAction::Stop
         };
@@ -116,6 +121,7 @@ impl InboxService {
                     let action = if active {
                         ProcessingAction::Start {
                             message: message.as_deref(),
+                            default: self.start_ack,
                         }
                     } else {
                         ProcessingAction::Stop
@@ -148,27 +154,45 @@ impl InboxService {
                 }
             }
         };
-        let (start_acknowledgment, outbound_message_id, start_acknowledgment_error_code) =
+        // A consumed attempt never falls back to another effect; processing stays started.
+        let (start_acknowledgment, kind, outbound_message_id, start_acknowledgment_error_code) =
             if let Some(ack) = start_ack {
-                match outbound.send_start_ack(ack).await {
-                    Ok(confirmed) => (
+                let kind = match ack.effect {
+                    StartAckEffect::Text(_) => StartAcknowledgmentKind::Message,
+                    StartAckEffect::Reaction => StartAcknowledgmentKind::Reaction,
+                };
+                let sent = match kind {
+                    StartAcknowledgmentKind::Message => {
+                        outbound.send_start_ack(ack).await.map(|confirmed| {
+                            (Some(confirmed.message.message_id), confirmed.bookkeeping)
+                        })
+                    }
+                    StartAcknowledgmentKind::Reaction => outbound
+                        .react_start_ack(ack)
+                        .await
+                        .map(|bookkeeping| (None, bookkeeping)),
+                };
+                match sent {
+                    Ok((message_id, bookkeeping)) => (
                         StartAcknowledgment::Sent,
-                        Some(confirmed.message.message_id),
-                        confirmed.bookkeeping.err().map(|error| error.code()),
+                        Some(kind),
+                        message_id,
+                        bookkeeping.err().map(|error| error.code()),
                     ),
                     Err(AppError::Telegram(TelegramError::DeliveryUncertain)) => {
-                        (StartAcknowledgment::Uncertain, None, None)
+                        (StartAcknowledgment::Uncertain, Some(kind), None, None)
                     }
-                    Err(_) => (StartAcknowledgment::Failed, None, None),
+                    Err(_) => (StartAcknowledgment::Failed, Some(kind), None, None),
                 }
             } else {
-                (StartAcknowledgment::AlreadyStarted, None, None)
+                (StartAcknowledgment::AlreadyStarted, None, None, None)
             };
         Ok(ProcessingResult {
             reply_id: request.reply_id,
             claim_token: token,
             processing_started_at: status.processing_started_at,
             start_acknowledgment,
+            start_acknowledgment_kind: kind,
             outbound_message_id,
             start_acknowledgment_error_code,
         })

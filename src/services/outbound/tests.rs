@@ -260,7 +260,8 @@ impl Mock {
                             [
                                 "/botSynthetic/sendMessage",
                                 "/botSynthetic/sendDocument",
-                                "/botSynthetic/sendChatAction"
+                                "/botSynthetic/sendChatAction",
+                                "/botSynthetic/setMessageReaction"
                             ]
                             .contains(&method.as_str())
                         );

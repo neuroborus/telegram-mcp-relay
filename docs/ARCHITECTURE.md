@@ -34,8 +34,8 @@ explicit reconciliation and acknowledgment operations are available. MCP registr
 outbound tools, read-only inbox resources and inbox/processing/acknowledgment tools are
 available. Modern resource subscriptions deliver bounded post-commit inbox invalidations;
 bounded asks use the common claim path without disabling events. Confirmed processing now drives
-one shared, capped typing scheduler in the library and consumes one visible start
-acknowledgment attempt per reply.
+one shared, capped typing scheduler in the library and consumes one start acknowledgment
+attempt per reply: a 👀 reaction by default, or threaded text.
 Durable notice-attempt arbitration and one bounded factual-notice dispatcher are available
 in the library, including service-Reply loop suppression across restart and uncertain sends.
 Indexed bounded retention cleanup, incremental disk reclamation and a startup/daily library
@@ -312,20 +312,24 @@ The locked SDK also requires `Mcp-Name` to match `params.uri` on resource reads.
 pre-processing replies and never completes them. Preserve each reply ID and current token.
 `telegram_processing({session_key, reply_id, claim_token, active, message?})` records the first
 start when active and preserves ownership when inactive. The first start drives the
-[shared typing scheduler](#confirmed-processing-typing) and consumes one send attempt for a
-framed reply to the originating Telegram message. Relay validates optional literal `message`
-with the complete framing before changing state. Omission uses “✅ Request received. Working
-on it.” `message` with any other action returns `REQUEST_INVALID`.
+[shared typing scheduler](#confirmed-processing-typing) and consumes one acknowledgment attempt
+on the originating Telegram message. Relay validates optional literal `message` with the
+complete framing on every active call before changing state; a supplied message is always a
+framed threaded reply. Omission follows `delivery.processing_start_ack`: `reaction` (default)
+calls `setMessageReaction` with 👀, and `message` sends “✅ Request received. Working on it.”
+`message` with any other action returns `REQUEST_INVALID`.
 For explicit processing recovery, omit `active` and instead supply
 `reconcile_request_id`: save a fresh random 1–64-byte request ID with the current token before
 dispatch. Exactly one action is required. The result returns the reply ID, current token and
 original first start. Save the rotated token; retry a lost response with the identical saved
 request ID and prior token. Registration alone never rotates ownership. The result also
-reports `start_acknowledgment` as `sent`, `uncertain`, `failed` or `already_started`.
-Confirmed delivery returns `sent` with the outbound ID, and includes
-`start_acknowledgment_error_code: "SEND_BOOKKEEPING_FAILED"` if local bookkeeping fails.
-That code means the reply route may be missing. Reconciliation, inactivity and repeated starts
-return `already_started` without a send.
+reports `start_acknowledgment` as `sent`, `uncertain`, `failed` or `already_started`, with
+`start_acknowledgment_kind` (`message` or `reaction`) when the call consumed the attempt.
+Confirmed text returns `sent` with the outbound ID; a reaction has no outbound ID. Either
+includes `start_acknowledgment_error_code: "SEND_BOOKKEEPING_FAILED"` if local bookkeeping
+fails after Telegram confirmed the effect. For text, the reply route may be missing; for a
+reaction, only the attempt confirmation failed. A failed reaction never falls back to text.
+Reconciliation, inactivity and repeated starts return `already_started` without a send or kind.
 
 `telegram_ack({session_key, reply_id, claim_token})` removes the successfully handled payload
 through the existing bounded receipt transaction and returns `reply_id`/`acknowledged=true`.
@@ -600,7 +604,10 @@ to omission, preserving identities, routes, claims and notices.
 Version 9 rebuilds reply, completion, disposition and notice keys to allow update-ID reuse
 across sequences. It preserves every token/reconciliation field and attachment reference.
 Version 12 adds nullable start acknowledgment state and bounded literal text to replies.
-Existing processing replies retain their first start and leave both columns null.
+Existing processing replies retain their first start and leave both columns null. The text
+column holds the attempted payload: the literal text body before Relay adds the title and
+project header, or 👀 for a reaction. There is no kind column or migration; existing
+attempted and sent rows are unchanged.
 Before a schema upgrade, Relay disables foreign-key actions for SQLite's parent-table rebuild
 procedure. It checks all foreign keys before commit and restores enforcement after success or
 rollback. Capacity or DDL failures roll back all changes.
@@ -750,19 +757,25 @@ before sending, so an in-flight rename cannot relabel the historical message. Re
 are logical admission, not a guarantee against later disk or SQLite failure. Missing older
 outgoing bodies cannot be reconstructed.
 
-The first processing acknowledgment uses the same send permit, route and opt-in outgoing
-journal. It threads to the owned reply in its currently allowlisted chat using Telegram
-`reply_parameters`. The acknowledgment may still be delivered if the original Telegram
+A threaded text processing acknowledgment uses the same send permit, route and opt-in
+outgoing journal. It threads to the owned reply in its currently allowlisted chat using
+Telegram `reply_parameters`. The acknowledgment may still be delivered if the original Telegram
 message is unavailable. The journal records the intended parent, and replies to the
-acknowledgment use its ordinary text route. The acknowledgment leaves the reply's typing lease
-active. The initial tool call can take the usual text-send deadline plus local bookkeeping.
-See [Telegram ReplyParameters](https://core.telegram.org/bots/api#replyparameters).
+acknowledgment use its ordinary text route. The default reaction shares the same allowlist
+check, send permit, tracked task and deadline, but reserves no route or journal entry. It calls
+`setMessageReaction` once with one ordinary 👀 emoji on the owned reply's chat and message,
+never retried, then records `sent`. A decoded 4xx rejection is `failed`; a `false` result,
+malformed body, transport error, deadline or 5xx is `uncertain`. Either acknowledgment leaves
+the reply's typing lease active. The initial tool call can take the usual text-send deadline
+plus local bookkeeping. See [Telegram ReplyParameters](https://core.telegram.org/bots/api#replyparameters)
+and [setMessageReaction](https://core.telegram.org/bots/api#setmessagereaction).
 
 A consistent 4xx rejection remains definitive. A lost/invalid response remains
 `TELEGRAM_DELIVERY_UNCERTAIN`, with no fabricated route. A confirmed accepted send whose
 route transaction fails returns `SEND_BOOKKEEPING_FAILED`, explicitly warning that Telegram
-accepted it but reply routing could not be saved. For a start acknowledgment this code
-appears alongside the confirmed outbound ID in the successful processing result. Neither
+accepted it but reply routing could not be saved. For a text start acknowledgment this code
+appears alongside the confirmed outbound ID in the successful processing result; for a
+reaction it means the attempt confirmation failed. Neither
 outcome authorizes automatic resending. Failures from detached work log only a static error
 code. Ordinary outbound tool success requires a committed route. Reservations and task
 permits release on completion or failure.
@@ -1016,7 +1029,9 @@ authorized same-host 44-byte cloud round trip under the original deployment cond
 Version 4 added meaningful title and project label requirements and their recovery path.
 Version 5 describes strict Markdown, explicit plain mode and the compatible native entity
 path. Version 6 integrates those rules with examples for reply intent, file approval,
-first-start acknowledgment and recovery. The HOST observations below cover version 1.
+first-start acknowledgment and recovery. Version 7 names the configured start default (👀
+reaction or threaded text), the explicit text override, failure without fallback and
+`start_acknowledgment_kind`. The HOST observations below cover version 1.
 Standard rmcp 3.8.0 `ServerConfig` instructions expose a compact policy before tools through
 legacy initialization and modern discovery.
 They fit 500 Unicode scalars and 512 UTF-16 units.
@@ -1158,7 +1173,7 @@ are excluded from automatic recovery; reads/claims never acknowledge, delete or 
 The inbox service validates the session, unexpired reply and current token.
 Pre-processing claims must also have an unexpired lease. The first active call atomically
 records processing start, removes the claim lease, and records the acknowledgment as
-`attempted` with its literal body. Retained acknowledgment text counts against the metadata
+`attempted` with its literal body or 👀. Retained acknowledgment text counts against the metadata
 budget and is removed with the reply at completion or expiry. This retention applies even
 with shared history disabled. The inbox service updates RAM
 typing after the fenced transition and hands the consumed attempt to the outbound service.

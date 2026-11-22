@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::{
+    config::ProcessingStartAck,
     repositories::{ReplyState, ReplyTarget, RouteKind},
     services::{inbox::InboxService, ingress::IngressService, unix_millis},
 };
@@ -601,6 +602,8 @@ async fn saturated_waits_leave_processing_ack_and_inbox_capacity_on_both_protoco
         fixture.config.limits.concurrent_requests = 1;
         fixture.config.limits.waiters = 1;
         fixture.config.activity.typing_enabled = false;
+        // The held Telegram response is a threaded text start acknowledgment.
+        fixture.config.delivery.processing_start_ack = ProcessingStartAck::Message;
         let mut mock = Mock::new(&fixture.config).await;
         let (database, state) = mock.shared(&fixture);
         let key = session(&database);

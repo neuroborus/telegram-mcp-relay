@@ -409,16 +409,18 @@ async fn composition_cleans_before_polling_and_shares_send_ingress_and_typing() 
             let request = mock.receive().await;
             methods.push(request.method.clone());
             match request.method.as_str() {
-                "sendMessage" => request.respond(conversations::accepted(6)),
-                "sendChatAction" => request.respond(json!({"ok":true,"result":true})),
+                "sendChatAction" | "setMessageReaction" => {
+                    request.respond(json!({"ok":true,"result":true}));
+                }
                 _ => panic!("unexpected Telegram method"),
             }
         }
         methods.sort();
-        assert_eq!(methods, ["sendChatAction", "sendMessage"]);
+        assert_eq!(methods, ["sendChatAction", "setMessageReaction"]);
     };
     let (started, ()) = tokio::join!(tool(address, "telegram_processing", processing), telegram);
     assert_eq!(started["start_acknowledgment"], "sent");
+    assert_eq!(started["start_acknowledgment_kind"], "reaction");
     tool(address, "telegram_ack", handle).await;
     running.stop.cancel();
     (&mut running.task).await.unwrap().unwrap();

@@ -10,7 +10,8 @@ use super::{
     registry::{expiry, random_key, session_by, usage},
 };
 use crate::{
-    domain::outbound::{FormattedMessage, START_ACK_TEXT, format_text},
+    config::ProcessingStartAck,
+    domain::outbound::{FormattedMessage, START_ACK_REACTION, START_ACK_TEXT, format_text},
     error::AppError,
 };
 
@@ -23,7 +24,11 @@ pub struct ProcessingStatus {
 
 #[derive(Clone, Copy)]
 pub(crate) enum ProcessingAction<'a> {
-    Start { message: Option<&'a str> },
+    /// An explicit literal `message` is always threaded text; `default` applies otherwise.
+    Start {
+        message: Option<&'a str>,
+        default: ProcessingStartAck,
+    },
     Stop,
 }
 
@@ -36,7 +41,15 @@ pub(crate) struct PreparedStartAck {
     pub session: Session,
     pub reply_id: String,
     pub target: ReplyTarget,
-    pub text: FormattedMessage,
+    pub effect: StartAckEffect,
+}
+
+/// The single Telegram effect consumed by a first start.
+pub(crate) enum StartAckEffect {
+    /// Threaded text reply with an outbound message ID, route and history.
+    Text(FormattedMessage),
+    /// Emoji reaction on the received message; no outbound message exists.
+    Reaction,
 }
 
 impl fmt::Debug for ProcessingStatus {
@@ -86,19 +99,33 @@ impl Database {
         let mut owned = owned_reply(&transaction, session_key, reply_id, claim_token, now)?;
         let first_start = owned.status.processing_started_at.is_none();
         // Validate explicit text on every active call. The default is only used on first start.
-        let body = match action {
-            ProcessingAction::Start { message } => {
-                message.or(first_start.then_some(START_ACK_TEXT))
-            }
-            ProcessingAction::Stop => None,
-        };
-        let prepared = match (session.as_ref(), body) {
-            (Some(session), Some(body)) => {
-                Some((format_text(&session.title, directory, body)?, body))
+        let prepared = match (session.as_ref(), action) {
+            (
+                Some(session),
+                ProcessingAction::Start {
+                    message: Some(body),
+                    ..
+                },
+            ) => Some((
+                StartAckEffect::Text(format_text(&session.title, directory, body)?),
+                body,
+            )),
+            (Some(session), ProcessingAction::Start { default, .. }) if first_start => {
+                Some(match default {
+                    ProcessingStartAck::Message => (
+                        StartAckEffect::Text(format_text(
+                            &session.title,
+                            directory,
+                            START_ACK_TEXT,
+                        )?),
+                        START_ACK_TEXT,
+                    ),
+                    ProcessingStartAck::Reaction => (StartAckEffect::Reaction, START_ACK_REACTION),
+                })
             }
             _ => None,
         };
-        let start_ack = if let Some((session, (text, body))) = session.zip(prepared)
+        let start_ack = if let Some((session, (effect, body))) = session.zip(prepared)
             && first_start
         {
             if usage(&transaction)?.metadata_bytes
@@ -108,6 +135,8 @@ impl Database {
             {
                 return Err(AppError::StorageCapacity);
             }
+            // `start_ack_text` retains the attempted payload, the body or the reaction emoji.
+            // The kind is not stored: after this transaction it never drives later behavior.
             transaction.execute(
                 "UPDATE replies SET state = 'processing', processing_started_at = ?4,
                  claim_expires_at = NULL, start_ack_state = 'attempted', start_ack_text = ?5
@@ -122,7 +151,7 @@ impl Database {
                     chat_id: owned.status.telegram_chat_id,
                     message_id: owned.message_id,
                 },
-                text,
+                effect,
             })
         } else {
             None

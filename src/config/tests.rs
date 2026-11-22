@@ -51,6 +51,35 @@ fn defaults_and_example_are_safe_and_independent() {
 }
 
 #[test]
+fn processing_start_ack_defaults_to_reaction_and_rejects_unknown_modes() {
+    // Existing files without the key take the new quiet default.
+    assert_eq!(
+        parse("").unwrap().delivery.processing_start_ack,
+        ProcessingStartAck::Reaction
+    );
+    let example = Config::parse(
+        include_str!("../../config/relay.example.toml"),
+        Some(Path::new("/home/synthetic")),
+    )
+    .unwrap();
+    assert_eq!(
+        example.delivery.processing_start_ack,
+        ProcessingStartAck::Reaction
+    );
+    assert_eq!(
+        parse("[delivery]\nprocessing_start_ack='message'")
+            .unwrap()
+            .delivery
+            .processing_start_ack,
+        ProcessingStartAck::Message
+    );
+    let marker = "synthetic_marker_mode";
+    let error = parse(&format!("[delivery]\nprocessing_start_ack='{marker}'")).unwrap_err();
+    assert!(matches!(error, AppError::InvalidConfig(_)));
+    assert!(!format!("{error} {error:?}").contains(marker));
+}
+
+#[test]
 fn local_bot_api_accepts_explicit_loopback_and_keeps_cloud_defaults() {
     let root = "local_bot_api_files_root = '~/upstream'";
     let settings = |url: &str| format!("bot_api = 'local'\n{root}\nlocal_bot_api_url = '{url}'");

@@ -3,6 +3,7 @@
 use super::*;
 use crate::{
     clients::telegram::{TelegramClient, Update},
+    config::ProcessingStartAck,
     repositories::{IngestOutcome, RouteKind},
     services::{ingress::IngressService, unix_millis},
 };
@@ -129,6 +130,8 @@ async fn accepted_filters_fan_out_only_authorized_committed_inboxes() {
     let mut fixture = Fixture::new();
     fixture.config.limits.concurrent_requests = 8;
     fixture.config.activity.typing_enabled = false;
+    // The start acknowledgment commits a threaded route the mock waits for.
+    fixture.config.delivery.processing_start_ack = ProcessingStartAck::Message;
     let mut telegram = ask::Mock::new(&fixture.config).await;
     let (database, state) = telegram.shared(&fixture);
     let http = fixture.serve(state, None).await;

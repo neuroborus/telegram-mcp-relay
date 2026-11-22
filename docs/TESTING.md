@@ -355,7 +355,8 @@ content follows specification §§5.4/14. The earlier version-1 cases passed in 
 complete C6 at the [composition baseline](#agent-experience-composition-validation).
 Version 6 adds assertions for compact instructions, tool and field descriptions, and full
 policy examples. The [interaction acceptance record](#interaction-rules-acceptance) records their
-execution.
+execution at `e3c7fab`. Version 7 adds source-defined assertions that guidance names the
+configured start acknowledgment in each mode; they await their Runner FINALIZE receipts.
 Source inspection does not establish named-client, live Telegram, host concurrency or idle wake.
 
 ## Interaction rules acceptance
@@ -365,8 +366,8 @@ Source inspection does not establish named-client, live Telegram, host concurren
 | Executed synthetic composition baseline | The [accepted baseline](#agent-experience-composition-validation) ran the original daemon cases with ordinary MCP HTTP clients, an isolated synthetic Telegram peer and both protocol revisions. Its C6 and locked release results cover those baseline cases. |
 | Executed locked release builds | On the Rust source at `e3c7fab523fd2c485cb842e16ecec388438698f4`, the operator ran the two locked release builds after the integration commit. `cargo build --locked --release --bin telegram-mcp-relay` and `cargo build --locked --release --example resource_probe` both exited 0 outside Runner. They are not Runner C11/C12 receipts. |
 | Executed RELAY-001–007 integration | Run `1e2601a4-8210-41b3-a961-ab53a6d08e6e` reached DONE at revision 229 for `e3c7fab523fd2c485cb842e16ecec388438698f4`, with accepted FINALIZE at revision 201 and reviewer confirmation at revision 210 bound to finalized/reviewed fingerprint `d0232e890221`. The accepted FINALIZE covers C1–C3 for repository, whitespace and formatting and C4–C6 for Clippy, rustdoc and the full locked workspace suite through the Runner-trusted aliases. The suite exercises both MCP protocol revisions against the synthetic peer. The release commands have separate operator results above. |
-| Current synthetic coverage | The [daemon composition test](../src/app/tests/extended.rs) uses both protocol revisions without fetching guidance. It exercises display repair under the same identity, effect-free Markdown rejection and explicit plain recovery, formatted file approval, timeout and late inbox recovery, known-ID catch-up, stale-token rejection, one threaded start per reply, token-free resource reads of started replies and explicit completion. [After-send wait cases](#after-send-wait-regressions) cover on-time file approval and recovery after post-send wait admission failure. The [ext4 accounting regression](#relay-001-download-reservation-accounting) models the extra allocation block deterministically. The C6 result above includes these cases. |
-| Pending operator HOST acceptance | Download through MCP on ext4 under conditions that reproduced the old allocation rejection. Transfer an incoming gigabyte-scale file through MCP with an authorized live local Bot API and record bytes and memory use. Use a real agent to verify formatting, an on-time reply, late recovery, file approval, and visible acknowledgment before longer work finishes. The supervising operator owns these trials after DONE and workspace release. |
+| Current synthetic coverage | The [daemon composition test](../src/app/tests/extended.rs) uses both protocol revisions without fetching guidance. It exercises display repair under the same identity, effect-free Markdown rejection and explicit plain recovery, formatted file approval, timeout and late inbox recovery, known-ID catch-up, stale-token rejection, one start acknowledgment per reply, token-free resource reads of started replies and explicit completion. [After-send wait cases](#after-send-wait-regressions) cover on-time file approval and recovery after post-send wait admission failure. The [ext4 accounting regression](#relay-001-download-reservation-accounting) models the extra allocation block deterministically. The C6 result above covers these cases with the threaded default at `e3c7fab`; the revised 👀 reaction expectations for the omitted-message start are source-defined until their FINALIZE receipts. |
+| Pending operator HOST acceptance | Download through MCP on ext4 under conditions that reproduced the old allocation rejection. Transfer an incoming gigabyte-scale file through MCP with an authorized live local Bot API and record bytes and memory use. Use a real agent to verify formatting, an on-time reply, late recovery, file approval, and the start acknowledgment (reaction by default) before longer work finishes. This trial is not required for the processing-start reaction revision. The supervising operator owns these trials after DONE and workspace release. |
 
 The integration plan assigned C1–C3 and C11/C12 to Worker FINALIZE and C4–C6 to the
 selected Runner-trusted commands. The synthetic accounting case and the HOST ext4 download
@@ -723,7 +724,17 @@ The processing-start case exercises both protocols without a guidance call. It c
 redelivery after a confirmed start preserves the processing reply and that a repeated start
 leaves the acknowledgment send count at one. It also distinguishes ambiguous Telegram delivery
 from confirmed delivery with a failed route transaction. The
-[interaction acceptance record](#interaction-rules-acceptance) records its execution.
+[interaction acceptance record](#interaction-rules-acceptance) records its execution. That case
+now selects `processing_start_ack = "message"` and reopens under the reaction default to
+prove schema-12 attempted and sent rows survive unchanged without redispatch.
+`processing_reacts_once_by_default_on_both_protocols` is source-defined until FINALIZE. It
+checks the exact `setMessageReaction` payload in a second allowlisted chat with history
+enabled, no added route or journal row, rejected and uncertain reactions without text fallback,
+a failed attempt confirmation, explicit threaded text in reaction mode, an in-flight competing
+start, redelivery, repeated, inactive and reconciled calls, restart and a removed chat
+allowlist entry. A controlled-time [outbound typing case](../src/services/outbound/typing.rs)
+shows that the reaction leaves the typing lease refreshing. Client cases cover the single
+non-retried request and its error mapping.
 Invalid URIs, limits, listing cursors and tool arguments return safe errors without claiming.
 Fixtures honor TMPDIR and use private randomized directories; no live Telegram calls are made.
 These cases cover the read/claim/recovery portion of

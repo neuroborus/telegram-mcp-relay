@@ -1,7 +1,10 @@
 //! Actual MCP HTTP calls through the production handler and a separate fake Bot API.
 
 use super::*;
-use crate::{clients::telegram::TelegramClient, repositories::RouteKind, services::unix_millis};
+use crate::{
+    clients::telegram::TelegramClient, config::ProcessingStartAck, repositories::RouteKind,
+    services::unix_millis,
+};
 use std::{collections::VecDeque, sync::Mutex};
 
 struct Recorded {
@@ -46,9 +49,13 @@ impl Telegram {
     }
 
     pub(super) fn text_request(&self, index: usize) -> Value {
+        self.json_request(index, "sendMessage")
+    }
+
+    pub(super) fn json_request(&self, index: usize, method: &str) -> Value {
         let requests = self.requests.lock().unwrap();
         let request = &requests[index];
-        assert_eq!(request.method, "/botSynthetic/sendMessage");
+        assert_eq!(request.method, format!("/botSynthetic/{method}"));
         serde_json::from_slice(&request.body).unwrap()
     }
 
@@ -128,6 +135,25 @@ impl Telegram {
         self.shared(fixture).1
     }
 
+    /// Opted-in history requires an authenticated endpoint; pair with `Http::authorize`.
+    pub(super) fn history_handler(&self, fixture: &Fixture) -> Arc<McpHandler> {
+        let database = Database::open_with_history(
+            &fixture.config.storage,
+            &fixture.config.limits,
+            &fixture.config.history,
+            true,
+        )
+        .unwrap();
+        Arc::new(
+            McpHandler::new(
+                Arc::new(Mutex::new(database)),
+                self.client.clone(),
+                &fixture.config,
+            )
+            .unwrap(),
+        )
+    }
+
     pub(super) fn shared(&self, fixture: &Fixture) -> (Arc<Mutex<Database>>, Arc<McpHandler>) {
         let database = Arc::new(Mutex::new(
             Database::open(&fixture.config.storage, &fixture.config.limits).unwrap(),
@@ -146,6 +172,19 @@ impl Drop for Telegram {
 }
 
 impl Http {
+    pub(super) fn authorize(&mut self) {
+        let mut headers = http::HeaderMap::new();
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_str(&format!("Bearer {TOKEN}")).unwrap(),
+        );
+        self.client = reqwest::Client::builder()
+            .no_proxy()
+            .default_headers(headers)
+            .build()
+            .unwrap();
+    }
+
     pub(super) async fn rpc(&self, method: &str, params: Value) -> Value {
         let mut body = message(method);
         body["params"]
@@ -174,9 +213,24 @@ impl Http {
 }
 
 pub(super) fn sent(id: i64) -> (u16, Value) {
+    sent_in(-101, id)
+}
+
+pub(super) fn sent_in(chat: i64, id: i64) -> (u16, Value) {
     (
         200,
-        json!({"ok":true,"result":{"chat":{"id":-101},"message_id":id,"date":unix_millis().unwrap()/1000}}),
+        json!({"ok":true,"result":{"chat":{"id":chat},"message_id":id,"date":unix_millis().unwrap()/1000}}),
+    )
+}
+
+pub(super) fn reacted() -> (u16, Value) {
+    (200, json!({"ok":true,"result":true}))
+}
+
+pub(super) fn rejected() -> (u16, Value) {
+    (
+        400,
+        json!({"ok":false,"error_code":400,"description":"synthetic"}),
     )
 }
 
@@ -900,6 +954,8 @@ async fn legacy_session_metadata_gates_outbound_and_processing_until_recovery_on
         let mut fixture = Fixture::new();
         fixture.config.limits.waiters = 1;
         fixture.config.activity.typing_enabled = false;
+        // The start result asserts a threaded outbound message ID.
+        fixture.config.delivery.processing_start_ack = ProcessingStartAck::Message;
         let telegram = Telegram::new(&fixture.config, (6..=9).map(sent).collect()).await;
         let shared = Arc::new(Mutex::new(
             Database::open(&fixture.config.storage, &fixture.config.limits).unwrap(),
@@ -925,7 +981,14 @@ async fn legacy_session_metadata_gates_outbound_and_processing_until_recovery_on
         let session = &response["result"]["structuredContent"];
         let key = &session["session_key"];
         let key_str = key.as_str().unwrap();
-        inbox::seed(&fixture, session, 5, &[11, 12]);
+        inbox::seed(
+            &fixture,
+            &mut inbox::open(&fixture),
+            session,
+            -101,
+            5,
+            &[11, 12],
+        );
         let response = protocol_tool(
             &http,
             &endpoint,

@@ -422,6 +422,75 @@ async fn ambiguous_sends_are_never_repeated_or_redirected() {
 }
 
 #[tokio::test]
+async fn reactions_send_one_ordinary_emoji_and_never_retry_uncertainty() {
+    const REACTED: &str = r#"{"ok":true,"result":true}"#;
+    let mock = Mock::new(vec![reply(200, REACTED), reply(200, REACTED)], 1_024).await;
+    mock.client
+        .set_message_reaction(-101, 42, "👀")
+        .await
+        .unwrap();
+    assert_eq!(
+        mock.requests.lock().unwrap().as_slice(),
+        [(
+            "/bot123:synthetic/setMessageReaction".into(),
+            json!({"chat_id":-101,"message_id":42,"reaction":[{"type":"emoji","emoji":"👀"}]})
+        )]
+    );
+    let rejected = r#"{"ok":false,"error_code":400,"description":"synthetic"}"#;
+    let mock = Mock::new(vec![reply(400, rejected), reply(200, REACTED)], 1_024).await;
+    assert_eq!(
+        mock.client
+            .set_message_reaction(-101, 42, "👀")
+            .await
+            .unwrap_err(),
+        TelegramError::Rejected {
+            code: 400,
+            retry_after_seconds: None
+        }
+        .into()
+    );
+    assert_eq!(mock.count(), 1);
+    for step in [
+        reply(400, "not an envelope"),
+        reply(500, r#"{"ok":false,"error_code":500}"#),
+        reply(200, r#"{"ok":true,"result":false}"#),
+        reply(200, r#"{"ok":true,"result":null}"#),
+        Step::Disconnect,
+    ] {
+        let mock = Mock::new(vec![step, reply(200, REACTED)], 1_024).await;
+        assert_eq!(
+            mock.client
+                .set_message_reaction(-101, 42, "👀")
+                .await
+                .unwrap_err(),
+            TelegramError::DeliveryUncertain.into()
+        );
+        assert_eq!(mock.count(), 1);
+    }
+    let mut mock = Mock::new(
+        vec![
+            Step::Hang(b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n{".to_vec()),
+            reply(200, REACTED),
+        ],
+        1_024,
+    )
+    .await;
+    let client = mock.client.clone();
+    let mut call = tokio::spawn(async move { client.set_message_reaction(-101, 42, "👀").await });
+    tokio::select! {
+        seen = mock.seen.recv() => assert!(seen.is_some()),
+        result = &mut call => panic!("reaction ended before the mock response: {result:?}"),
+    }
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(16)).await;
+    assert_eq!(
+        call.await.unwrap().unwrap_err(),
+        TelegramError::DeliveryUncertain.into()
+    );
+    assert_eq!(mock.count(), 1);
+}
+
+#[tokio::test]
 async fn advertised_and_chunked_responses_are_bounded_before_decoding() {
     for step in [
         reply(200, &"x".repeat(129)),

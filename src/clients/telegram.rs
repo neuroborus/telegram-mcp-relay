@@ -195,6 +195,25 @@ impl TelegramClient {
         Ok(sent)
     }
 
+    /// Replace the bot's reaction on one received message; no message is created.
+    /// Omitting `is_big` keeps Telegram's ordinary animation. Never retried.
+    pub(crate) async fn set_message_reaction(
+        &self,
+        chat_id: i64,
+        message_id: i64,
+        emoji: &str,
+    ) -> Result<(), AppError> {
+        let payload = json!({"chat_id": chat_id, "message_id": message_id,
+            "reaction": [{"type": "emoji", "emoji": emoji}]});
+        let set: bool = self
+            .call("setMessageReaction", &payload, false, REQUEST_TIMEOUT)
+            .await?;
+        if !set {
+            return Err(TelegramError::DeliveryUncertain.into());
+        }
+        Ok(())
+    }
+
     pub async fn send_chat_action(&self, chat_id: i64) -> Result<(), AppError> {
         // The shared typing scheduler owns refreshes, cancellation and rate-limit cooldowns.
         // Internal retries could outlive a lease or send twice within one refresh interval.

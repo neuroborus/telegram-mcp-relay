@@ -1,11 +1,13 @@
 //! Real MCP requests prove read/claim separation and durable token fencing across reconnects.
 
 use super::*;
+use crate::config::ProcessingStartAck;
 use crate::{
     repositories::{IngestOutcome, RouteKind},
     services::{ingress::IngressService, unix_millis},
 };
-use tools::{Telegram, failure, protocol_tool, sent};
+use tokio::sync::oneshot;
+use tools::{Telegram, failure, protocol_tool, reacted, rejected, sent, sent_in};
 
 impl Http {
     pub(super) async fn snapshot(&self, uri: &str) -> Value {
@@ -26,24 +28,34 @@ impl Http {
     }
 }
 
-fn text_reply_update(parent: i64, id: i64) -> Value {
+fn text_reply_update(chat: i64, parent: i64, id: i64) -> Value {
     json!({"update_id":id,"message":{"message_id":id+100,"date":1,
-        "chat":{"id":-101},"from":{"id":7,"is_bot":false},
+        "chat":{"id":chat},"from":{"id":7,"is_bot":false},
         "reply_to_message":{"message_id":parent},"text":format!("reply {id}")}})
 }
 
-pub(super) fn seed(fixture: &Fixture, session: &Value, parent: i64, ids: &[i64]) {
-    let mut database = Database::open(&fixture.config.storage, &fixture.config.limits).unwrap();
+pub(super) fn open(fixture: &Fixture) -> Database {
+    Database::open(&fixture.config.storage, &fixture.config.limits).unwrap()
+}
+
+pub(super) fn seed(
+    fixture: &Fixture,
+    database: &mut Database,
+    session: &Value,
+    chat: i64,
+    parent: i64,
+    ids: &[i64],
+) {
     let now = unix_millis().unwrap();
     let reservation = database
         .reserve_route(session["session_key"].as_str().unwrap())
         .unwrap();
     database
-        .persist_route(reservation, -101, parent, RouteKind::Document, now, now)
+        .persist_route(reservation, chat, parent, RouteKind::Document, now, now)
         .unwrap();
     let ingress = IngressService::new(&fixture.config).unwrap();
     for (index, &id) in ids.iter().enumerate() {
-        let mut update = text_reply_update(parent, id);
+        let mut update = text_reply_update(chat, parent, id);
         if index == 1 {
             update["message"].as_object_mut().unwrap().remove("text");
             update["message"]["document"] =
@@ -51,7 +63,7 @@ pub(super) fn seed(fixture: &Fixture, session: &Value, parent: i64, ids: &[i64])
         }
         assert!(matches!(
             ingress
-                .ingest(&mut database, &serde_json::from_value(update).unwrap(), now)
+                .ingest(database, &serde_json::from_value(update).unwrap(), now)
                 .unwrap(),
             IngestOutcome::ReplyStored { .. }
         ));
@@ -76,8 +88,15 @@ async fn stable_templates_and_direct_paginated_snapshots_never_claim_or_enumerat
     let second = http
         .register(json!({"title":"Same","directory_label":"p"}))
         .await;
-    seed(&fixture, &first, 5, &[11, 12, 13]);
-    seed(&fixture, &second, 6, &[14]);
+    seed(
+        &fixture,
+        &mut open(&fixture),
+        &first,
+        -101,
+        5,
+        &[11, 12, 13],
+    );
+    seed(&fixture, &mut open(&fixture), &second, -101, 6, &[14]);
     let database = Database::open(&fixture.config.storage, &fixture.config.limits).unwrap();
     let before = database
         .session(first["session_key"].as_str().unwrap())
@@ -142,7 +161,7 @@ async fn stable_templates_and_direct_paginated_snapshots_never_claim_or_enumerat
 async fn competing_inbox_claims_reconcile_and_complete_durably_through_mcp() {
     let mut fixture = Fixture::new();
     fixture.config.activity.typing_enabled = false;
-    let telegram = Telegram::new(&fixture.config, vec![sent(31)]).await;
+    let telegram = Telegram::new(&fixture.config, vec![reacted()]).await;
     let state = telegram.handler(&fixture);
     let mut http = fixture.serve(state, None).await;
     let session = http
@@ -151,7 +170,7 @@ async fn competing_inbox_claims_reconcile_and_complete_durably_through_mcp() {
     let other = http
         .register(json!({"title":"Same","directory_label":"p"}))
         .await;
-    seed(&fixture, &session, 5, &[11, 12]);
+    seed(&fixture, &mut open(&fixture), &session, -101, 5, &[11, 12]);
     let key = &session["session_key"];
     let (a, b) = tokio::join!(
         http.success("telegram_inbox", json!({"session_key":key,"limit":1})),
@@ -167,12 +186,13 @@ async fn competing_inbox_claims_reconcile_and_complete_durably_through_mcp() {
     let started = http.success("telegram_processing", start.clone()).await;
     assert!(started["processing_started_at"].is_i64());
     assert_eq!(started["start_acknowledgment"], "sent");
+    assert_eq!(started["start_acknowledgment_kind"], "reaction");
     let mut existing = started;
     existing["start_acknowledgment"] = "already_started".into();
     existing
         .as_object_mut()
         .unwrap()
-        .remove("outbound_message_id");
+        .remove("start_acknowledgment_kind");
     assert_eq!(http.success("telegram_processing", start).await, existing);
     let mut stop = args.clone();
     stop["active"] = false.into();
@@ -248,6 +268,7 @@ async fn processing_sends_one_threaded_acknowledgment_without_guidance_on_both_p
     for legacy in [false, true] {
         let mut fixture = Fixture::new();
         fixture.config.activity.typing_enabled = false;
+        fixture.config.delivery.processing_start_ack = ProcessingStartAck::Message;
         let telegram = Telegram::new(
             &fixture.config,
             vec![
@@ -276,7 +297,14 @@ async fn processing_sends_one_threaded_acknowledgment_without_guidance_on_both_p
         let key = session["session_key"].as_str().unwrap();
         let parent = 5;
         let update_ids = [11, 12, 13, 14, 15];
-        seed(&fixture, &session, parent, &update_ids);
+        seed(
+            &fixture,
+            &mut open(&fixture),
+            &session,
+            -101,
+            parent,
+            &update_ids,
+        );
         let claimed = call("telegram_inbox", json!({"session_key":key})).await;
         assert_eq!(claimed["result"]["isError"], false);
         let sql = rusqlite::Connection::open(&fixture.config.storage.path).unwrap();
@@ -368,6 +396,7 @@ async fn processing_sends_one_threaded_acknowledgment_without_guidance_on_both_p
             assert_eq!(result["result"]["isError"], false, "{result}");
             let result = &result["result"]["structuredContent"];
             assert_eq!(result["start_acknowledgment"], outcome);
+            assert_eq!(result["start_acknowledgment_kind"], "message");
             assert!(result["processing_started_at"].is_i64());
             assert_eq!(
                 result.get("start_acknowledgment_error_code"),
@@ -403,7 +432,7 @@ async fn processing_sends_one_threaded_acknowledgment_without_guidance_on_both_p
                 let mut database =
                     Database::open(&fixture.config.storage, &fixture.config.limits).unwrap();
                 let update =
-                    serde_json::from_value(text_reply_update(parent, update_ids[0])).unwrap();
+                    serde_json::from_value(text_reply_update(-101, parent, update_ids[0])).unwrap();
                 assert!(matches!(
                     IngressService::new(&fixture.config)
                         .unwrap()
@@ -449,9 +478,42 @@ async fn processing_sends_one_threaded_acknowledgment_without_guidance_on_both_p
         drop(endpoint);
         drop(state);
 
+        // Schema-12 attempts survive a restart under the new reaction default unchanged.
+        let rows = || {
+            let mut statement = sql
+                .prepare(
+                    "SELECT reply_id, start_ack_state, start_ack_text, processing_started_at
+                     FROM replies WHERE start_ack_state IS NOT NULL ORDER BY reply_id",
+                )
+                .unwrap();
+            statement
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, i64>(3)?,
+                    ))
+                })
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        let before = rows();
+        assert_eq!(before.len(), 5);
+        assert!(before.iter().any(|row| row.1 == "attempted"));
+        assert!(before.iter().any(|row| row.1 == "sent"));
+        fixture.config.delivery.processing_start_ack = ProcessingStartAck::Reaction;
         let (mut http, endpoint) = fixture
             .serve_endpoint(telegram.handler(&fixture), None)
             .await;
+        assert_eq!(
+            Database::open(&fixture.config.storage, &fixture.config.limits)
+                .unwrap()
+                .schema_version()
+                .unwrap(),
+            12
+        );
         let transport = if legacy {
             Some(http.initialize(LEGACY_VERSION).await.0)
         } else {
@@ -473,7 +535,316 @@ async fn processing_sends_one_threaded_acknowledgment_without_guidance_on_both_p
             );
         }
         assert_eq!(telegram.request_count(), 5);
+        assert_eq!(rows(), before);
         http.finish().await;
+    }
+}
+
+/// Signal arrival when requested, then answer with the queued or held response.
+async fn respond(
+    arrived: Option<oneshot::Sender<()>>,
+    response: oneshot::Receiver<(u16, Value)>,
+) -> (u16, Value) {
+    if let Some(arrived) = arrived {
+        arrived.send(()).unwrap();
+    }
+    response.await.unwrap()
+}
+
+#[tokio::test]
+async fn processing_reacts_once_by_default_on_both_protocols() {
+    for legacy in [false, true] {
+        let mut fixture = Fixture::new();
+        // Only acknowledgment effects reach the mock Bot API.
+        fixture.config.activity.typing_enabled = false;
+        fixture.config.telegram.allowed_chat_ids = vec![-101, -202];
+        fixture.config.history.enabled = true;
+        let auth = fixture.auth();
+        let (arrived, held_arrived) = oneshot::channel();
+        let (release, held) = oneshot::channel();
+        let ready = [
+            reacted(),
+            rejected(),
+            (200, json!({"ok":true,"result":null})),
+            reacted(),
+            sent_in(-202, 41),
+        ]
+        .map(|response| {
+            let (queued, response_rx) = oneshot::channel();
+            queued.send(response).unwrap();
+            (None, response_rx)
+        });
+        let telegram = Telegram::with_responses(
+            &fixture.config,
+            ready
+                .into_iter()
+                .chain([(Some(arrived), held)])
+                .map(|(arrived, response)| respond(arrived, response)),
+        )
+        .await;
+        let state = telegram.history_handler(&fixture);
+        let (mut http, endpoint) = fixture.serve_endpoint(state.clone(), Some(&auth)).await;
+        http.authorize();
+        let transport = if legacy {
+            Some(http.initialize(LEGACY_VERSION).await.0)
+        } else {
+            None
+        };
+        let call = |name, args| protocol_tool(&http, &endpoint, transport.as_deref(), name, args);
+        let session = call(
+            "telegram_register",
+            json!({"title":"Relay","directory_label":"relay"}),
+        )
+        .await["result"]["structuredContent"]
+            .clone();
+        let other = call(
+            "telegram_register",
+            json!({"title":"Other","directory_label":"relay"}),
+        )
+        .await["result"]["structuredContent"]
+            .clone();
+        let key = session["session_key"].as_str().unwrap();
+        let parent = 5;
+        seed(
+            &fixture,
+            &mut open(&fixture),
+            &session,
+            -202,
+            parent,
+            &[11, 12, 13, 14, 15, 16, 17],
+        );
+        let claimed = call("telegram_inbox", json!({"session_key":key})).await;
+        let replies = claimed["result"]["structuredContent"]["replies"]
+            .as_array()
+            .unwrap()
+            .clone();
+        assert_eq!(replies.len(), 7);
+        let start = |index: usize| {
+            json!({"session_key":key,"reply_id":replies[index]["reply_id"],
+                "claim_token":replies[index]["claim_token"],"active":true})
+        };
+        let sql = rusqlite::Connection::open(&fixture.config.storage.path).unwrap();
+        let stored = |index: usize| {
+            sql.query_row(
+                "SELECT start_ack_state, start_ack_text, length(CAST(start_ack_text AS BLOB)),
+                 processing_started_at FROM replies WHERE reply_id = ?1",
+                [replies[index]["reply_id"].as_str().unwrap()],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, Option<i64>>(2)?,
+                        row.get::<_, Option<i64>>(3)?,
+                    ))
+                },
+            )
+            .unwrap()
+        };
+        let effects = || {
+            sql.query_row(
+                "SELECT (SELECT count(*) FROM message_routes), (SELECT count(*) FROM journal_records)",
+                [],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+            )
+            .unwrap()
+        };
+        let reaction = |index: usize| {
+            json!({"chat_id":-202,"message_id":replies[index]["telegram_message_id"],
+                "reaction":[{"type":"emoji","emoji":"👀"}]})
+        };
+
+        // Stale and foreign claims fail before any durable start or Telegram effect.
+        let mut stale = start(0);
+        stale["claim_token"] = "stale".into();
+        let mut foreign = start(0);
+        foreign["session_key"] = other["session_key"].clone();
+        for invalid in [stale, foreign] {
+            failure(
+                &call("telegram_processing", invalid).await["result"],
+                "CLAIM_INVALID",
+            );
+        }
+        assert_eq!(stored(0), (None, None, None, None));
+        assert_eq!(telegram.request_count(), 0);
+
+        // Rejected and uncertain reactions never fall back to text; processing stays started.
+        let trigger = format!(
+            "CREATE TRIGGER fail_reaction_confirmation BEFORE UPDATE OF start_ack_state ON replies
+             WHEN NEW.reply_id = '{}' AND OLD.start_ack_state = 'attempted'
+             AND NEW.start_ack_state = 'sent'
+             BEGIN SELECT RAISE(ABORT, 'synthetic confirmation failure'); END;",
+            replies[3]["reply_id"].as_str().unwrap()
+        );
+        sql.execute_batch(&trigger).unwrap();
+        for (index, outcome, error_code, stored_state) in [
+            (0, "sent", None, "sent"),
+            (1, "failed", None, "attempted"),
+            (2, "uncertain", None, "attempted"),
+            (3, "sent", Some("SEND_BOOKKEEPING_FAILED"), "attempted"),
+        ] {
+            let before = effects();
+            let result = call("telegram_processing", start(index)).await;
+            assert_eq!(result["result"]["isError"], false, "{result}");
+            let result = &result["result"]["structuredContent"];
+            assert_eq!(result["start_acknowledgment"], outcome);
+            assert_eq!(result["start_acknowledgment_kind"], "reaction");
+            assert!(result.get("outbound_message_id").is_none());
+            assert_eq!(
+                result.get("start_acknowledgment_error_code"),
+                error_code.map(Value::from).as_ref(),
+            );
+            assert_eq!(telegram.request_count(), index + 1);
+            assert_eq!(
+                telegram.json_request(index, "setMessageReaction"),
+                reaction(index)
+            );
+            // A reaction creates no outbound message, route or history record.
+            assert_eq!(effects(), before);
+            assert_eq!(
+                stored(index),
+                (
+                    Some(stored_state.into()),
+                    Some("👀".into()),
+                    Some(4),
+                    result["processing_started_at"].as_i64()
+                )
+            );
+        }
+        sql.execute_batch("DROP TRIGGER fail_reaction_confirmation;")
+            .unwrap();
+
+        // An explicit literal message is threaded text in reaction mode.
+        let before = effects();
+        let mut explicit = start(4);
+        explicit["message"] = "Checking release logs".into();
+        let result = call("telegram_processing", explicit).await;
+        let result = &result["result"]["structuredContent"];
+        assert_eq!(result["start_acknowledgment"], "sent");
+        assert_eq!(result["start_acknowledgment_kind"], "message");
+        assert_eq!(result["outbound_message_id"], 41);
+        assert_eq!(
+            telegram.text_request(4),
+            json!({"chat_id":-202,"text":"[Relay]\nrelay\n\nChecking release logs",
+                "entities":[{"type":"bold","offset":0,"length":7},
+                            {"type":"italic","offset":8,"length":5}],
+                "reply_parameters":{"message_id":replies[4]["telegram_message_id"],
+                                    "allow_sending_without_reply":true}})
+        );
+        let route = open(&fixture)
+            .route(-202, 41, unix_millis().unwrap())
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            (route.session_key.as_str(), route.kind),
+            (key, RouteKind::Text)
+        );
+        assert_eq!(effects(), (before.0 + 1, before.1 + 1));
+        assert_eq!(stored(4).0.as_deref(), Some("sent"));
+
+        // A competing start while the first reaction is in flight cannot react again.
+        let first = call("telegram_processing", start(5));
+        let competing = async {
+            held_arrived.await.unwrap();
+            let params = json!({"name":"telegram_processing","arguments":start(5)});
+            let competing = match transport.as_deref() {
+                Some(transport) => http.legacy_rpc(transport, "tools/call", params).await,
+                None => http.rpc("tools/call", params).await,
+            };
+            let competing = &competing["result"]["structuredContent"];
+            assert_eq!(competing["start_acknowledgment"], "already_started");
+            assert!(competing.get("start_acknowledgment_kind").is_none());
+            release.send(reacted()).unwrap();
+        };
+        let (first, ()) = tokio::time::timeout(Duration::from_secs(5), async {
+            tokio::join!(first, competing)
+        })
+        .await
+        .unwrap();
+        let first = &first["result"]["structuredContent"];
+        assert_eq!(first["start_acknowledgment"], "sent");
+        assert_eq!(first["start_acknowledgment_kind"], "reaction");
+        assert_eq!(telegram.request_count(), 6);
+        assert_eq!(telegram.json_request(5, "setMessageReaction"), reaction(5));
+        assert_eq!(stored(5).0.as_deref(), Some("sent"));
+
+        // Redelivery, repeated, inactive and reconciled calls consume no new attempt.
+        let retained = || (0..replies.len()).map(&stored).collect::<Vec<_>>();
+        let snapshot = retained();
+        let update = serde_json::from_value(text_reply_update(-202, parent, 11)).unwrap();
+        assert!(matches!(
+            IngressService::new(&fixture.config)
+                .unwrap()
+                .ingest(&mut open(&fixture), &update, unix_millis().unwrap())
+                .unwrap(),
+            IngestOutcome::Duplicate
+        ));
+        let mut current = start(0);
+        let mut resume = current.clone();
+        resume.as_object_mut().unwrap().remove("active");
+        resume["reconcile_request_id"] = "synthetic-reaction-resume".into();
+        for action in [
+            json!({"active":true}),
+            json!({"active":false}),
+            json!({"active":true,"message":"Must not send"}),
+        ] {
+            let mut repeated = current.clone();
+            repeated
+                .as_object_mut()
+                .unwrap()
+                .extend(action.as_object().unwrap().clone());
+            let repeated = call("telegram_processing", repeated).await;
+            let repeated = &repeated["result"]["structuredContent"];
+            assert_eq!(repeated["start_acknowledgment"], "already_started");
+            assert!(repeated.get("start_acknowledgment_kind").is_none());
+        }
+        let rotated = call("telegram_processing", resume).await;
+        let rotated = &rotated["result"]["structuredContent"];
+        assert_eq!(rotated["start_acknowledgment"], "already_started");
+        assert!(rotated.get("start_acknowledgment_kind").is_none());
+        current["claim_token"] = rotated["claim_token"].clone();
+        assert_eq!(retained(), snapshot);
+        assert_eq!(telegram.request_count(), 6);
+        http.finish().await;
+        state.stop();
+        state.drain().await.unwrap();
+        drop(endpoint);
+        drop(state);
+
+        // After restart without -202 in the allowlist, a retained claim starts but cannot react.
+        fixture.config.telegram.allowed_chat_ids = vec![-101];
+        let state = telegram.history_handler(&fixture);
+        let (mut http, endpoint) = fixture.serve_endpoint(state.clone(), Some(&auth)).await;
+        http.authorize();
+        let transport = if legacy {
+            Some(http.initialize(LEGACY_VERSION).await.0)
+        } else {
+            None
+        };
+        let call = |name, args| protocol_tool(&http, &endpoint, transport.as_deref(), name, args);
+        let recovered = call("telegram_processing", current).await;
+        let recovered = &recovered["result"]["structuredContent"];
+        assert_eq!(recovered["start_acknowledgment"], "already_started");
+        assert!(recovered.get("start_acknowledgment_kind").is_none());
+        assert_eq!(retained(), snapshot);
+        let unauthorized = call("telegram_processing", start(6)).await;
+        assert_eq!(unauthorized["result"]["isError"], false, "{unauthorized}");
+        let unauthorized = &unauthorized["result"]["structuredContent"];
+        assert_eq!(unauthorized["start_acknowledgment"], "failed");
+        assert_eq!(unauthorized["start_acknowledgment_kind"], "reaction");
+        assert!(unauthorized["processing_started_at"].is_i64());
+        assert_eq!(
+            stored(6),
+            (
+                Some("attempted".into()),
+                Some("👀".into()),
+                Some(4),
+                unauthorized["processing_started_at"].as_i64()
+            )
+        );
+        assert_eq!(telegram.request_count(), 6);
+        http.finish().await;
+        state.stop();
+        state.drain().await.unwrap();
     }
 }
 
@@ -485,7 +856,7 @@ async fn invalid_inbox_uris_and_claim_arguments_fail_safely_without_effects() {
     let session = http
         .register(json!({"title":"Same","directory_label":"p"}))
         .await;
-    seed(&fixture, &session, 5, &[11]);
+    seed(&fixture, &mut open(&fixture), &session, -101, 5, &[11]);
     let uri = session["inbox_uri"].as_str().unwrap();
     for invalid in [
         "private-uri".into(),

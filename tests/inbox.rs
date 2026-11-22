@@ -3,7 +3,7 @@ use std::{fs, os::unix::fs::DirBuilderExt, sync::Arc};
 use rusqlite::Connection;
 use serde_json::{Value, json};
 use telegram_mcp_relay::{
-    config::{Config, Delivery, Limits, Storage},
+    config::{Config, Delivery, Limits, ProcessingStartAck, Storage},
     domain::outbound::START_ACK_TEXT,
     error::AppError,
     repositories::{Database, InboxReply, IngestOutcome, ReplyState, ReplyTarget, RouteKind},
@@ -91,6 +91,15 @@ fn input(id: i64, chat: i64, parent: i64) -> Value {
 
 fn claims() -> InboxService {
     InboxService::new(&Delivery::default()).unwrap()
+}
+
+/// Storage cases that measure the generic threaded text attempt.
+fn text_claims() -> InboxService {
+    InboxService::new(&Delivery {
+        processing_start_ack: ProcessingStartAck::Message,
+        ..Delivery::default()
+    })
+    .unwrap()
 }
 
 fn update_ids(replies: &[InboxReply]) -> Vec<i64> {
@@ -264,7 +273,7 @@ fn competing_starts_consume_one_attempt_before_delivery_and_redelivery_keeps_it(
                 let (key, id, token, barrier) = (&key, &id, &token, &barrier);
                 scope.spawn(move || {
                     barrier.wait();
-                    claims()
+                    text_claims()
                         .processing(&mut db, key, id, token, true, now)
                         .unwrap()
                 })
@@ -308,11 +317,11 @@ fn competing_starts_consume_one_attempt_before_delivery_and_redelivery_keeps_it(
         .reconcile_processing(&mut db, &key, &id, &token, "resume", 3_001)
         .unwrap();
     assert_eq!(
-        claims().processing(&mut db, &key, &id, &token, true, 3_002),
+        text_claims().processing(&mut db, &key, &id, &token, true, 3_002),
         Err(AppError::InvalidClaim)
     );
     assert_eq!(
-        claims()
+        text_claims()
             .processing(&mut db, &key, &id, &rotated.claim_token, true, 3_002)
             .unwrap()
             .processing_started_at,
@@ -1074,7 +1083,7 @@ fn reconciliation_and_ack_account_for_replacement_bytes_and_outstanding_sends() 
     fixture.0.limits.metadata_bytes = BASE + START_ACK - 1;
     let mut db = fixture.open();
     assert_eq!(
-        claims().processing(&mut db, &key, &id, &token, true, 2_001),
+        text_claims().processing(&mut db, &key, &id, &token, true, 2_001),
         Err(AppError::StorageCapacity)
     );
     assert_eq!(
@@ -1084,7 +1093,7 @@ fn reconciliation_and_ack_account_for_replacement_bytes_and_outstanding_sends() 
     drop(db);
     fixture.0.limits.metadata_bytes = BASE + START_ACK + PROOF + 192 - 1;
     let mut db = fixture.open();
-    claims()
+    text_claims()
         .processing(&mut db, &key, &id, &token, true, 2_001)
         .unwrap();
     let reservation = db.reserve_route(&key).unwrap();

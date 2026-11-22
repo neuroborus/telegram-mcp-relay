@@ -2,7 +2,7 @@
 
 **Status:** Accepted requirements, including the RELAY-003–005 presentation and formatting revisions  
 **Original date:** 2026-10-29  
-**Revision date:** 2026-11-21  
+**Revision date:** 2026-11-22  
 **Preferred implementation:** Rust  
 **Target:** One lightweight, local, vendor-neutral MCP server shared by multiple agent sessions  
 **Primary user interface:** A single Telegram bot
@@ -37,6 +37,12 @@ and does not change run-frozen guidance.
 The RELAY-003 and RELAY-004 revision requires a meaningful title and project label for
 agent outbound messages and fenced processing start. It preserves identity, routes and
 pending replies during metadata recovery.
+
+The owner approved a quieter processing-start acknowledgment on 2026-11-22. When `message` is
+omitted, the first fenced start now reacts with 👀 on the received message by default instead
+of sending threaded text. `[delivery].processing_start_ack = "message"` restores the generic
+threaded text, and an explicit literal `message` is always threaded text. A reaction failure
+never falls back to text. This revision adds no MCP tool, SQLite migration or HOST result.
 
 ---
 
@@ -620,11 +626,12 @@ Rules:
 - Each acquired claim returns an unpredictable `claim_token` (or equivalent fencing/version value) together with the stable `reply_id`. The agent must pass the token to `telegram_processing` and `telegram_ack`; reject stale or mismatched tokens so an expired claimant cannot complete another claimant's work.
 - If a claim is abandoned **before** processing starts, it becomes claimable again after a short, bounded claim lease; this does **not** time out the agent's work. Never expire a processing claim merely because the user-facing 10-minute typing cap elapsed.
 - Once processing is explicitly started, keep the reply recoverable in SQLite until a final `telegram_ack` or 30-day retention expiry. Do not automatically redeliver it to other concurrent consumers while marked `processing`.
-- On the first fenced `telegram_processing(active=true)` transition, atomically consume one visible start acknowledgment attempt and retain its bounded text with the reply. An optional `message` is literal and valid only with `active=true`. Validate the complete framed text before effects. Omission uses “✅ Request received. Working on it.” Send it as a reply to the user's Telegram message and record confirmed delivery. The processing start survives send failure or uncertainty. Repeated starts, reconciliation, redelivery and restart never send another copy, including after a crash between committing the attempt and dispatch.
-  The attempt text is private reply state retained until completion or expiry. This is the
-  exception to §16's history opt-in rule for outgoing bodies. Journaling the confirmed
-  acknowledgment requires the usual history opt-in.
-- Return `start_acknowledgment` as `sent`, `uncertain`, `failed` or `already_started`. Include the outbound message ID when Telegram confirms delivery. If local bookkeeping fails after delivery, include `start_acknowledgment_error_code: "SEND_BOOKKEEPING_FAILED"` with `sent`. The caller can keep handling the original reply and use a regular routed send or ask when another reply is needed. Inactivity, reconciliation and repeated starts return `already_started` without sending. Check `processing_started_at` to determine whether processing has started. Successful completion still requires `telegram_ack`.
+- On the first fenced `telegram_processing(active=true)` transition, atomically consume one start acknowledgment attempt and retain its bounded payload with the reply. An optional `message` is literal and valid only with `active=true`. Validate the complete framed text on every active call, before effects. A supplied `message` is always sent as a reply to the user's Telegram message. When it is omitted, `[delivery].processing_start_ack` selects the default: `reaction` (the default, also for existing configuration without the key) calls `setMessageReaction` with the ordinary 👀 emoji on the same authorized received message, without `is_big` or an extra message; `message` sends the threaded “✅ Request received. Working on it.” Record confirmed delivery. The processing start survives failure or uncertainty, and a failed reaction never falls back to text. Repeated starts, reconciliation, redelivery and restart never send another acknowledgment, including after a crash between committing the attempt and dispatch.
+  The attempt payload (text or 👀) is private reply state retained until completion or expiry.
+  This is the exception to §16's history opt-in rule for outgoing bodies. Journaling a
+  confirmed text acknowledgment requires the usual history opt-in. A reaction creates no
+  outbound message ID, reply route or history record.
+- Return `start_acknowledgment` as `sent`, `uncertain`, `failed` or `already_started`, and `start_acknowledgment_kind` (`message` or `reaction`) whenever the call consumed the attempt. Include the outbound message ID when Telegram confirms text delivery. If local bookkeeping fails after Telegram confirms the effect, include `start_acknowledgment_error_code: "SEND_BOOKKEEPING_FAILED"` with `sent`: for a reaction the attempt confirmation failed; for text the confirmation or route/journal persistence failed, so the route may be missing. The caller can keep handling the original reply and use a regular routed send or ask when another reply is needed. Inactivity, reconciliation and repeated starts return `already_started` without sending or a kind. Check `processing_started_at` to determine whether processing has started. Successful completion still requires `telegram_ack`.
 - On explicit session resume, allow retrieval/reconciliation of previously `processing` but unacknowledged replies so a crashed agent can decide whether to resume. The agent finds these replies with `resources/read` on the saved `inbox_uri` and reconciles with the privately saved claim token. Always include the same `reply_id` for idempotency.
 - For explicit reconciliation, privately persist a fresh random `reconcile_request_id` and the prior `claim_token` **before** requesting `telegram_processing` with those values, the session/reply IDs and no `active`. After response loss retry that same request ID/prior-token pair; retain the returned rotated token. Registration alone does not reconcile ownership. Preserve the original processing start and typing cap.
 - A canceled ask/wait, disconnected client, expired wait, or server restart cannot delete an unacknowledged reply.
@@ -667,7 +674,7 @@ The bridge is not a monitoring system for agent processes. It has no reliable kn
 | Trigger | Behavior |
 |---|---|
 | Normal send / Reply / claim / final `telegram_ack` | Silent. |
-| First confirmed processing start | One attempted threaded acknowledgment using the normal session header and text route. Use the supplied literal `message` or “✅ Request received. Working on it.” The normal typing lease continues. |
+| First confirmed processing start | One attempted acknowledgment. By default, a 👀 reaction on the received message without an extra message. A supplied literal `message`, or the configured `message` mode with “✅ Request received. Working on it.”, uses the normal session header and threaded text route. No fallback after a failed reaction. The normal typing lease continues. |
 | Reply saved, but not confirmed as **started processing** within a configurable 60-second grace period | At most one factual notification for that Reply. Do not notify merely because final acknowledgment is pending while processing is already underway. |
 | Reply to unknown/expired route | One concise unroutable notification; do not guess agent. |
 | Ask or after-send wait exceeds its wait timeout | Return timeout to caller; **no Telegram notice**. |
@@ -985,6 +992,8 @@ long_poll_timeout_seconds = 45
 wait_fallback_enabled = true
 wait_timeout_seconds = 600
 processing_start_grace_seconds = 60
+# Default first-start acknowledgment without `message`: "reaction" (👀) or "message" (text).
+processing_start_ack = "reaction"
 
 [activity]
 typing_enabled = true
@@ -1104,9 +1113,11 @@ this requirement revision does not change run-frozen contributor instructions or
   Treat redelivery as potentially already handled and reconcile known effects first.
 - As soon as you begin working on a received reply, call
   `telegram_processing(active=true, reply_id=..., claim_token=...)`. Relay attempts one
-  threaded start acknowledgment on the first start. Omit `message` for
-  “✅ Request received. Working on it.” or supply a short literal message. The start survives
-  failed or uncertain delivery. Repeated starts do not send another acknowledgment.
+  start acknowledgment on the first start. Omit `message` for the configured default, a 👀
+  reaction unless the operator selects the threaded “✅ Request received. Working on it.”,
+  or supply a short literal message, which is always threaded text. The start survives
+  failed or uncertain delivery without fallback. Repeated starts do not send another
+  acknowledgment.
 - Call `telegram_processing(active=false, reply_id=..., claim_token=...)` when that work ends.
 - Call `telegram_ack(reply_id=..., claim_token=...)` after you have successfully handled the reply.
   Preserve `reply_id` and the current claim token throughout processing; do not acknowledge stale claims.
@@ -1161,7 +1172,7 @@ Keep phases small and independently testable; do **not** treat provider-specific
 
 1. Preserve `telegram_ask` and add after-send/file `telegram_wait` with shared bounded admission, authorization and server-configured deadline, without resending. Add `wait_for_reply` as an opt-in on sends after route commit.
 2. Confirm notifications **still fire with an active waiter** and a Reply is not processed twice.
-3. Add `telegram_processing`, a single threaded acknowledgment on the first fenced start, and 10-minute capped typing refresh. Keep completion explicit.
+3. Add `telegram_processing`, a single acknowledgment on the first fenced start (a 👀 reaction by default, threaded text when supplied or configured), and 10-minute capped typing refresh. Keep completion explicit.
 4. Add a 60-second delayed once-per-reply **unconfirmed processing** notice (never fire when processing was confirmed), plus unknown-route notice. Prefix every service message `🔧 ` and preserve legacy notice-loop recognition.
 5. Implement cleanup, bounded resource consumption, and safe file sending.
 
@@ -1175,7 +1186,7 @@ Keep phases small and independently testable; do **not** treat provider-specific
 ### Accepted agent-experience extensions
 
 The accepted extensions require meaningful display metadata, native headers, strict Markdown
-with literal compatibility, explicit reply intent, a visible first-start acknowledgment
+with literal compatibility, explicit reply intent, a first-start acknowledgment
 and versioned current guidance. They also require the opt-in bounded journal and confined
 lazy downloads, including explicitly configured local Bot API retrieval. Cover observable
 contracts with synthetic proofs at their owning layers, including mixed-protocol composition
@@ -1210,7 +1221,7 @@ filesystem, upstream and real-agent trials have separate evidence.
 - [ ] Timeout/cancellation/shutdown retires in-memory ask/wait interests without deleting durable routes/replies, resending, or issuing timeout notices. A returned reply requires current-token processing and explicit ack; timeout grants no permission.
 - [ ] Offline or disconnected agents' replies remain in SQLite for recovery (within TTL).
 - [ ] Claims, processing starts, and final acknowledgments are idempotent and concurrency safe; stale `claim_token` values cannot start processing or acknowledge a newer claim.
-- [ ] The first fenced `telegram_processing(active=true)` attempts one acknowledgment threaded to the incoming Telegram message. An omitted message uses “✅ Request received. Working on it.” A supplied message is literal and obeys framed text limits. Retries, redelivery and restart never send another automatic acknowledgment. Failed or uncertain delivery preserves the start; completion still requires explicit ack.
+- [ ] The first fenced `telegram_processing(active=true)` attempts one acknowledgment on the incoming Telegram message. An omitted message reacts with 👀 by default, or sends the threaded “✅ Request received. Working on it.” when `processing_start_ack = "message"`. A supplied message is literal threaded text and obeys framed text limits. A reaction reports `start_acknowledgment_kind: "reaction"` without an outbound message ID, route or history record. Retries, redelivery and restart never send another automatic acknowledgment. Failed or uncertain delivery preserves the start without fallback; completion still requires explicit ack.
 - [ ] Inbox resource reads show unfinished `processing` replies without token disclosure. Explicit reconciliation is lost-response safe: persist fresh request ID/prior token before requesting, omit `active`, retry the same pair and preserve the rotated token and original processing start.
 - [ ] On confirmed start of handling, Telegram `typing` appears, is refreshed while active, and stops after a configurable **10-minute maximum** even if the agent works longer.
 - [ ] No `typing` refresh and no periodic agent inbox checks occur in idle.
@@ -1253,7 +1264,7 @@ filesystem, upstream and real-agent trials have separate evidence.
 - [ ] Include unit and integration tests for title truncation, Unicode text length at 1,000/1,001 scalar values (including header, Cyrillic, ZWJ emoji, surrogate pairs, and multiline text), native Telegram caption bounds, oversized question/caption rejection without partial sends, interleaved sessions, reply routing, event/wait claim races and stale fencing tokens, missing processing acknowledgment vs long-running confirmed processing, TTL, missed acks, restart, large-file streaming, unauthorized updates, and invalid paths.
 - [ ] Add meaningful synthetic tests for entity offsets/literal content/service-prefix/legacy notice suppression; after-send/file waits without resend/lost wake; history migration/atomicity/dedup/search/retention/capacity/read-versus-claim isolation; and attachment authorization/confinement/limits/redaction/cleanup/concurrency. Reuse owning test layers, not implementation-mirroring assertions or live credentials.
 - [ ] Mixed MCP `2025-06-18`/`2026-07-28` scenarios cover dynamic catalog/schemas, original-tool compatibility, subscriptions/inbox/ask/wait contention, saturated-wait control capacity, active calls, cancellation/reconnect/restart/shutdown, cross-session shared reads and attachment authorization. Preserve security assertions and distinguish source-defined tests from executed results.
-- [ ] With operator authorization, verify an MCP download on ext4 under conditions that reproduced the old accounting failure, and a gigabyte-scale incoming transfer via an approved local Bot API with byte and memory observations. Verify formatting, on-time and late replies, file approval and visible start acknowledgment before long work completes in a real agent workflow. Record these HOST results separately.
+- [ ] With operator authorization, verify an MCP download on ext4 under conditions that reproduced the old accounting failure, and a gigabyte-scale incoming transfer via an approved local Bot API with byte and memory observations. Verify formatting, on-time and late replies, file approval and the start acknowledgment (reaction by default) before long work completes in a real agent workflow. Record these HOST results separately.
 - [ ] Public README/owning documentation describe all actual tools/resources/DTOs/handles, errors/recovery, privacy/configuration and concise synthetic workflows. Public claims do not depend on ignored private receipts; historical benchmark/static-unit evidence and bounded baseline HOST text-flow facts remain distinct from new-runtime acceptance. No new performance/live/universal-wake success is inferred.
 
 ---

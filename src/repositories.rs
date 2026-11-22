@@ -30,7 +30,9 @@ mod inbox;
 pub(crate) use inbox::valid_cursor_id;
 pub use inbox::{ClaimedReply, InboxCursor, InboxPage, InboxReply, ReplyState, ReplyTarget};
 mod processing;
-pub(crate) use processing::{PreparedStartAck, ProcessingAction, ProcessingTransition};
+pub(crate) use processing::{
+    PreparedStartAck, ProcessingAction, ProcessingTransition, StartAckEffect,
+};
 pub use processing::{ProcessingStatus, ReconciledProcessing};
 mod notices;
 pub use notices::{NoticeAttempt, NoticeKind, NoticePolicy};

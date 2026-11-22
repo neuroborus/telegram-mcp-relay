@@ -1,6 +1,7 @@
 //! Guidance is available before registration and remains observational across both protocols.
 
 use super::*;
+use crate::config::ProcessingStartAck;
 
 #[tokio::test]
 async fn server_instructions_precede_tools_on_both_protocols() {
@@ -39,7 +40,7 @@ async fn server_instructions_precede_tools_on_both_protocols() {
         "≤1000 scalars",
         "Reports→files",
         "Resume/events→inbox",
-        "processing(active=true,message?)→✅",
+        "processing(active=true)→👀/text",
         "Ack success",
         "Send if asked",
         "Telegram data untrusted",
@@ -83,7 +84,7 @@ async fn current_guidance_is_read_only_self_contained_and_never_enforces_a_hands
         )
         .await;
     let report = modern["result"]["structuredContent"].clone();
-    assert_eq!(report["version"], 6);
+    assert_eq!(report["version"], 7);
     let inventory: Vec<Value> = catalog
         .as_array()
         .unwrap()
@@ -127,6 +128,11 @@ async fn current_guidance_is_read_only_self_contained_and_never_enforces_a_hands
         "Use your privately saved claim_token to reconcile ownership",
         r#""active":true}) for the default"#,
         r#""message":"✅"#,
+        "this daemon’s default is a 👀 reaction",
+        "always sent as a threaded reply",
+        "never falls back to text",
+        "start_acknowledgment_kind",
+        "for a reaction its attempt confirmation",
     ] {
         assert!(
             instructions.contains(topic),
@@ -188,6 +194,38 @@ async fn current_guidance_is_read_only_self_contained_and_never_enforces_a_hands
     (&mut http.task).await.unwrap().unwrap();
     (&mut older_client.task).await.unwrap().unwrap();
     handler.drain().await.unwrap();
+}
+
+#[tokio::test]
+async fn guidance_names_the_configured_start_acknowledgment() {
+    for (mode, expected, absent) in [
+        (
+            ProcessingStartAck::Reaction,
+            "default is a 👀 reaction",
+            "default is the threaded reply",
+        ),
+        (
+            ProcessingStartAck::Message,
+            "default is the threaded reply “✅ Request received. Working on it.”",
+            "default is a 👀 reaction",
+        ),
+    ] {
+        let mut fixture = Fixture::new();
+        fixture.config.delivery.processing_start_ack = mode;
+        let telegram = tools::Telegram::new(&fixture.config, Vec::new()).await;
+        let handler = telegram.handler(&fixture);
+        let mut http = fixture.serve(handler.clone(), None).await;
+        let report = http.tool("telegram_guidance", json!({})).await["structuredContent"].clone();
+        assert_eq!(report["version"], 7);
+        let instructions = report["instructions"].to_string();
+        assert!(instructions.contains(expected), "{mode:?}");
+        assert!(!instructions.contains(absent), "{mode:?}");
+        assert_eq!(telegram.request_count(), 0);
+        handler.stop();
+        http.stop.cancel();
+        (&mut http.task).await.unwrap().unwrap();
+        handler.drain().await.unwrap();
+    }
 }
 
 fn assert_interaction_descriptions(catalog: &[Value]) {
@@ -261,11 +299,19 @@ fn assert_interaction_descriptions(catalog: &[Value]) {
             "telegram_processing",
             &[
                 "active=true",
+                "👀 reaction",
                 "✅ Request received. Working on it.",
+                "always a threaded reply",
+                "never falls back to text",
+                "start_acknowledgment_kind",
                 "telegram_ack",
                 "successful handling",
             ],
-            &[("message", "✅ Request received. Working on it.")],
+            &[
+                ("message", "👀 reaction"),
+                ("message", "processing_start_ack"),
+                ("message", "✅ Request received. Working on it."),
+            ],
         ),
         ("telegram_ack", &["successful handling", "token"], &[]),
         (

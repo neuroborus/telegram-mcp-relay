@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::{
+    config::ProcessingStartAck,
     repositories::{IngestOutcome, RouteKind},
     services::{ingress::IngressService, unix_millis},
 };
@@ -90,6 +91,8 @@ async fn both_protocols_share_tools_resources_and_durable_routes() {
     let mut fixture = Fixture::new();
     fixture.config.delivery.wait_fallback_enabled = false;
     fixture.config.activity.typing_enabled = false;
+    // Starts consume the queued threaded responses and their message IDs.
+    fixture.config.delivery.processing_start_ack = ProcessingStartAck::Message;
     let telegram = Telegram::new(&fixture.config, (7..19).map(sent).collect()).await;
     let state = telegram.handler(&fixture);
     let (mut http, endpoint) = fixture.serve_endpoint(state.clone(), None).await;
@@ -269,6 +272,8 @@ async fn both_protocols_share_tools_resources_and_durable_routes() {
 async fn mixed_claims_reconcile_fence_and_ack_across_restart() {
     let mut fixture = Fixture::new();
     fixture.config.activity.typing_enabled = false;
+    // The threaded start acknowledgment commits the route this mock waits for.
+    fixture.config.delivery.processing_start_ack = ProcessingStartAck::Message;
     let mut mock = Mock::new(&fixture.config).await;
     let (database, state) = mock.shared(&fixture);
     let (mut http, endpoint) = fixture.serve_endpoint(state.clone(), None).await;

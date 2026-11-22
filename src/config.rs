@@ -125,11 +125,22 @@ impl Telegram {
     }
 }
 
+/// Default effect of a first processing start without an explicit literal `message`.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ProcessingStartAck {
+    /// React with 👀 to the received message; no outbound message is created.
+    Reaction,
+    /// Send the generic threaded text acknowledgment.
+    Message,
+}
+
 settings!(Delivery {
     wait_fallback_enabled: bool = true,
     wait_timeout_seconds: u64 = 600,
     processing_start_grace_seconds: u64 = 60,
     claim_lease_seconds: u64 = 60,
+    processing_start_ack: ProcessingStartAck = ProcessingStartAck::Reaction,
 });
 settings!(Activity {
     typing_enabled: bool = true,

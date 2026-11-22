@@ -475,10 +475,12 @@ pub struct ProcessingRequest {
     /// For SESSION_METADATA_REQUIRED on start, re-register the same session with a valid
     /// title and directory_label, then retry with the current claim token.
     pub active: Option<bool>,
-    /// Use only with active=true. On the first start, Relay attempts one reply to the user's
-    /// Telegram message to confirm work has begun. Supply literal text or omit this field for
-    /// "✅ Request received. Working on it." The complete text including Relay's
-    /// header must fit 1,000 Unicode scalars. Later starts never send another copy.
+    /// Use only with active=true. On the first start, Relay attempts one acknowledgment on
+    /// the user's Telegram message. Literal text is always sent as a threaded reply; its
+    /// complete text including Relay's header must fit 1,000 Unicode scalars. If omitted,
+    /// the configured default applies: a 👀 reaction, or the threaded
+    /// "✅ Request received. Working on it." when delivery.processing_start_ack = "message".
+    /// Later starts never send another acknowledgment.
     pub message: Option<String>,
     /// Explicit resume: save a fresh random ID (1–64 UTF-8 bytes) and current token before
     /// calling. Retry with the same pair after response loss; preserve the returned token.
@@ -492,17 +494,34 @@ pub struct ProcessingResult {
     pub claim_token: String,
     /// Original durable first start in Unix milliseconds; inactivity never resets it.
     pub processing_started_at: Option<i64>,
-    /// Result of the one start send. Inactivity, reconciliation and repeated active calls
-    /// return already_started without sending. The processing start survives send failures.
+    /// Result of the one start attempt, a threaded message or a reaction. Inactivity,
+    /// reconciliation and repeated active calls return already_started without sending.
+    /// The processing start survives failures; a failed reaction never falls back to text.
     pub start_acknowledgment: StartAcknowledgment,
-    /// Telegram confirmed this message ID. Check the error code before relying on reply routing.
+    /// Kind of the acknowledgment attempt consumed by this call; absent for already_started.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_acknowledgment_kind: Option<StartAcknowledgmentKind>,
+    /// Text only: Telegram confirmed this message ID. Check the error code before relying on
+    /// reply routing. A reaction creates no message ID, route or history.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub outbound_message_id: Option<i64>,
-    /// SEND_BOOKKEEPING_FAILED means Telegram accepted the message but local bookkeeping failed.
-    /// Continue handling the current reply. Use a regular routed send or ask if another
-    /// reply is needed. Never resend the start acknowledgment.
+    /// SEND_BOOKKEEPING_FAILED with sent means Telegram confirmed the effect but local
+    /// bookkeeping failed. For a reaction, the attempt confirmation failed. For text, the
+    /// acknowledgment confirmation or route/journal persistence failed, so the route may be
+    /// missing. Continue handling the current reply. Use a regular routed send or ask if
+    /// another reply is needed. Never resend the start acknowledgment.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub start_acknowledgment_error_code: Option<&'static str>,
+}
+
+#[derive(Clone, Copy, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[schemars(crate = "rmcp::schemars")]
+pub enum StartAcknowledgmentKind {
+    /// Threaded text reply.
+    Message,
+    /// 👀 reaction on the received message.
+    Reaction,
 }
 
 #[derive(Serialize, JsonSchema)]

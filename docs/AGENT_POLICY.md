@@ -63,9 +63,11 @@ Configure the client using [setup](SETUP.md).
   Treat redelivery as potentially already handled and reconcile known effects first.
 - As soon as you begin working on a received reply, call
   `telegram_processing(active=true, reply_id=..., claim_token=...)`. Relay attempts one
-  threaded start acknowledgment on the first start. Omit `message` for
-  “✅ Request received. Working on it.” or supply a short literal message. The start survives
-  failed or uncertain delivery. Repeated starts do not send another acknowledgment.
+  start acknowledgment on the first start. Omit `message` for the configured default, a 👀
+  reaction unless the operator selects the threaded “✅ Request received. Working on it.”,
+  or supply a short literal message, which is always threaded text. The start survives
+  failed or uncertain delivery without fallback. Repeated starts do not send another
+  acknowledgment.
 - Call `telegram_processing(active=false, reply_id=..., claim_token=...)` when that work ends.
 - Call `telegram_ack(reply_id=..., claim_token=...)` after you have successfully handled the reply.
   Preserve `reply_id` and the current claim token throughout processing; do not acknowledge stale claims.
@@ -93,7 +95,7 @@ Configure the client using [setup](SETUP.md).
 
 ## Implementation details for consumers
 
-`telegram_guidance({})` returns version 6 of its self-contained current policy plus `tools`,
+`telegram_guidance({})` returns version 7 of its self-contained current policy plus `tools`,
 `capabilities` and `limits`. It is read-only and available before registration. Descriptions
 request it first per conversation. The [enforcement and compatibility tables](../README.md#interaction-rules-and-compatibility)
 describe which behavior Relay enforces and which actions the agent must take. Guidance reports
@@ -140,15 +142,20 @@ private application session.
 claims with stable `reply_id` and rotating `claim_token`. A resource snapshot contains no
 tokens and never claims. Preserve each current token before work. Pre-processing claims can
 expire (60 seconds by default). A stale claim cannot authorize new effects or acknowledgment.
-Confirm actual work with `telegram_processing(active=true)`. On the first start, Relay
-attempts a reply to the user's Telegram message with “✅ Request received. Working on it.” Supply
-`message` with `active=true` to replace this body with literal text. The complete framed
-acknowledgment must fit the usual 1,000-scalar limit. Allow the ordinary text-send deadline. Follow
-`start_acknowledgment` for the outcome. If a `sent` result also includes
-`start_acknowledgment_error_code: "SEND_BOOKKEEPING_FAILED"`, Telegram confirmed the
-outbound ID and the reply route may be missing. Continue handling the original reply and use a
-regular routed send or ask for any further reply you need. The recorded start and typing
-lease survive delivery failures. Never resend the start acknowledgment.
+Confirm actual work with `telegram_processing(active=true)`. On the first start without
+`message`, Relay reacts with 👀 on the user's Telegram message by default. With
+`[delivery].processing_start_ack = "message"` it instead replies with
+“✅ Request received. Working on it.” Supply `message` with `active=true` to send literal
+threaded text in either mode. The complete framed text must fit the usual 1,000-scalar limit.
+Allow the ordinary text-send deadline. Follow `start_acknowledgment` for the outcome and
+`start_acknowledgment_kind` (`message` or `reaction`) for the attempt that call consumed. A
+reaction has no `outbound_message_id`, reply route or history record. If a `sent` result also
+includes `start_acknowledgment_error_code: "SEND_BOOKKEEPING_FAILED"`, Telegram confirmed the
+effect but local bookkeeping failed: for a reaction its attempt confirmation, for text its
+confirmation or reply route, which may be missing. Continue handling the original reply and use
+a regular routed send or ask for any further reply you need. The recorded start and typing
+lease survive failures; a failed reaction never falls back to text. Never resend the start
+acknowledgment.
 
 End activity with `active=false` and acknowledge only successful handling. Inactivity and
 typing expiry preserve durable processing ownership. If a reply reappears after a crash

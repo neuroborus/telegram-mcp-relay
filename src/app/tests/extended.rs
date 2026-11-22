@@ -372,9 +372,15 @@ async fn clients_skip_guidance_and_recover_metadata_markup_and_late_approval() {
         )
         .await;
 
+    // The default start reacts; explicit literal text stays a threaded message.
     for (client, reply, message, id) in [
-        (&modern, approval_reply, None, 8),
-        (&legacy, &waited["reply"], Some("Checking *literally*."), 9),
+        (&modern, approval_reply, None, None),
+        (
+            &legacy,
+            &waited["reply"],
+            Some("Checking *literally*."),
+            Some(9),
+        ),
     ] {
         let token = &reply["claim_token"];
         let handle = json!({"session_key":key,"reply_id":reply["reply_id"],"claim_token":token});
@@ -391,21 +397,41 @@ async fn clients_skip_guidance_and_recover_metadata_markup_and_late_approval() {
         assert!(mock.requests.try_recv().is_err());
         let (started, ()) =
             tokio::join!(client.tool("telegram_processing", start.clone()), async {
-                let send = mock.next("sendMessage").await;
-                let body = message.unwrap_or("✅ Request received. Working on it.");
-                assert_eq!(
-                    send.payload,
-                    json!({"chat_id":-101,
-                    "text":format!("[Release review]\nrelay\n\n{body}"),
-                    "entities":[{"type":"bold","offset":0,"length":16},
-                                {"type":"italic","offset":17,"length":5}],
-                    "reply_parameters":{"message_id":reply["telegram_message_id"],
-                                        "allow_sending_without_reply":true}})
-                );
-                send.respond(accepted(id));
+                if let (Some(body), Some(id)) = (message, id) {
+                    let send = mock.next("sendMessage").await;
+                    assert_eq!(
+                        send.payload,
+                        json!({"chat_id":-101,
+                        "text":format!("[Release review]\nrelay\n\n{body}"),
+                        "entities":[{"type":"bold","offset":0,"length":16},
+                                    {"type":"italic","offset":17,"length":5}],
+                        "reply_parameters":{"message_id":reply["telegram_message_id"],
+                                            "allow_sending_without_reply":true}})
+                    );
+                    send.respond(accepted(id));
+                } else {
+                    let reaction = mock.next("setMessageReaction").await;
+                    assert_eq!(
+                        reaction.payload,
+                        json!({"chat_id":-101,"message_id":reply["telegram_message_id"],
+                        "reaction":[{"type":"emoji","emoji":"👀"}]})
+                    );
+                    reaction.respond(json!({"ok":true,"result":true}));
+                }
             },);
         assert_eq!(started["start_acknowledgment"], "sent");
-        assert_eq!(started["outbound_message_id"], id);
+        assert_eq!(
+            started["start_acknowledgment_kind"],
+            if message.is_some() {
+                "message"
+            } else {
+                "reaction"
+            }
+        );
+        assert_eq!(
+            started.get("outbound_message_id"),
+            id.map(Value::from).as_ref()
+        );
         assert_eq!(started["claim_token"], *token);
         let claims = client
             .tool("telegram_inbox", json!({"session_key":key}))
@@ -670,7 +696,9 @@ async fn shared_composition_preserves_claims_and_attachment_authority_across_pro
     assert_eq!(recovery_state(&fixture), before);
     assert_eq!(fixture.count("acknowledgment_receipts"), 0);
 
-    let mut action = json!({"session_key":owner["session_key"],"reply_id":claim["reply_id"],"claim_token":claim["claim_token"],"active":true});
+    // Explicit text keeps the threaded journal parent asserted below.
+    let mut action = json!({"session_key":owner["session_key"],"reply_id":claim["reply_id"],
+        "claim_token":claim["claim_token"],"active":true,"message":"Checking the attachment."});
     let (started, ()) = tokio::join!(legacy.tool("telegram_processing", action.clone()), async {
         let request = mock.next("sendMessage").await;
         assert_eq!(
@@ -696,6 +724,7 @@ async fn shared_composition_preserves_claims_and_attachment_authority_across_pro
         )
     );
     action.as_object_mut().unwrap().remove("active");
+    action.as_object_mut().unwrap().remove("message");
     action["reconcile_request_id"] = json!("saved-extended-reconciliation");
     let rotated = modern.tool("telegram_processing", action.clone()).await;
     let before_restart = recovery_state(&fixture);

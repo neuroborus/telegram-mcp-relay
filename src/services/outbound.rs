@@ -2,20 +2,21 @@
 
 use std::sync::{Arc, Mutex};
 
-use tokio::sync::{Semaphore, watch};
-use tokio_util::task::TaskTracker;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, watch};
+use tokio_util::task::{TaskTracker, task_tracker::TaskTrackerToken};
 
 use crate::{
     clients::telegram::{SentMessage, TelegramClient},
     config::Config,
     domain::outbound::{
-        FormattedMessage, MessageEntity, format_caption, format_text, validate_body_entities,
+        FormattedMessage, MessageEntity, START_ACK_REACTION, format_caption, format_text,
+        validate_body_entities,
     },
     error::{AppError, TelegramError},
     repositories::{
         AttachmentInput, AttachmentKind, ConfirmedMessage, Database, MessageSource,
         OutgoingJournal, OutgoingKind, PreparedStartAck, ReplyTarget, RouteKind, RouteReservation,
-        Session,
+        Session, StartAckEffect,
     },
 };
 
@@ -212,20 +213,60 @@ impl OutboundService {
         &self,
         ack: PreparedStartAck,
     ) -> Result<ConfirmedSend, AppError> {
-        if !self.allowed_chats.contains(&ack.target.chat_id) {
-            return Err(AppError::InvalidRequest("reply chat authorization"));
-        }
+        self.authorize_reply_chat(&ack)?;
+        let StartAckEffect::Text(text) = ack.effect else {
+            // The inbox service dispatches reactions to `react_start_ack`.
+            return Err(AppError::InvalidRequest("start acknowledgment kind"));
+        };
         self.send_prepared(move |_| {
             Ok((
                 ack.session,
                 Delivery::StartAck {
-                    text: ack.text,
+                    text,
                     target: ack.target,
                     reply_id: ack.reply_id,
                 },
             ))
         })
         .await
+    }
+
+    /// React on the reply's own received message. A reaction reserves no route or journal
+    /// entry, writes no history and leaves typing active. The outer error means Telegram
+    /// did not confirm it; the inner one is a failed local attempt confirmation.
+    pub(super) async fn react_start_ack(
+        &self,
+        ack: PreparedStartAck,
+    ) -> Result<Result<(), AppError>, AppError> {
+        self.authorize_reply_chat(&ack)?;
+        let task = self.tasks.token();
+        let permit = Arc::clone(&self.admission)
+            .try_acquire_owned()
+            .map_err(|_| AppError::SendCapacity)?;
+        let service = self.clone();
+        let work = async move {
+            let target = ack.target;
+            service
+                .telegram
+                .set_message_reaction(target.chat_id, target.message_id, START_ACK_REACTION)
+                .await?;
+            // Telegram confirmed the reaction; only its local attempt record can still fail.
+            Ok(service
+                .database
+                .lock()
+                .map_err(|_| AppError::StorageFailure)
+                .and_then(|database| database.confirm_start_ack(&ack.reply_id))
+                .map_err(|_| AppError::SendBookkeepingFailed))
+        };
+        self.spawn_admitted(task, permit, work, |bookkeeping| bookkeeping.as_ref().err())
+            .await
+    }
+
+    fn authorize_reply_chat(&self, ack: &PreparedStartAck) -> Result<(), AppError> {
+        if !self.allowed_chats.contains(&ack.target.chat_id) {
+            return Err(AppError::InvalidRequest("reply chat authorization"));
+        }
+        Ok(())
     }
 
     async fn send_prepared(
@@ -254,17 +295,34 @@ impl OutboundService {
             let journal = database.reserve_outgoing(text.as_str(), Some(&session), kind)?;
             (delivery, reservation, journal, permit, session.session_key)
         };
-        // No await separates admission from transfer to the owned task. Dropping the join
-        // handle cannot abort the send or the synchronous post-send transaction.
         let service = self.clone();
+        let work = async move {
+            service
+                .send_reserved(delivery, reservation, journal, &session_key)
+                .await
+        };
+        self.spawn_admitted(task, permit, work, |confirmed| {
+            confirmed.bookkeeping.as_ref().err()
+        })
+        .await
+    }
+
+    /// No await separates admission from transfer to the owned task: the work is spawned
+    /// before this returns. Dropping the returned future cannot abort the effect or the
+    /// synchronous post-effect transaction.
+    fn spawn_admitted<T: Send + 'static>(
+        &self,
+        task: TaskTrackerToken,
+        permit: OwnedSemaphorePermit,
+        work: impl Future<Output = Result<T, AppError>> + Send + 'static,
+        bookkeeping: fn(&T) -> Option<&AppError>,
+    ) -> impl Future<Output = Result<T, AppError>> {
         let outcome = SendOutcome(Some(self.failed.clone()));
         let handle = self.tasks.spawn(async move {
             let _permit = permit;
-            let result = service
-                .send_reserved(delivery, reservation, journal, &session_key)
-                .await;
+            let result = work.await;
             let error = match &result {
-                Ok(confirmed) => confirmed.bookkeeping.as_ref().err(),
+                Ok(value) => bookkeeping(value),
                 Err(error) => Some(error),
             };
             if let Some(error) = error {
@@ -276,9 +334,11 @@ impl OutboundService {
         });
         // The tracked future now owns retirement, including destruction of its captures.
         drop(task);
-        handle
-            .await
-            .map_err(|_| AppError::Telegram(TelegramError::DeliveryUncertain))?
+        async move {
+            handle
+                .await
+                .map_err(|_| AppError::Telegram(TelegramError::DeliveryUncertain))?
+        }
     }
 
     async fn send_reserved(

@@ -79,6 +79,14 @@ The library dispatcher sweeps once per second, sends one admitted attempt at a t
 rechecks the current chat allowlist. Daemon composition owns this scheduler and cleanup,
 and shares one typing scheduler between processing, sends and retention deletion.
 
+`delivery.processing_start_ack` selects the first-start acknowledgment when
+`telegram_processing(active=true)` omits `message`. The default `"reaction"`, also used by
+existing files without the key, reacts with 👀 on the received message and creates no
+outbound message, route or history record. `"message"` restores the threaded
+“✅ Request received. Working on it.” Other values are rejected at startup. An explicit
+literal `message` is always threaded text. A failed reaction never falls back to text. See
+[reply tools](ARCHITECTURE.md#mcp-inbox-resources-and-reply-tools) for the outcome fields.
+
 `telegram_ask` honors `delivery.wait_fallback_enabled` (default true) and
 `delivery.wait_timeout_seconds` (default 600), starting its deadline after send bookkeeping.
 `telegram_wait` uses the same settings and shared `limits.waiters` budget (default 16, at most

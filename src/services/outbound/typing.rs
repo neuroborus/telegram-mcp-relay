@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::{
+    dto::{ProcessingRequest, StartAcknowledgment, StartAcknowledgmentKind},
     repositories::{ClaimedReply, CleanupSweep, IngestOutcome},
     services::{cleanup::CleanupService, inbox::InboxService, ingress::IngressService},
 };
@@ -147,6 +148,86 @@ async fn fenced_commit_precedes_typing_and_inactivity_cancels_a_stalled_action()
             .claim(&mut reopened, key, None, 1, 3_650_000)
             .unwrap()
             .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn default_start_reaction_leaves_confirmed_typing_active() {
+    let fixture = fixture();
+    let database = fixture.open();
+    let session = fixture.register(&database);
+    let accepted = || Response::Json(200, json!({"ok":true,"result":true}));
+    let mut mock = Mock::new(&fixture.config, vec![accepted(), accepted(), accepted()]).await;
+    let service = mock.service(&fixture, &database);
+    let inbox = inbox(&service, &fixture);
+    // `process` reads the real clock, so the claim must still be current.
+    let reply = claim_at(
+        &fixture,
+        &database,
+        &session.session_key,
+        1,
+        unix_millis().unwrap(),
+    );
+    let request = ProcessingRequest {
+        session_key: session.session_key.clone(),
+        reply_id: reply.reply.reply_id.clone(),
+        claim_token: reply.claim_token.clone(),
+        active: Some(true),
+        message: None,
+        reconcile_request_id: None,
+    };
+    let (result, ()) = tokio::join!(inbox.process(&database, &service, request), async {
+        for _ in 0..2 {
+            tokio::time::timeout(Duration::from_secs(5), mock.seen.recv())
+                .await
+                .unwrap()
+                .unwrap();
+        }
+    });
+    let result = result.unwrap();
+    assert!(matches!(
+        result.start_acknowledgment,
+        StartAcknowledgment::Sent
+    ));
+    assert!(matches!(
+        result.start_acknowledgment_kind,
+        Some(StartAcknowledgmentKind::Reaction)
+    ));
+    assert_eq!(result.outbound_message_id, None);
+    {
+        let requests = mock.requests.lock().unwrap();
+        let mut methods = requests
+            .iter()
+            .map(|r| r.method.as_str())
+            .collect::<Vec<_>>();
+        methods.sort();
+        assert_eq!(
+            methods,
+            [
+                "/botSynthetic/sendChatAction",
+                "/botSynthetic/setMessageReaction"
+            ]
+        );
+        let reaction = requests
+            .iter()
+            .find(|r| r.method == "/botSynthetic/setMessageReaction")
+            .unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Value>(&reaction.body).unwrap(),
+            json!({"chat_id":-101,"message_id":101,"reaction":[{"type":"emoji","emoji":"👀"}]})
+        );
+    }
+    // Unlike an agent result, the reaction never stops the started work's typing.
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(4)).await;
+    tokio::time::resume();
+    tokio::time::timeout(Duration::from_secs(5), mock.seen.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        mock.requests.lock().unwrap()[2].method,
+        "/botSynthetic/sendChatAction"
     );
 }
 

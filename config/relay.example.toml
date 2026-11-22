@@ -45,6 +45,8 @@ min_free_bytes = 16777216
 wait_fallback_enabled = true
 wait_timeout_seconds = 600
 processing_start_grace_seconds = 60
+# "message" restores the threaded text instead of the 👀 start reaction.
+processing_start_ack = "reaction"
 
 [activity]
 typing_enabled = true
